@@ -22,6 +22,33 @@ dev = [
     "ruff==0.17.3",
 ]
 
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"esptool.targets".msg = "Chip data goes through embr.core.chipinfo."
+"serial.Serial".msg = "Only embr.core.flasher.worker opens serial ports."
+"serial.serial_for_url".msg = "Only embr.core.flasher.worker opens serial ports."
+
+[tool.ruff.lint.per-file-ignores]
+"src/embr/core/chipinfo/**" = ["TID251"]
+"src/embr/core/flasher/worker/**" = ["TID251"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]
 build-backend = "uv_build"
