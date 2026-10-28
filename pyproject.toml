@@ -37,6 +37,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "TID"]
 [tool.ruff.lint.per-file-ignores]
 "src/embr/core/chipinfo/**" = ["TID251"]
 "src/embr/core/flasher/worker/**" = ["TID251"]
+# tests compare against esptool directly and reopen ports on real boards
+"tests/**" = ["TID251"]
 
 [tool.pyright]
 include = ["src", "tests"]
