@@ -1,0 +1,20 @@
+schema = 1
+kind = "platformio"
+pio_core = "PlatformIO Core, version 6.2.0"
+platform = "platformio/espressif32 6.12.0"
+framework_arduinoespressif32 = "3.20017.241212+sha.dcc1105b"
+platform_esptool = "2.40900.250804"
+platformio_ini = "[env:esp32dev]\nplatform = espressif32@6.12.0\nboard = esp32dev\nframework = arduino\nboard_build.flash_mode = dio\nboard_build.f_flash = 40000000L\nboard_upload.flash_size = 16MB\nboard_build.partitions = default_16MB.csv\n"
+base_project = "src/main.cpp: Arduino sketch printing chip info and blinking GPIO2 (author's test project); ESP-IDF framework sample uses ESP-IDF hello_world (CC0-1.0)"
+build_commands = ["pio run", "pio project metadata --json-output -e <env>"]
+build_env = "PLATFORMIO_BUILD_FLAGS=-ffile-prefix-map=<PIO_CORE>/packages=/pio/packages -ffile-prefix-map=<PROJECT_DIR>=. (keeps local paths out of the binaries)"
+sanitized = [
+  "metadata_<env>.json, idedata.json, flasher_args.json: absolute paths replaced with <PROJECT_DIR>, <PIO_CORE>, <HOME>",
+]
+reference_merge = "reference_merged.bin: built-in esptool 5.6.0, command in reference_merge_command.txt (PIO image list + app + board flash settings)"
+third_party = "Binaries contain the Arduino-ESP32 core (LGPL-2.1-or-later) and ESP-IDF components (mostly Apache-2.0); pio_core/ holds boot_app0.bin and package.json copied from framework-arduinoespressif32; test data only, not shipped with Embr"
+
+[expect]
+chip = "esp32"
+flash_settings = "dio / 40m / 16MB"
+images = ["0x1000 bootloader.bin", "0x8000 partitions.bin", "0xe000 boot_app0.bin", "0x10000 firmware.bin"]

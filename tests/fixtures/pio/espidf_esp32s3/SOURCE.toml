@@ -1,0 +1,18 @@
+schema = 1
+kind = "platformio"
+pio_core = "PlatformIO Core, version 6.2.0"
+platform = "platformio/espressif32 6.12.0"
+framework_arduinoespressif32 = "3.20017.241212+sha.dcc1105b"
+platform_esptool = "2.40900.250804"
+platformio_ini = "[env:esp32-s3-devkitc-1]\nplatform = espressif32@6.12.0\nboard = esp32-s3-devkitc-1\nframework = espidf\n"
+base_project = "src/main.cpp: Arduino sketch printing chip info and blinking GPIO2 (author's test project); ESP-IDF framework sample uses ESP-IDF hello_world (CC0-1.0)"
+build_commands = ["pio run", "pio project metadata --json-output -e <env>"]
+build_env = "PLATFORMIO_BUILD_FLAGS=-ffile-prefix-map=<PIO_CORE>/packages=/pio/packages -ffile-prefix-map=<PROJECT_DIR>=. (keeps local paths out of the binaries)"
+sanitized = [
+  "metadata_<env>.json, idedata.json, flasher_args.json: absolute paths replaced with <PROJECT_DIR>, <PIO_CORE>, <HOME>",
+]
+third_party = "Binaries are built from ESP-IDF (mostly Apache-2.0) and the CC0-1.0 hello_world example; test data only, not shipped with Embr"
+
+[expect]
+chip = "esp32s3"
+note = "flasher_args.json uses idf.py file names (bootloader/bootloader.bin, partition_table/partition-table.bin, espidf_esp32s3.bin); PIO outputs are bootloader.bin, partitions.bin, firmware.bin"

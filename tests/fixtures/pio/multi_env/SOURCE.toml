@@ -1,0 +1,17 @@
+schema = 1
+kind = "platformio"
+pio_core = "PlatformIO Core, version 6.2.0"
+platform = "platformio/espressif32 6.12.0"
+framework_arduinoespressif32 = "3.20017.241212+sha.dcc1105b"
+platform_esptool = "2.40900.250804"
+platformio_ini = "[env]\nplatform = espressif32@6.12.0\nframework = arduino\n\n[env:esp32dev]\nboard = esp32dev\n\n[env:esp32-s3-devkitc-1]\nboard = esp32-s3-devkitc-1\n"
+base_project = "src/main.cpp: Arduino sketch printing chip info and blinking GPIO2 (author's test project); ESP-IDF framework sample uses ESP-IDF hello_world (CC0-1.0)"
+build_commands = ["pio run", "pio project metadata --json-output -e <env>"]
+build_env = "PLATFORMIO_BUILD_FLAGS=-ffile-prefix-map=<PIO_CORE>/packages=/pio/packages -ffile-prefix-map=<PROJECT_DIR>=. (keeps local paths out of the binaries)"
+sanitized = [
+  "metadata_<env>.json, idedata.json, flasher_args.json: absolute paths replaced with <PROJECT_DIR>, <PIO_CORE>, <HOME>",
+]
+third_party = "Binaries contain the Arduino-ESP32 core (LGPL-2.1-or-later) and ESP-IDF components (mostly Apache-2.0); pio_core/ holds boot_app0.bin and package.json copied from framework-arduinoespressif32; test data only, not shipped with Embr"
+
+[expect]
+envs = ["esp32dev (esp32, board esp32dev)", "esp32-s3-devkitc-1 (esp32s3, board esp32-s3-devkitc-1)"]
