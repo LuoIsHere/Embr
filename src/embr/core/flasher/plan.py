@@ -4,6 +4,7 @@ The worker's esptool API arguments and the equivalent command line shown in the
 UI are both derived from the same plan.
 """
 
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -87,7 +88,34 @@ def adjust_reset(
     watchdog-reset. USB-OTG: before is always no-reset. Returns (before, after, reasons),
     one reason per changed value.
     """
-    raise NotImplementedError
+    if before not in BEFORE_MODES:
+        raise ValueError(f"unknown before mode: {before}")
+    if after not in AFTER_MODES:
+        raise ValueError(f"unknown after mode: {after}")
+    new_before, new_after = before, after
+    reasons: list[str] = []
+    if connection == ConnectionType.USB_OTG:
+        new_before = "no-reset"
+        if before != new_before:
+            reasons.append(
+                f"before={before} -> no-reset: on USB-OTG the chip only appears in ROM "
+                "download mode, it cannot be reset into it"
+            )
+    elif connection == ConnectionType.USB_SERIAL_JTAG:
+        if after == "hard-reset":
+            new_after = "watchdog-reset"
+            reasons.append(
+                "after=hard-reset -> watchdog-reset: on USB-Serial/JTAG an RTS reset may "
+                "leave the chip in download mode"
+            )
+    else:
+        if before == "usb-reset":
+            new_before = "default-reset"
+            reasons.append("before=usb-reset -> default-reset: not a USB-Serial/JTAG port")
+        if after == "watchdog-reset":
+            new_after = "hard-reset"
+            reasons.append("after=watchdog-reset -> hard-reset: not a native USB port")
+    return new_before, new_after, tuple(reasons)
 
 
 def build_flash_plan(
@@ -108,14 +136,36 @@ def build_flash_plan(
     """Build a plan: sorts entries by address, adjusts reset modes, sets baud to None on
     native USB and to DEFAULT_UART_BAUD when not given otherwise, enables skip_flashed
     unless erase_all, and uses FlashSettings() (all "keep") when `flash` is None."""
-    raise NotImplementedError
+    new_before, new_after, reasons = adjust_reset(connection, before, after)
+    if connection in _NATIVE_USB:
+        baud = None
+    elif baud is None:
+        baud = DEFAULT_UART_BAUD
+    return FlashPlan(
+        port=port,
+        connection=connection,
+        baud=baud,
+        chip=chip,
+        before=new_before,
+        after=new_after,
+        stub=stub,
+        flash=flash or FlashSettings(),
+        entries=tuple(sorted(entries, key=lambda e: e.address)),
+        erase_all=erase_all,
+        skip_flashed=not erase_all,
+        declared_flash_size=declared_flash_size,
+        partitions_end=partitions_end,
+        adjustments=reasons,
+    )
 
 
 def build_identify_plan(
     port: str, connection: ConnectionType, before: str = "default-reset"
 ) -> IdentifyPlan:
     """Identify job plan with reset modes adjusted to the connection type."""
-    raise NotImplementedError
+    after = "no-reset" if connection in _NATIVE_USB else "hard-reset"
+    new_before, new_after, _ = adjust_reset(connection, before, after)
+    return IdentifyPlan(port=port, connection=connection, before=new_before, after=new_after)
 
 
 def cli_args(plan: FlashPlan) -> list[str]:
@@ -123,16 +173,49 @@ def cli_args(plan: FlashPlan) -> list[str]:
     --chip, -p, -b (UART only), --before, --after, --no-stub (if stub is off), write-flash,
     --erase-all / --skip-flashed, flash settings other than "keep", then address/path pairs.
     Never contains --force."""
-    raise NotImplementedError
+    args = ["--chip", plan.chip, "-p", plan.port]
+    if plan.baud is not None:
+        args += ["-b", str(plan.baud)]
+    args += ["--before", plan.before, "--after", plan.after]
+    if not plan.stub:
+        args.append("--no-stub")
+    args.append("write-flash")
+    if plan.erase_all:
+        args.append("--erase-all")
+    for key, value in _flash_settings(plan).items():
+        args += ["--" + key.replace("_", "-"), value]
+    if plan.skip_flashed:
+        args.append("--skip-flashed")
+    for entry in plan.entries:
+        args += [f"{entry.address:#x}", entry.path]
+    return args
 
 
 def command_line(plan: FlashPlan) -> str:
     """`esptool ...` command line for display and copying, quoted for Windows."""
-    raise NotImplementedError
+    return subprocess.list2cmdline(["esptool", *cli_args(plan)])
 
 
 def write_flash_kwargs(plan: FlashPlan) -> dict[str, object]:
     """Keyword arguments the worker passes to esptool.cmds.write_flash for each entry
     (flash_mode, flash_freq, flash_size, skip_flashed). Never contains force or erase_all;
     the worker erases once before the first entry when plan.erase_all is set."""
-    raise NotImplementedError
+    kwargs: dict[str, object] = {
+        "flash_mode": plan.flash.mode,
+        "flash_freq": plan.flash.freq,
+        "flash_size": plan.flash.size,
+    }
+    kwargs["skip_flashed"] = plan.skip_flashed
+    return kwargs
+
+
+_NATIVE_USB = (ConnectionType.USB_SERIAL_JTAG, ConnectionType.USB_OTG)
+
+
+def _flash_settings(plan: FlashPlan) -> dict[str, str]:
+    values = {
+        "flash_mode": plan.flash.mode,
+        "flash_freq": plan.flash.freq,
+        "flash_size": plan.flash.size,
+    }
+    return {k: v for k, v in values.items() if v != "keep"}
