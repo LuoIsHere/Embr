@@ -71,6 +71,7 @@ def read_image_header(data: bytes) -> ImageHeader | None:
         flash_freq=chipinfo.flash_freq_name(chip.name, freq_code),
         flash_size=chipinfo.flash_size_name(chip.name, size_code),
         segment_count=len(segments),
+        segment_addresses=tuple(int(cast(int, s.addr)) for s in segments),  # pyright: ignore[reportUnknownMemberType]
         has_app_desc=len(first) == 4 and struct.unpack("<I", first)[0] == _APP_DESC_MAGIC,
         has_bootloader_desc=first[:1] == bytes([_BOOTLOADER_DESC_MAGIC]),
     )

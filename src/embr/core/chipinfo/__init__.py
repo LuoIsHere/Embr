@@ -107,7 +107,10 @@ def usb_otg_chip(vid: int, pid: int) -> ChipInfo | None:
 def flash_map_ranges(chip: str) -> tuple[tuple[int, int], ...]:
     """Address ranges [start, end) that the chip maps to flash through its cache (IROM and
     DROM). An image segment loaded inside one of them is executed or read from flash."""
-    raise NotImplementedError
+    rom = CHIP_DEFS[get_chip(chip).name]
+    names = (("IROM_MAP_START", "IROM_MAP_END"), ("DROM_MAP_START", "DROM_MAP_END"))
+    ranges = {(int(getattr(rom, lo)), int(getattr(rom, hi))) for lo, hi in names}
+    return tuple(sorted(ranges))
 
 
 def flash_mode_name(code: int) -> str | None:
