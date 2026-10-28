@@ -1,0 +1,65 @@
+schema = 1
+kind = "synthetic"
+generator = "tests/fixtures/make_synthetic.py"
+seed = 20261028
+padded_images = "not stored; tests call build_merged(chip, offset, pad_to_size) instead"
+
+[files."attachments/assets_fits.bin"]
+sha256 = "37f987451b3c3715d82b3f1059e40ee0464eb5da0263780865b6c2579608200c"
+size = 16384
+purpose = "attachment placed by partition 'assets' (0x6000 at 0x1a000 in idf/esp32s3_ota_custom)"
+
+[files."attachments/assets_too_big.bin"]
+sha256 = "513f18856bd3352d6891fea106d906169cda5269f37a47a63dff5e864ec52e63"
+size = 28672
+purpose = "attachment larger than partition 'assets'; placing it by partition must be refused"
+
+[files."attachments/calib_at_address.bin"]
+sha256 = "8305400f2cea9fcfaa2de2c6ebbde8b38ed810cbca9ce06ee8844e30b478b00b"
+size = 4096
+purpose = "attachment placed by address 0x3ff000"
+
+[files."merged/esp32_offset_0x0.bin"]
+sha256 = "08c53d0d11890260f35a92fe82cd6095a2087956cb1e1caf44e84402133f501f"
+size = 202336
+purpose = "merged image of idf/esp32_hello, target offset 0x0, bootloader at 0x1000"
+
+[files."merged/esp32_offset_0x1000.bin"]
+sha256 = "d36b1a469da4de15d533d5e522daf4a73d25f64e4a8543e29bfeba186a94e5b5"
+size = 198240
+purpose = "merged image of idf/esp32_hello, target offset 0x1000, bootloader at 0x1000"
+
+[files."merged/esp32p4_offset_0x0.bin"]
+sha256 = "9b89072b4ba531e32a9b91ce9d2fe06e477aece253b2cd3bbc5167ecdc1632d7"
+size = 235200
+purpose = "merged image of idf/esp32p4_rev1_hello, target offset 0x0, bootloader at 0x2000"
+
+[files."merged/esp32p4_offset_0x2000.bin"]
+sha256 = "857caa079e9c9181e29d1d9ebb7f65377456d6770bcc87e413eded7278aec174"
+size = 227008
+purpose = "merged image of idf/esp32p4_rev1_hello, target offset 0x2000, bootloader at 0x2000"
+
+[files."merged/esp32s3_offset_0x0.bin"]
+sha256 = "10d98ffb1f0d8f077e858f03faf6a4f736cd73a21b65d8535a8619f0f31a0a6b"
+size = 227712
+purpose = "merged image of idf/esp32s3_hello, target offset 0x0, bootloader at 0x0"
+
+[files."negative/ff_4k.bin"]
+sha256 = "f47a8ec3e9aff2318d896942282ad4fe37d6391c82914f54a5da8a37de1300c6"
+size = 4096
+purpose = "all 0xFF but not 8 KiB, must not classify as otadata"
+
+[files."negative/notes.txt"]
+sha256 = "3c7ba94dba7d1414ec1869625ff2a12615b3976d7e5c3cf59336c689e1753e46"
+size = 2080
+purpose = "text file, must classify as unknown"
+
+[files."negative/program.elf"]
+sha256 = "e2f2a73962c2d77d5076b6a8cdd32e4b85778c3f371943002a0db95220c49b14"
+size = 4096
+purpose = "ELF header, must classify as unknown"
+
+[files."negative/random_64k.bin"]
+sha256 = "6b7118705e508710f03b099dd82522278bacc7a8c594e52adc540eb4122032c5"
+size = 65536
+purpose = "random data, must classify as unknown"

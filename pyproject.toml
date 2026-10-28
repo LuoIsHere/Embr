@@ -41,6 +41,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "TID"]
 [tool.pyright]
 include = ["src", "tests"]
 typeCheckingMode = "strict"
+# esptool ships inline annotations but no py.typed marker
+reportMissingTypeStubs = false
 pythonVersion = "3.13"
 venvPath = "."
 venv = ".venv"
