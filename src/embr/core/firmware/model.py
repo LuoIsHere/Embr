@@ -2,8 +2,11 @@
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import cast
 
+from embr.core import chipinfo
 from embr.core.firmware.kinds import EntryKind
+from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.storage.documents import Document
 
 FIRMWARE_SCHEMA_VERSION = 1
@@ -132,11 +135,73 @@ class ReadOnlyFieldError(ValueError):
 def editable_params(firmware: Firmware) -> frozenset[str]:
     """Fixed (manual, archived): all PARAMS. IDF tracking: erase_all, tags, notes.
     PIO tracking: before, after, erase_all, tags, notes."""
-    raise NotImplementedError
+    if firmware.source == Source.IDF_BUILD:
+        return _IDF_PARAMS
+    if firmware.source == Source.PIO_BUILD:
+        return _PIO_PARAMS
+    return _FIXED_PARAMS
 
 
 def set_param(firmware: Firmware, name: str, value: object) -> None:
     """Change one parameter. ReadOnlyFieldError if not editable for this firmware;
     ValueError for an invalid value (unknown chip, flash setting the chip does not support,
     unknown reset mode, wrong type)."""
-    raise NotImplementedError
+    if name not in PARAMS:
+        raise ValueError(f"unknown parameter {name!r}")
+    if name not in editable_params(firmware):
+        raise ReadOnlyFieldError(f"{name} is derived from the build output")
+    if name in ("erase_all",):
+        if not isinstance(value, bool):
+            raise ValueError("erase_all must be true or false")
+        firmware.erase_all = value
+    elif name == "tags":
+        if not isinstance(value, list) or not all(
+            isinstance(t, str) for t in cast(list[object], value)
+        ):
+            raise ValueError("tags must be a list of strings")
+        firmware.tags = [t for t in cast(list[str], value)]
+    elif not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    elif name == "notes":
+        firmware.notes = value
+    elif name == "chip":
+        try:
+            chipinfo.get_chip(value)
+        except chipinfo.UnknownChipError:
+            raise ValueError(f"unknown chip {value!r}") from None
+        firmware.chip = value
+    elif name == "before":
+        if value not in BEFORE_MODES:
+            raise ValueError(f"unknown reset mode {value!r}")
+        firmware.before = value
+    elif name == "after":
+        if value not in AFTER_MODES:
+            raise ValueError(f"unknown reset mode {value!r}")
+        firmware.after = value
+    elif name == "flash_mode":
+        if value not in ("keep", *chipinfo.FLASH_MODES):
+            raise ValueError(f"unknown flash mode {value!r}")
+        firmware.flash.mode = value
+    elif name == "flash_freq":
+        if value != "keep" and value not in _choices(firmware.chip, "freq"):
+            raise ValueError(f"flash frequency {value!r} is not supported")
+        firmware.flash.freq = value
+    else:  # flash_size
+        if value not in ("keep", "detect") and value not in _choices(firmware.chip, "size"):
+            raise ValueError(f"flash size {value!r} is not supported")
+        firmware.flash.size = value
+
+
+_FIXED_PARAMS = frozenset(PARAMS)
+
+
+_IDF_PARAMS = frozenset({"erase_all", "tags", "notes"})
+
+
+_PIO_PARAMS = frozenset({"before", "after", "erase_all", "tags", "notes"})
+
+
+def _choices(chip: str | None, what: str) -> set[str]:
+    """Flash sizes / frequencies of the chip, or of any chip when the chip is not set."""
+    chips = [chipinfo.get_chip(chip)] if chip else list(chipinfo.supported_chips())
+    return {v for c in chips for v in (c.flash_sizes if what == "size" else c.flash_freqs)}
