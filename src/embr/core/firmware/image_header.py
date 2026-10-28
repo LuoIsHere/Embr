@@ -37,6 +37,8 @@ class ImageHeader:
     """First segment starts with the esp_app_desc_t magic 0xABCD5432."""
     has_bootloader_desc: bool
     """First segment starts with the bootloader descriptor magic byte 0x50."""
+    segment_addresses: tuple[int, ...] = ()
+    """Load address of every segment, in image order."""
 
 
 def read_image_header(data: bytes) -> ImageHeader | None:

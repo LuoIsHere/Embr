@@ -104,6 +104,12 @@ def usb_otg_chip(vid: int, pid: int) -> ChipInfo | None:
     return next((c for c in supported_chips() if c.usb_otg and c.image_chip_id == pid), None)
 
 
+def flash_map_ranges(chip: str) -> tuple[tuple[int, int], ...]:
+    """Address ranges [start, end) that the chip maps to flash through its cache (IROM and
+    DROM). An image segment loaded inside one of them is executed or read from flash."""
+    raise NotImplementedError
+
+
 def flash_mode_name(code: int) -> str | None:
     """Header flash mode byte -> "qio" / "qout" / "dio" / "dout", or None."""
     return FLASH_MODES[code] if 0 <= code < len(FLASH_MODES) else None
