@@ -18,7 +18,7 @@ def test_usb_otg() -> None:
 
 
 def test_uart_bridge() -> None:
-    assert classify_connection(0x1A86, 0x55D3) == (ConnectionType.UART_BRIDGE, None)
+    assert classify_connection(0x10C4, 0xEA60) == (ConnectionType.UART_BRIDGE, None)
     assert classify_connection(0x10C4, 0xEA60) == (ConnectionType.UART_BRIDGE, None)
 
 

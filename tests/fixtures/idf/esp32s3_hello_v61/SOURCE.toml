@@ -9,7 +9,7 @@ build_commands = ["idf.py set-target esp32s3", "idf.py build", "idf.py merge-bin
 flash_command_capture = "idf.py -p COM99 flash; COM99 does not exist, so esptool stops before opening any board"
 sdkconfig_defaults = ""
 sanitized = [
-  "build/project_description.json: absolute paths replaced with <PROJECT_DIR>, <BUILD_DIR>, <IDF_PATH>, <IDF_TOOLS>, <IDF_ENV>, <HOME>",
+  "build/project_description.json: absolute paths replaced with <PROJECT_DIR>, <BUILD_DIR>, <IDF_PATH>, <IDF_TOOLS>, <HOME>",
 ]
 third_party = "Binaries are built from ESP-IDF (mostly Apache-2.0) and the CC0-1.0 hello_world example; test data only, not shipped with Embr"
 

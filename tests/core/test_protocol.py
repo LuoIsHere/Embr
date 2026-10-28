@@ -32,7 +32,7 @@ from embr.core.serial import ConnectionType
 def test_task_round_trip() -> None:
     tasks: list[Task] = [
         FlashPlan(
-            port="COM9",
+            port="COM3",
             connection=ConnectionType.USB_SERIAL_JTAG,
             baud=None,
             chip="esp32s3",

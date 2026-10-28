@@ -1,8 +1,8 @@
 """Command-line demo of the flashing engine, for checks on real boards.
 
 python -m embr.devtools ports
-python -m embr.devtools identify -p COM9
-python -m embr.devtools flash -p COM9 --chip esp32s3 0x0:bootloader.bin 0x8000:pt.bin ...
+python -m embr.devtools identify -p COM3
+python -m embr.devtools flash -p COM3 --chip esp32s3 0x0:bootloader.bin 0x8000:pt.bin ...
 """
 
 import argparse

@@ -27,7 +27,7 @@ OTG = ConnectionType.USB_OTG
 
 def _plan(connection: ConnectionType = UART, **kwargs: Any) -> FlashPlan:
     params: dict[str, Any] = {
-        "port": "COM9",
+        "port": "COM3",
         "connection": connection,
         "chip": "esp32s3",
         "entries": list(reversed(idf_entries("esp32s3_hello"))),

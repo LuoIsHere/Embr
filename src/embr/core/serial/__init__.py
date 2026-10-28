@@ -22,7 +22,7 @@ class ConnectionType(StrEnum):
 @dataclass(frozen=True)
 class PortInfo:
     device: str
-    """e.g. "COM9"."""
+    """e.g. "COM3"."""
     vid: int | None
     pid: int | None
     serial_number: str | None
@@ -68,7 +68,7 @@ def list_ports() -> list[PortInfo]:
 
 
 def _natural_key(device: str) -> tuple[str, int]:
-    # "COM10" sorts after "COM9"
+    # "COM10" sorts after "COM2"
     head = device.rstrip("0123456789")
     tail = device[len(head) :]
     return head, int(tail) if tail else -1
