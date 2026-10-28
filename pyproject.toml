@@ -50,6 +50,9 @@ venv = ".venv"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "hardware: needs a connected board; set EMBR_TEST_PORT_UART / EMBR_TEST_PORT_USB / EMBR_TEST_PORT_P4",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]
