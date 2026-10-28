@@ -63,3 +63,13 @@ purpose = "ELF header, must classify as unknown"
 sha256 = "6b7118705e508710f03b099dd82522278bacc7a8c594e52adc540eb4122032c5"
 size = 65536
 purpose = "random data, must classify as unknown"
+
+[files."variants/app_no_desc.bin"]
+sha256 = "f401b9b2d89cd5a14a974a847dedbb4192f88360887e086cd632a19b52730c04"
+size = 162176
+purpose = "idf/esp32s3_hello app with the esp_app_desc_t magic cleared; classify by segments"
+
+[files."variants/partition_table_no_md5.bin"]
+sha256 = "75d566b507928041a2f258b41aa6ef771cdb536fde9655d1dc21287fdf16d661"
+size = 3072
+purpose = "idf/esp32s3_hello partition table with its MD5 entry removed"

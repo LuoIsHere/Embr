@@ -95,7 +95,33 @@ def generate() -> dict[str, tuple[bytes, str]]:
         b"\xff" * 0x1000,
         "all 0xFF but not 8 KiB, must not classify as otadata",
     )
+    out["variants/app_no_desc.bin"] = (
+        app_without_descriptor(),
+        "idf/esp32s3_hello app with the esp_app_desc_t magic cleared; classify by segments",
+    )
+    out["variants/partition_table_no_md5.bin"] = (
+        partition_table_without_md5(),
+        "idf/esp32s3_hello partition table with its MD5 entry removed",
+    )
     return out
+
+
+def app_without_descriptor() -> bytes:
+    """App image whose first segment no longer starts with the app descriptor magic."""
+    data = bytearray((IDF / "esp32s3_hello" / "build" / "hello_esp32s3.bin").read_bytes())
+    # the first segment's data starts after the 24-byte image header and 8-byte segment header
+    data[0x20:0x24] = bytes(4)
+    return bytes(data)
+
+
+def partition_table_without_md5() -> bytes:
+    """Partition table with the 0xEBEB MD5 entry blanked to 0xFF."""
+    path = IDF / "esp32s3_hello" / "build" / "partition_table" / "partition-table.bin"
+    data = bytearray(path.read_bytes())
+    for i in range(0, len(data), 32):
+        if data.startswith(b"\xeb\xeb", i):
+            data[i : i + 32] = b"\xff" * 32
+    return bytes(data)
 
 
 def manifest(files: dict[str, tuple[bytes, str]]) -> bytes:
