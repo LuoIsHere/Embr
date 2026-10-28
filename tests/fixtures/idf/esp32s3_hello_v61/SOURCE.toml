@@ -1,0 +1,22 @@
+schema = 1
+kind = "esp-idf"
+toolchain = "ESP-IDF v6.1"
+toolchain_esptool = "5.6.0"
+target = "esp32s3"
+base_project = "ESP-IDF examples/get-started/hello_world, main/hello_world_main.c unchanged (CC0-1.0)"
+project_name = "hello_esp32s3_v61"
+build_commands = ["idf.py set-target esp32s3", "idf.py build", "idf.py merge-bin"]
+flash_command_capture = "idf.py -p COM99 flash; COM99 does not exist, so esptool stops before opening any board"
+sdkconfig_defaults = ""
+sanitized = [
+  "build/project_description.json: absolute paths replaced with <PROJECT_DIR>, <BUILD_DIR>, <IDF_PATH>, <IDF_TOOLS>, <IDF_ENV>, <HOME>",
+]
+third_party = "Binaries are built from ESP-IDF (mostly Apache-2.0) and the CC0-1.0 hello_world example; test data only, not shipped with Embr"
+
+[expect]
+chip = "esp32s3"
+bootloader_offset = "0x0"
+partition_table_offset = "0x8000"
+app_offset = "0x10000"
+app_chip_revision = "v0.0 - v0.99"
+flash_settings = "{\"flash_mode\": \"dio\", \"flash_size\": \"2MB\", \"flash_freq\": \"80m\"}"

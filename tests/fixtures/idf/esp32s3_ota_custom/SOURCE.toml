@@ -1,0 +1,23 @@
+schema = 1
+kind = "esp-idf"
+toolchain = "ESP-IDF v5.5.5"
+toolchain_esptool = "4.12.0"
+target = "esp32s3"
+base_project = "ESP-IDF examples/get-started/hello_world, main/hello_world_main.c unchanged (CC0-1.0)"
+project_name = "ota_custom"
+build_commands = ["idf.py set-target esp32s3", "idf.py build"]
+flash_command_capture = "idf.py -p COM99 flash; COM99 does not exist, so esptool stops before opening any board"
+sdkconfig_defaults = "CONFIG_PARTITION_TABLE_CUSTOM=y\nCONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"\nCONFIG_PARTITION_TABLE_OFFSET=0x10000\nCONFIG_ESPTOOLPY_FLASHSIZE_4MB=y\n"
+partitions_csv = "# Name,           Type,            SubType,         Offset,   Size\nbootloader,       bootloader,      primary,         0x0,      0x10000\npartition_table,  partition_table, primary,         0x10000,  0x1000\nnvs,              data,            nvs,             0x11000,  0x6000\notadata,          data,            ota,             0x17000,  0x2000\nphy_init,         data,            phy,             0x19000,  0x1000\nassets,           data,            0x40,            0x1A000,  0x6000\nota_0,            app,             ota_0,           0x20000,  0x180000\nota_1,            app,             ota_1,           0x1A0000, 0x180000\n"
+sanitized = [
+  "build/project_description.json: absolute paths replaced with <PROJECT_DIR>, <BUILD_DIR>, <IDF_PATH>, <IDF_TOOLS>, <IDF_ENV>, <HOME>",
+]
+third_party = "Binaries are built from ESP-IDF (mostly Apache-2.0) and the CC0-1.0 hello_world example; test data only, not shipped with Embr"
+
+[expect]
+chip = "esp32s3"
+bootloader_offset = "0x0"
+partition_table_offset = "0x10000"
+app_offset = "0x20000"
+app_chip_revision = "v0.0 - v0.99"
+flash_settings = "{\"flash_mode\": \"dio\", \"flash_size\": \"4MB\", \"flash_freq\": \"80m\"}"

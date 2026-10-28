@@ -1,0 +1,22 @@
+schema = 1
+kind = "esp-idf"
+toolchain = "ESP-IDF v5.5.5"
+toolchain_esptool = "4.12.0"
+target = "esp32p4"
+base_project = "ESP-IDF examples/get-started/hello_world, main/hello_world_main.c unchanged (CC0-1.0)"
+project_name = "hello_esp32p4_rev3"
+build_commands = ["idf.py set-target esp32p4", "idf.py build"]
+flash_command_capture = "idf.py -p COM99 flash; COM99 does not exist, so esptool stops before opening any board"
+sdkconfig_defaults = "CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n\n"
+sanitized = [
+  "build/project_description.json: absolute paths replaced with <PROJECT_DIR>, <BUILD_DIR>, <IDF_PATH>, <IDF_TOOLS>, <IDF_ENV>, <HOME>",
+]
+third_party = "Binaries are built from ESP-IDF (mostly Apache-2.0) and the CC0-1.0 hello_world example; test data only, not shipped with Embr"
+
+[expect]
+chip = "esp32p4"
+bootloader_offset = "0x2000"
+partition_table_offset = "0x8000"
+app_offset = "0x10000"
+app_chip_revision = "v3.1 - v3.99"
+flash_settings = "{\"flash_mode\": \"dio\", \"flash_size\": \"2MB\", \"flash_freq\": \"80m\"}"
