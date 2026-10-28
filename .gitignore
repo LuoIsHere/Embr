@@ -1,0 +1,15 @@
+/internal_docs/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Build output
+/build/
+/dist/
+
+# Portable data root when running from source
+/.run/
