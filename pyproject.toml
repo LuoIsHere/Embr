@@ -41,7 +41,7 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "TID"]
 "tests/**" = ["TID251"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 typeCheckingMode = "strict"
 # esptool ships inline annotations but no py.typed marker
 reportMissingTypeStubs = false
