@@ -349,6 +349,8 @@ class Operations:
             ):
                 self._ctx.settings.save()
         job.segment.close()
+        if job.kind != JobKind.IDENTIFY and job.info is not None and job.info.mac:
+            self._ctx.logs.copy_to_board(job.segment, job.info.mac)
         self._job = None
         job.listener.on_finished(
             JobOutcome(

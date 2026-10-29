@@ -12,6 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
 
+from embr.core.history import normalize_mac
+
 HEADER_PREFIX = "=== "
 BOARDS_FOLDER = "boards"
 """Subfolder of logs/ with one file per board."""
@@ -49,7 +51,7 @@ def board_log_name(mac: str) -> str:
     """File name for a board: the MAC in lower case with "-" between bytes, e.g.
     "aa-bb-cc-dd-ee-ff.log" (":" is not allowed in Windows file names). Accepts the forms
     history.normalize_mac() accepts; ValueError otherwise."""
-    raise NotImplementedError
+    return normalize_mac(mac).replace(":", "-") + ".log"
 
 
 class LogSegment:
@@ -62,17 +64,19 @@ class LogSegment:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.file_name = path.name
+        self._lines: list[str] = []
         self._file = path.open("a", encoding="utf-8", newline="\n")
 
     @property
     def lines(self) -> list[str]:
         """Every line written to the segment so far, header first."""
-        raise NotImplementedError
+        return list(self._lines)
 
     def write(self, text: str) -> None:
         """Append `text` as one or more lines (a newline is added; embedded newlines start
         new lines)."""
         lines = text.splitlines() or [""]
+        self._lines += lines
         self._file.write("".join(f"{line}\n" for line in lines))
         self._file.flush()
 
@@ -131,12 +135,16 @@ class LogBook:
 
     def board_log_path(self, mac: str) -> Path:
         """logs/boards/<board_log_name(mac)> (whether or not it exists)."""
-        raise NotImplementedError
+        return self.directory / BOARDS_FOLDER / board_log_name(mac)
 
     def copy_to_board(self, segment: LogSegment, mac: str) -> Path:
         """Append the segment's lines (as written so far, header first) to the board's file,
         creating the folder and file when missing. Returns the file path."""
-        raise NotImplementedError
+        path = self.board_log_path(mac)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8", newline="\n") as file:
+            file.write("".join(f"{line}\n" for line in segment.lines))
+        return path
 
     def find_segment(self, file_name: str, segment_id: str) -> int | None:
         """0-based line number of the segment's header in `file_name`, or None if the file
