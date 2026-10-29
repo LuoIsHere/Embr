@@ -1,5 +1,8 @@
-"""Identify and flash jobs: one worker process each, a log segment each, a flash record
-for every flash (design doc §3.3, §4.1, §7.2).
+"""Identify, flash, erase and read_flash jobs: one worker process each, a log segment each,
+a record for every flash, erase and read_flash (design doc §3.3, §4.1, §7.2). When a flash,
+erase or read_flash job got the board's MAC (InfoEvent), its finished segment is also
+appended to logs/boards/<mac>.log; identify segments and jobs without a MAC stay in the
+daily log only.
 
 Worker events arrive on a background thread. Operations hands each one to `dispatch`,
 which must run it on the thread that owns Operations (the Qt adapter queues it to the main

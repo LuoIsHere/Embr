@@ -1,8 +1,10 @@
-"""Daily log files logs/YYYY-MM-DD.log (design doc §7.6).
+"""Daily log files logs/YYYY-MM-DD.log, and per-board files logs/boards/<mac>.log
+(design doc §7.6).
 
 Every operation writes one segment that starts with a header line carrying the record id
-(or, for identify, an id of its own), so a record can be traced to its log. Segments are
-appended, never rewritten; nothing is deleted automatically.
+(or, for identify, an id of its own), so a record can be traced to its log. Flash, erase
+and read_flash segments are also appended to the board's own file once the job knows the
+board's MAC. Segments are appended, never rewritten; nothing is deleted automatically.
 """
 
 import datetime
@@ -11,6 +13,8 @@ from pathlib import Path
 from types import TracebackType
 
 HEADER_PREFIX = "=== "
+BOARDS_FOLDER = "boards"
+"""Subfolder of logs/ with one file per board."""
 
 
 def log_file_name(day: datetime.date) -> str:
@@ -41,6 +45,13 @@ def header_line(
     return " | ".join(fields)
 
 
+def board_log_name(mac: str) -> str:
+    """File name for a board: the MAC in lower case with "-" between bytes, e.g.
+    "aa-bb-cc-dd-ee-ff.log" (":" is not allowed in Windows file names). Accepts the forms
+    history.normalize_mac() accepts; ValueError otherwise."""
+    raise NotImplementedError
+
+
 class LogSegment:
     """An open segment. Each write() is flushed, so a crash keeps everything written."""
 
@@ -52,6 +63,11 @@ class LogSegment:
         self.path = path
         self.file_name = path.name
         self._file = path.open("a", encoding="utf-8", newline="\n")
+
+    @property
+    def lines(self) -> list[str]:
+        """Every line written to the segment so far, header first."""
+        raise NotImplementedError
 
     def write(self, text: str) -> None:
         """Append `text` as one or more lines (a newline is added; embedded newlines start
@@ -112,6 +128,15 @@ class LogBook:
         )
         segment.write(header)
         return segment
+
+    def board_log_path(self, mac: str) -> Path:
+        """logs/boards/<board_log_name(mac)> (whether or not it exists)."""
+        raise NotImplementedError
+
+    def copy_to_board(self, segment: LogSegment, mac: str) -> Path:
+        """Append the segment's lines (as written so far, header first) to the board's file,
+        creating the folder and file when missing. Returns the file path."""
+        raise NotImplementedError
 
     def find_segment(self, file_name: str, segment_id: str) -> int | None:
         """0-based line number of the segment's header in `file_name`, or None if the file
