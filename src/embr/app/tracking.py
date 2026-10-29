@@ -135,6 +135,8 @@ class Tracker:
                 if resolution.state == ResolveState.UPDATED:
                     self._updated[firmware_id] = now
                 print_ = fingerprint(inputs)  # the TOML is not an input; files unchanged
+        if not status.state.flashable:  # "Build updated" only describes a flashable build
+            self._updated.pop(firmware_id, None)
         status = dataclasses.replace(status, updated_at=self._updated.get(firmware_id))
         self._status[firmware_id] = status
         self._inputs[firmware_id] = inputs
