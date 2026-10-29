@@ -996,8 +996,12 @@ class FirmwareView(QWidget):
         if self.banner.mode == "directory":
             self._owner.firmware_action("directory")
             return
-        self._owner.library.confirm_entries(firmware.id)
-        self._owner.note("ok", f"[entries] {firmware.name}: entries confirmed")
+        try:
+            self._owner.library.confirm_entries(firmware.id)
+        except ValueError:  # the build changed again since the banner was shown
+            self._owner.note("note", f"[entries] {firmware.name}: nothing left to confirm")
+        else:
+            self._owner.note("ok", f"[entries] {firmware.name}: entries confirmed")
         self._owner.changed()
 
 

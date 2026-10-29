@@ -184,7 +184,7 @@ class EmbrWindow(FrameWindow):
         self.firmware_view.entries.merge_requested.connect(self._merge)
         self.connection.erase_clicked.connect(self._erase)
         self.connection.read_clicked.connect(self._read)
-        self.connection.records_clicked.connect(self._board_records)
+        self.connection.board_log_clicked.connect(self._open_board_log)
         self.sidebar_panel.tree.move_requested.connect(self._move)
         self.connection.port_changed.connect(self._port_changed)
         self.connection.baud_changed.connect(self._refresh_right)
@@ -863,12 +863,15 @@ class EmbrWindow(FrameWindow):
     def _read(self) -> None:
         self._board_job(JobKind.READ_FLASH)
 
-    def _board_records(self) -> None:
+    def _open_board_log(self) -> None:
         snapshot = self._memory.snapshot
         if snapshot is None or not snapshot.info.mac:
             return
-        records = self._context.history.query(mac=snapshot.info.mac)
-        dialogs.board_records(self, snapshot.info.mac, records, self.show_log_segment)
+        path = self._context.logs.board_log_path(snapshot.info.mac)
+        if not path.is_file():
+            self.note("note", f"[board] no flash, erase or read on {snapshot.info.mac} yet")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     # ---- window -----------------------------------------------------------------------
 

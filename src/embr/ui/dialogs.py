@@ -28,7 +28,6 @@ from embr.core.archive import ArchiveFile
 from embr.core.firmware.import_idf import IdfBuild, IdfBuildError, default_firmware_name
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.protocol import InfoEvent
-from embr.core.history import FlashRecord
 from embr.core.storage.paths import AppPaths
 from embr.ui.widgets import button, label
 
@@ -492,37 +491,3 @@ def read_flash(
     if found is None:
         return None
     return ReadRequest(found[0], found[1], placement.value())
-
-
-def board_records(
-    parent: QWidget,
-    mac: str,
-    records: list[FlashRecord],
-    show_log: Callable[[str, str], None],
-) -> None:
-    dialog = Dialog(parent, f"Board records · MAC {mac}", "Close", danger=False)
-    dialog.cancel.hide()
-    dialog.setMinimumWidth(620)
-
-    def open_log(href: str) -> None:
-        file_name, _, segment_id = href.partition("|")
-        show_log(file_name, segment_id)
-
-    if not records:
-        dialog.text("No records for this board yet.")
-    for record in records[:50]:
-        what = OPERATION_TEXT.get(record.operation.value, record.operation.value)
-        target = f" · {html.escape(record.firmware_name)}" if record.firmware_name else ""
-        stamp = record.timestamp.replace("T", " ")
-        link = QLabel(
-            f'<a href="{record.log_file}|{record.id}">{stamp}</a> · {what}{target} · '
-            f"{record.result.value} · {html.escape(record.port)}"
-        )
-        link.setTextFormat(Qt.TextFormat.RichText)
-        link.linkActivated.connect(open_log)
-        dialog.body.addWidget(link)
-    dialog.text("Click a time to show that operation's section of the log.")
-    dialog.exec()
-
-
-OPERATION_TEXT = {"flash": "flash", "erase": "erase", "read_flash": "read flash"}

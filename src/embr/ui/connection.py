@@ -55,8 +55,8 @@ class ConnectionPanel(QWidget):
     identify_clicked = Signal()
     erase_clicked = Signal()
     read_clicked = Signal()
-    records_clicked = Signal()
-    """Board records of the identified MAC."""
+    board_log_clicked = Signal()
+    """Open logs/boards/<mac>.log of the identified board."""
     flash_clicked = Signal()
     """Flash, or Cancel while a job runs."""
     expand_toggled = Signal(bool)
@@ -83,6 +83,10 @@ class ConnectionPanel(QWidget):
         board.setSpacing(6)
         board.addWidget(self.erase, 1)
         board.addWidget(self.read, 1)
+        self.board_log = button("Board log")
+        self.board_log.setToolTip(
+            "Flash, erase and read operations on this board (logs/boards/<MAC>.log)"
+        )
         self.identity = QVBoxLayout()
         self.identity.setContentsMargins(0, 0, 0, 0)
         connect = QVBoxLayout()
@@ -91,6 +95,7 @@ class ConnectionPanel(QWidget):
         connect.addLayout(_row("Baud", self.baud))
         connect.addWidget(self.identify)
         connect.addLayout(board)
+        connect.addWidget(self.board_log)
         connect.addLayout(self.identity)
         # ---- checks ----
         self.checks = QVBoxLayout()
@@ -182,6 +187,7 @@ class ConnectionPanel(QWidget):
         self.identify.clicked.connect(self.identify_clicked.emit)
         self.erase.clicked.connect(self.erase_clicked.emit)
         self.read.clicked.connect(self.read_clicked.emit)
+        self.board_log.clicked.connect(self.board_log_clicked.emit)
         self.flash.clicked.connect(self.flash_clicked.emit)
         self.expand.clicked.connect(self._toggle_expand)
         self.log_folder.clicked.connect(self.log_folder_clicked.emit)
@@ -284,7 +290,6 @@ class ConnectionPanel(QWidget):
                 "Identified",
                 label(f"{snapshot.time.strftime('%H:%M:%S')} · port released", tone="3"),
             ),
-            ("Records", self._records_link()),
         ]
         for row, (key, widget) in enumerate(rows):
             caption = label(key, tone="3")
@@ -297,18 +302,10 @@ class ConnectionPanel(QWidget):
         self.identity.addLayout(grid)
 
     def set_board_actions(self, enabled: bool) -> None:
-        """Erase / Read flash: only with a snapshot for the selected port and no job."""
-        for widget in (self.erase, self.read):
+        """Erase / Read flash / Board log: only with a snapshot for the selected port and
+        no job."""
+        for widget in (self.erase, self.read, self.board_log):
             widget.setEnabled(enabled and not self._running)
-
-    def _records_link(self) -> QLabel:
-        link = QLabel('<a href="records">Board records (all operations on this MAC)</a>')
-        link.setTextFormat(Qt.TextFormat.RichText)
-        link.linkActivated.connect(self._records_activated)
-        return link
-
-    def _records_activated(self, _href: str) -> None:
-        self.records_clicked.emit()
 
     # ---- checks and hint --------------------------------------------------------------
 
