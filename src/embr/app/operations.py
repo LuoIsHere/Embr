@@ -9,16 +9,38 @@ happens there, so the sqlite connection is only used from one thread.
 
 import datetime
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
+import esptool
+
 from embr.app.context import AppContext
+from embr.app.flashplan import PlanError, assemble_plan
 from embr.app.identify import IdentifyMemory
-from embr.core.flasher.protocol import Event, Task
+from embr.core.firmware.files import FileState, entry_state
+from embr.core.firmware.model import Firmware
+from embr.core.flasher import runner
+from embr.core.flasher.checks import CheckLevel
+from embr.core.flasher.plan import FlashPlan, build_identify_plan, command_line
+from embr.core.flasher.protocol import (
+    CheckEvent,
+    EntryEvent,
+    EntryStatus,
+    ErrorEvent,
+    Event,
+    InfoEvent,
+    LogEvent,
+    LogLevel,
+    ProgressEvent,
+    ResultEvent,
+    Task,
+)
 from embr.core.flasher.runner import JobHandle
-from embr.core.history import RecordResult
-from embr.core.serial import PortInfo
+from embr.core.history import FlashRecord, Operation, RecordEntry, RecordResult, result_from_event
+from embr.core.logs import LogSegment
+from embr.core.serial import PortInfo, baud_adjustable, remember_baud
+from embr.core.storage.ids import new_id
 
 Dispatch = Callable[[Callable[[], None]], None]
 StartJob = Callable[[Task, Callable[[Event], None]], JobHandle]
@@ -71,6 +93,25 @@ class Listener(Protocol):
         ...
 
 
+@dataclass
+class _Job:
+    kind: JobKind
+    listener: Listener
+    port: PortInfo
+    segment: LogSegment
+    segment_id: str
+    start: datetime.datetime
+    firmware: Firmware | None = None
+    plan: FlashPlan | None = None
+    handle: JobHandle | None = None
+    info: InfoEvent | None = None
+    kinds: dict[tuple[int, str], str] = field(default_factory=lambda: dict[tuple[int, str], str]())
+    skipped: set[int] = field(default_factory=lambda: set[int]())
+    refusals: list[str] = field(default_factory=lambda: list[str]())
+    cancel_requested: bool = False
+    finished: bool = False
+
+
 class Operations:
     def __init__(
         self,
@@ -82,21 +123,32 @@ class Operations:
         clock: Callable[[], datetime.datetime] = datetime.datetime.now,
     ) -> None:
         """`start_job` defaults to core.flasher.runner.start; tests pass a fake."""
-        raise NotImplementedError
+        self._ctx = context
+        self._memory = identify_memory
+        self._dispatch = dispatch
+        self._start_job: StartJob = start_job or runner.start
+        self._clock = clock
+        self._job: _Job | None = None
 
     @property
     def busy(self) -> bool:
-        raise NotImplementedError
+        return self._job is not None
 
     @property
     def running_firmware_id(self) -> str | None:
         """Firmware being flashed (locked for editing in the UI), else None."""
-        raise NotImplementedError
+        job = self._job
+        return job.firmware.id if job is not None and job.firmware is not None else None
 
     def identify(self, port: PortInfo, listener: Listener) -> None:
         """Start an identify job. Its log segment gets an id of its own; no record is
         written. The InfoEvent updates identify_memory. BusyError while a job runs."""
-        raise NotImplementedError
+        self._ensure_idle()
+        segment_id = new_id()
+        start = self._clock()
+        segment = self._ctx.logs.open_segment(segment_id, JobKind.IDENTIFY, port=port.device)
+        job = _Job(JobKind.IDENTIFY, listener, port, segment, segment_id, start)
+        self._run(job, build_identify_plan(port.device, port.connection))
 
     def flash(self, firmware_id: str, port: PortInfo, baud: int | None, listener: Listener) -> None:
         """Start a flash job for a fixed firmware. Before starting: the entry files are
@@ -109,9 +161,184 @@ class Operations:
         command and log file; on OK over an adjustable port the baud is remembered for the
         port's VID/PID and settings are saved. The InfoEvent also updates identify_memory.
         BusyError while a job runs; flashplan.PlanError propagates."""
-        raise NotImplementedError
+        self._ensure_idle()
+        firmware = self._ctx.firmware.get(firmware_id)
+        enabled = [e for e in firmware.entries if e.enabled]
+        bad = [e.name for e in enabled if entry_state(e, self._ctx.paths.archive) != FileState.OK]
+        if bad:
+            raise PlanError(f"{', '.join(bad)}: file missing or changed since it was recorded")
+        if firmware.chip is None:
+            snapshot = self._memory.snapshot
+            if snapshot is None:
+                raise PlanError(f"{firmware.name} has no chip; identify the board first")
+            firmware.chip = snapshot.info.chip
+            self._ctx.firmware.save(firmware)
+        plan = assemble_plan(self._ctx, firmware, port, baud)
+        record_id = new_id()
+        start = self._clock()
+        segment = self._ctx.logs.open_segment(
+            record_id,
+            JobKind.FLASH,
+            port=port.device,
+            project_name=self._project_name(firmware.project_id),
+            firmware_name=firmware.name,
+        )
+        segment.write(f"$ {command_line(plan)}")
+        job = _Job(JobKind.FLASH, listener, port, segment, record_id, start, firmware, plan)
+        job.kinds = {(e.address, e.name): str(e.kind) for e in enabled if e.address is not None}
+        self._run(job, plan)
 
     def cancel(self) -> None:
         """Kill the running job's worker; the job then finishes as CANCELLED. No effect
         when idle."""
-        raise NotImplementedError
+        job = self._job
+        if job is None:
+            return
+        job.cancel_requested = True
+        if job.handle is not None:
+            job.handle.cancel()
+
+    # ---- running a job ----------------------------------------------------------------
+
+    def _ensure_idle(self) -> None:
+        if self._job is not None:
+            raise BusyError("a job is already running")
+
+    def _run(self, job: _Job, task: Task) -> None:
+        self._job = job
+        try:
+            job.handle = self._start_job(
+                task, lambda event: self._dispatch(lambda: self._handle(job, event))
+            )
+        except BaseException:
+            job.segment.close()
+            self._job = None
+            raise
+        if job.cancel_requested:  # cancel() came before the handle existed
+            job.handle.cancel()
+
+    def _handle(self, job: _Job, event: Event) -> None:
+        if job.finished:
+            return
+        self._log(job, event)
+        if isinstance(event, InfoEvent):
+            job.info = event
+            self._memory.record(job.port, event, self._clock())
+        elif isinstance(event, CheckEvent) and event.level == CheckLevel.REFUSE:
+            job.refusals.append(event.message)
+        elif isinstance(event, EntryEvent) and event.status == EntryStatus.SKIPPED:
+            job.skipped.add(event.entry_index)
+        job.listener.on_event(event)
+        if isinstance(event, ProgressEvent) and job.plan is not None:
+            job.listener.on_progress(_progress(job.plan, event))
+        if isinstance(event, ResultEvent | ErrorEvent):
+            self._finish(job, event)
+
+    def _finish(self, job: _Job, event: ResultEvent | ErrorEvent) -> None:
+        job.finished = True
+        result = result_from_event(event)
+        job.segment.write(f"[result] {result}: {event.message}")
+        record_id: str | None = None
+        if job.kind == JobKind.FLASH and job.plan is not None and job.firmware is not None:
+            record = self._record(job, result, event.message)
+            self._ctx.history.add(record)
+            record_id = record.id
+            job.segment.write(
+                f"[record] {record.id} {result}, {len(record.entries)} entries, "
+                f"{record.duration_ms} ms"
+            )
+            if result == RecordResult.OK and remember_baud(
+                self._ctx.settings, job.port, job.plan.baud or 0
+            ):
+                self._ctx.settings.save()
+        job.segment.close()
+        self._job = None
+        job.listener.on_finished(
+            JobOutcome(
+                kind=job.kind,
+                result=result,
+                message=event.message,
+                record_id=record_id,
+                log_file=job.segment.file_name,
+                segment_id=job.segment_id,
+                native_usb=not baud_adjustable(job.port),
+            )
+        )
+
+    def _record(self, job: _Job, result: RecordResult, message: str) -> FlashRecord:
+        plan, firmware, info = job.plan, job.firmware, job.info
+        assert plan is not None and firmware is not None
+        refused = result == RecordResult.REFUSED
+        return FlashRecord(
+            id=job.segment_id,
+            operation=Operation.FLASH,
+            timestamp=job.start.isoformat(timespec="seconds"),
+            result=result,
+            project_id=firmware.project_id,
+            project_name=self._project_name(firmware.project_id),
+            firmware_id=firmware.id,
+            firmware_name=firmware.name,
+            device=firmware.device,
+            port=plan.port,
+            baud=plan.baud,
+            connection_type=plan.connection.value,
+            reset_before=plan.before,
+            reset_after=plan.after,
+            chip_detected=info.chip if info else None,
+            chip_revision=info.revision if info else None,
+            mac=info.mac if info and info.mac else None,
+            flash_size_detected=info.flash_size if info else None,
+            entries=tuple(
+                RecordEntry(
+                    e.name,
+                    e.address,
+                    e.sha256,
+                    e.size,
+                    job.kinds.get((e.address, e.name), ""),
+                    i in job.skipped,
+                )
+                for i, e in enumerate(plan.entries)
+            ),
+            refuse_reason=("; ".join(job.refusals) or message) if refused else None,
+            duration_ms=int((self._clock() - job.start).total_seconds() * 1000),
+            esptool_version=esptool.__version__,
+            command=command_line(plan),
+            log_file=job.segment.file_name,
+        )
+
+    def _log(self, job: _Job, event: Event) -> None:
+        segment = job.segment
+        if isinstance(event, LogEvent):
+            if event.level != LogLevel.STAGE:
+                prefix = "" if event.level == LogLevel.INFO else f"[{event.level}] "
+                segment.write(prefix + event.text)
+        elif isinstance(event, CheckEvent):
+            segment.write(f"[check {event.level}] {event.name}: {event.message}")
+        elif isinstance(event, InfoEvent):
+            segment.write(
+                f"[chip] {event.chip} {event.revision}, MAC {event.mac or '-'}, "
+                f"flash {event.flash_size or '-'}"
+            )
+        elif isinstance(event, EntryEvent):
+            segment.write(f"[entry] {event.address:#x} {event.status}")
+        elif isinstance(event, ErrorEvent):
+            segment.write(f"[error] {event.message}")
+            if event.details:
+                segment.write(event.details.rstrip("\n"))
+
+    def _project_name(self, project_id: str | None) -> str:
+        if project_id is None:
+            return ""
+        try:
+            return self._ctx.projects.get(project_id).name
+        except KeyError:
+            return ""
+
+
+def _progress(plan: FlashPlan, event: ProgressEvent) -> JobProgress:
+    count = len(plan.entries)
+    index = min(max(event.entry_index, 0), count - 1) if count else 0
+    fraction = event.cur / event.total if event.total else 0.0
+    percent = int(100 * (index + min(fraction, 1.0)) / count) if count else 0
+    name = plan.entries[index].name if count else ""
+    return JobProgress(index, count, event.address, name, max(0, min(percent, 100)))
