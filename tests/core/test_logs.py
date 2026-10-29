@@ -1,9 +1,18 @@
-"""core/logs: daily log files and segments (design doc §7.6)."""
+"""core/logs: daily log files, segments and per-board files (design doc §7.6)."""
 
 import datetime
 from pathlib import Path
 
-from embr.core.logs import HEADER_PREFIX, LogBook, header_line, log_file_name
+import pytest
+
+from embr.core.logs import (
+    BOARDS_FOLDER,
+    HEADER_PREFIX,
+    LogBook,
+    board_log_name,
+    header_line,
+    log_file_name,
+)
 from embr.core.storage.ids import new_id
 
 DAY = datetime.date(2026, 10, 29)
@@ -136,3 +145,53 @@ def test_multiline_write_and_utf8(tmp_path: Path) -> None:
     lines = raw.decode("utf-8").splitlines()
     assert "固件 Grüße" in lines[0]
     assert lines[1:] == ["first", "second"]
+
+
+@pytest.mark.parametrize("mac", ["AA:BB:CC:DD:EE:FF", "aa-bb-cc-dd-ee-ff", "aabbccddeeff"])
+def test_board_log_name_is_a_windows_safe_mac(mac: str) -> None:
+    name = board_log_name(mac)
+    assert name == "aa-bb-cc-dd-ee-ff.log"
+    assert ":" not in name
+
+
+@pytest.mark.parametrize("mac", ["", "aa:bb:cc:dd:ee", "gg:hh:ii:jj:kk:ll"])
+def test_board_log_name_rejects_a_non_mac(mac: str) -> None:
+    with pytest.raises(ValueError):
+        board_log_name(mac)
+
+
+def test_segment_lines_hold_header_and_written_lines(tmp_path: Path) -> None:
+    book = LogBook(tmp_path, Clock(_at(DAY, 9)))
+    segment_id = new_id()
+    with book.open_segment(segment_id, "flash", port="COM1") as segment:
+        segment.write("first\nsecond")
+        lines = segment.lines
+    header = header_line(
+        segment_id, "flash", _at(DAY, 9), port="COM1", project_name="", firmware_name=""
+    )
+    assert lines == [header, "first", "second"]
+    assert lines == _lines(tmp_path / "2026-10-29.log")
+
+
+def test_copy_to_board_appends_segments_in_order(tmp_path: Path) -> None:
+    clock = Clock(_at(DAY, 9))
+    book = LogBook(tmp_path, clock)
+    mac = "aa:bb:cc:dd:ee:ff"
+    first = book.open_segment(new_id(), "flash", port="COM1")
+    first.write("flashed")
+    clock.now = _at(DAY, 10)
+    with book.open_segment(new_id(), "erase", port="COM1") as second:
+        second.write("erased")
+    daily = tmp_path / "2026-10-29.log"
+    before = daily.read_bytes()
+
+    assert not (tmp_path / BOARDS_FOLDER).exists()
+    path = book.copy_to_board(first, mac)  # still open: lines written so far
+    first.close()
+    assert book.copy_to_board(second, mac) == path
+
+    assert path == book.board_log_path(mac) == tmp_path / BOARDS_FOLDER / "aa-bb-cc-dd-ee-ff.log"
+    assert _lines(path) == first.lines + second.lines
+    assert _lines(path)[1::2] == ["flashed", "erased"]
+    assert b"\r\n" not in path.read_bytes()
+    assert daily.read_bytes() == before

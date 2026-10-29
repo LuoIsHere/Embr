@@ -41,6 +41,7 @@ from embr.core.flasher.protocol import (
     encode_event,
 )
 from embr.core.history import Operation, RecordResult
+from embr.core.logs import BOARDS_FOLDER, HEADER_PREFIX
 from embr.core.serial import BAUD_SECTION, PortInfo
 from embr.core.storage.settings import Settings
 
@@ -395,3 +396,44 @@ def test_refused_read_creates_no_firmware(context: AppContext) -> None:
         (),
         None,
     )
+
+
+def _log_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.parametrize("kind", [JobKind.FLASH, JobKind.ERASE, JobKind.READ_FLASH])
+def test_job_with_a_mac_copies_its_segment_to_the_board_log(
+    library: Library, context: AppContext, kind: JobKind
+) -> None:
+    ok: list[Event] = [INFO, ResultEvent(ResultStatus.OK, "done")]
+    setup = Setup(context, DumpWorker(FLASH_OK if kind is JobKind.FLASH else ok, b"\xff" * 16))
+    if kind is JobKind.FLASH:
+        setup.ops.flash(fixed_firmware(library, HELLO).id, BRIDGE, None, setup.recorder)
+    elif kind is JobKind.ERASE:
+        setup.ops.erase(BRIDGE, setup.recorder)
+    else:
+        setup.ops.read_flash(BRIDGE, None, setup.recorder, size=16)
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    daily = _log_lines(context.paths.logs / outcome.log_file)
+    assert daily[0].startswith(f"{HEADER_PREFIX}{outcome.segment_id} ")
+    assert _log_lines(context.logs.board_log_path(MAC)) == daily  # the finished segment
+
+
+def test_identify_with_a_mac_writes_no_board_log(context: AppContext) -> None:
+    setup = Setup(context, FakeWorker([INFO, ResultEvent(ResultStatus.OK, "identified")]))
+    setup.ops.identify(BRIDGE, setup.recorder)
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert context.logs.find_segment(outcome.log_file, outcome.segment_id) is not None
+    assert not (context.paths.logs / BOARDS_FOLDER).exists()
+
+
+def test_job_without_a_mac_stays_in_the_daily_log(library: Library, context: AppContext) -> None:
+    firmware = fixed_firmware(library, HELLO)
+    outcome = Setup(context, FakeWorker([ErrorEvent("no serial data", "trace")])).flash(firmware.id)
+
+    assert outcome.result == RecordResult.FAILED
+    assert context.logs.find_segment(outcome.log_file, outcome.segment_id) is not None
+    assert not (context.paths.logs / BOARDS_FOLDER).exists()
