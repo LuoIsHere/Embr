@@ -115,6 +115,7 @@ class EmbrWindow(FrameWindow):
         self._query = ""
         self._last_outcome: JobOutcome | None = None
         self._job_firmware: str | None = None
+        self._ports_pending = False
         self._scheme = SchemeWatcher(self)
         self._palette = palette(self._scheme.dark)
 
@@ -431,6 +432,14 @@ class EmbrWindow(FrameWindow):
     def _ports_changed(self, change: object) -> None:
         if isinstance(change, PortChange):
             self._memory.ports_changed(change)
+        if self._ops.busy:
+            # the job keeps its port; the list (and selection) follow once it ends
+            self._ports_pending = True
+            return
+        self._apply_ports()
+
+    def _apply_ports(self) -> None:
+        self._ports_pending = False
         had = self.connection.selected_port()
         self.connection.set_ports(self.ports.ports)
         now = self.connection.selected_port()
@@ -551,6 +560,8 @@ class EmbrWindow(FrameWindow):
         self._last_outcome = outcome
         self._job_firmware = None
         self.connection.set_running(False)
+        if self._ports_pending:
+            self._apply_ports()
         if outcome.kind == JobKind.IDENTIFY:
             done = outcome.result == RecordResult.OK
             self.connection.show_progress(0, "Identified" if done else RESULT_TEXT[outcome.result])
