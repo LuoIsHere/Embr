@@ -1,0 +1,43 @@
+schema = 1
+kind = "embr-sqlite"
+schema_version = 1
+made_with = "embr.core.storage.database.open_database at DB_SCHEMA_VERSION 1"
+rebuild = "uv run python tests/fixtures/db/make_v1.py (only while the schema is 1)"
+content = "one flash_records row and its one record_entries row, inserted with plain SQL"
+purpose = "real v1 database for the v1 -> v2 migration tests"
+
+[file]
+name = "embr_v1.sqlite"
+sha256 = "ac34b0e7fad17c59977d0e1b9614a00a0be7d13aaa2ec5ef4b64841505b12726"
+size = 49152
+
+[record]
+id = "01JC0000000000000000000001"
+project_id = "01JC0000000000000000000002"
+project_name = "Sample project"
+firmware_id = "01JC0000000000000000000003"
+firmware_name = "Sample firmware"
+device = "Sample board"
+timestamp = "2026-10-01T12:00:00"
+port = "COM3"
+baud = 460800
+connection_type = "uart_bridge"
+reset_before = "default-reset"
+reset_after = "hard-reset"
+chip_detected = "esp32"
+chip_revision = "v3.0"
+mac = "aa:bb:cc:dd:ee:ff"
+flash_size_detected = "4MB"
+result = "ok"
+duration_ms = 12345
+esptool_version = "5.0.0"
+command = "esptool --chip esp32 -p COM3 -b 460800 write-flash 0x10000 app.bin"
+log_file = "2026-10-01.log"
+
+[entry]
+name = "app.bin"
+address = 65536
+sha256 = "eeca19f3ef60339bf7024ea0a87df90be1041b8ac652c8eb231e6d51c002309c"
+size = 1024
+kind = "app"
+skipped = false

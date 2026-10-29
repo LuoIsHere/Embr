@@ -1,18 +1,23 @@
-"""core/storage: data layout, single-instance lock, ids, embr.sqlite and TOML documents."""
+"""core/storage: data layout, single-instance lock, ids, embr.sqlite, TOML documents and
+settings.ini."""
 
+import hashlib
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 import tomli_w
-from embr_testkit import REPO
+from embr_testkit import FIXTURES, REPO
 
+from embr.core.history import History, Operation, RecordEntry
 from embr.core.storage.database import (
     DB_SCHEMA_VERSION,
     NewerSchemaError,
@@ -23,6 +28,7 @@ from embr.core.storage.documents import Document, load_document, save_document
 from embr.core.storage.ids import is_id, new_id, unique_name
 from embr.core.storage.lock import InstanceLock
 from embr.core.storage.paths import AppPaths, clear_temp, is_writable, prepare
+from embr.core.storage.settings import Settings
 
 CROCKFORD_ULID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
 
@@ -176,6 +182,51 @@ def test_open_database_refuses_newer_schema(tmp_path: Path) -> None:
     assert path.read_bytes() == original
 
 
+V1_DB = FIXTURES / "db" / "embr_v1.sqlite"
+
+
+def _v1_source() -> dict[str, Any]:
+    return tomllib.loads((FIXTURES / "db" / "SOURCE.toml").read_text(encoding="utf-8"))
+
+
+def _copy_v1(tmp_path: Path) -> tuple[Path, bytes]:
+    source = _v1_source()
+    original = V1_DB.read_bytes()
+    assert hashlib.sha256(original).hexdigest() == source["file"]["sha256"]  # still the v1 file
+    path = tmp_path / "embr.sqlite"
+    shutil.copyfile(V1_DB, path)
+    return path, original
+
+
+def test_v1_database_migrates_to_v2_with_backup(tmp_path: Path) -> None:
+    assert DB_SCHEMA_VERSION == 2
+    path, original = _copy_v1(tmp_path)
+    connection = open_database(path, tmp_path / "backup")
+    try:
+        assert schema_version(connection) == 2
+        rows = connection.execute("SELECT id, operation FROM flash_records").fetchall()
+    finally:
+        connection.close()
+    assert rows == [(_v1_source()["record"]["id"], "flash")]
+    backups = _backup_files(tmp_path / "backup")
+    assert [b.read_bytes() for b in backups] == [original]
+
+
+def test_v1_record_reads_back_after_migration(tmp_path: Path) -> None:
+    path, _ = _copy_v1(tmp_path)
+    expected = _v1_source()
+    connection = open_database(path, tmp_path / "backup")
+    try:
+        record = History(connection).get(expected["record"]["id"])
+    finally:
+        connection.close()
+    assert record.operation is Operation.FLASH
+    for field, value in expected["record"].items():
+        assert getattr(record, field) == value, field
+    assert record.refuse_reason is None
+    assert record.entries == (RecordEntry(**expected["entry"]),)
+
+
 # --- documents ---------------------------------------------------------------------------
 
 SAMPLE: Document = {"name": "Demo", "tags": ["a", "b"], "nested": {"value": 3, "on": True}}
@@ -228,3 +279,64 @@ def test_newer_document_is_read_only_and_untouched(tmp_path: Path) -> None:
     assert loaded.read_only
     assert loaded.data["future"] == 1
     assert path.read_bytes() == original
+
+
+# --- settings ----------------------------------------------------------------------------
+
+
+def test_settings_round_trip_keeps_case_and_percent(tmp_path: Path) -> None:
+    path = tmp_path / "settings.ini"
+    settings = Settings(path, tmp_path / "backup")
+    settings.set("window", "SideBarWidth", "240")
+    settings.set("window", "geometry", "AdnQyw%3D%25 100%")
+    settings.set("baud", "10c4:ea60", "921600")
+    assert not path.exists()  # only save() writes
+    settings.save()
+
+    reloaded = Settings(path, tmp_path / "backup")
+    assert reloaded.keys("window") == ["SideBarWidth", "geometry"]
+    assert reloaded.get("window", "SideBarWidth") == "240"
+    assert reloaded.get("window", "geometry") == "AdnQyw%3D%25 100%"
+    assert reloaded.get("baud", "10c4:ea60") == "921600"
+    assert reloaded.get("window", "missing") is None
+    assert reloaded.get("missing", "SideBarWidth") is None
+
+
+def test_settings_missing_file_is_empty(tmp_path: Path) -> None:
+    settings = Settings(tmp_path / "settings.ini", tmp_path / "backup")
+    assert settings.keys("window") == []
+    assert settings.get("window", "SideBarWidth") is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_invalid_settings_file_is_backed_up_and_replaced(tmp_path: Path) -> None:
+    path = tmp_path / "settings.ini"
+    path.write_bytes(b"not an ini [")
+    backup = tmp_path / "backup"
+    settings = Settings(path, backup)
+    assert settings.keys("window") == []
+    backups = _backup_files(backup)
+    assert [b.read_bytes() for b in backups] == [b"not an ini ["]
+    assert backups[0].parent.parent == backup  # backup_root/<timestamp>/
+
+    settings.set("window", "SideBarWidth", "240")
+    settings.save()
+    assert Settings(path, backup).get("window", "SideBarWidth") == "240"
+
+
+def test_removing_last_key_drops_section(tmp_path: Path) -> None:
+    path = tmp_path / "settings.ini"
+    settings = Settings(path, tmp_path / "backup")
+    settings.set("window", "SideBarWidth", "240")
+    settings.set("window", "LogHeight", "180")
+    settings.set("baud", "10c4:ea60", "921600")
+    settings.remove("window", "SideBarWidth")
+    settings.remove("window", "absent")  # no error
+    assert settings.keys("window") == ["LogHeight"]
+    settings.remove("window", "LogHeight")
+    settings.save()
+
+    assert "[window]" not in path.read_text(encoding="utf-8")
+    reloaded = Settings(path, tmp_path / "backup")
+    assert reloaded.keys("window") == []
+    assert reloaded.keys("baud") == ["10c4:ea60"]

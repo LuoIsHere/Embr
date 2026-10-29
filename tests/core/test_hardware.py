@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 import serial
-from embr_testkit import IDF, idf_entries, make_entry
+from embr_testkit import IDF, idf_entries, idf_expect, make_entry
 
 from embr.core.flasher.checks import REVISION, CheckLevel
 from embr.core.flasher.plan import FlashPlan, PlanEntry, build_flash_plan, build_identify_plan
@@ -28,7 +28,7 @@ from embr.core.flasher.protocol import (
     Task,
 )
 from embr.core.flasher.runner import start
-from embr.core.serial import list_ports
+from embr.core.serial import ConnectionType, list_ports
 
 pytestmark = pytest.mark.hardware
 PORT_VARS = ["EMBR_TEST_PORT_UART", "EMBR_TEST_PORT_USB", "EMBR_TEST_PORT_P4"]
@@ -175,3 +175,41 @@ def test_port_reopenable_after_cancel(var: str) -> None:
                 raise
             time.sleep(0.2)
     _flash(_plan(port, info, entries))  # leave complete firmware on the board
+
+
+def _assert_released(port: str) -> None:
+    """The port opens right away; native USB gets a short window to re-enumerate after the
+    reset that ends the job."""
+    connection = next(p.connection for p in list_ports() if p.device.upper() == port.upper())
+    window = 0.0 if connection is ConnectionType.UART_BRIDGE else 10.0
+    deadline = time.monotonic() + window
+    while True:
+        try:
+            serial.Serial(port).close()
+            return
+        except serial.SerialException:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.2)
+
+
+@pytest.mark.parametrize("var", PORT_VARS)
+def test_port_released_after_identify_flash_and_refusal(var: str) -> None:
+    port, info, entries = _setup(var)  # identify, ok
+    _assert_released(port)
+
+    _flash(_plan(port, info, entries))
+    _assert_released(port)
+
+    wrong = "esp32s3_hello" if info.chip == "esp32" else "esp32_hello"
+    connection = next(p.connection for p in list_ports() if p.device.upper() == port.upper())
+    refused = build_flash_plan(
+        port=port,
+        connection=connection,
+        chip=idf_expect(wrong)["chip"],
+        entries=idf_entries(wrong),
+        before="default-reset",
+        after="hard-reset",
+    )
+    assert _status(_run(refused)) is ResultStatus.REFUSED
+    _assert_released(port)
