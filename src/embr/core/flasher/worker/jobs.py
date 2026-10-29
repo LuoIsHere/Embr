@@ -13,6 +13,7 @@ from esptool.cmds import (  # pyright: ignore[reportUnknownVariableType]  # unty
     run_stub,
     write_flash,  # pyright: ignore[reportUnknownVariableType]  # untyped **kwargs
 )
+from esptool.cmds import read_flash as esptool_read_flash
 from esptool.loader import ESPLoader
 
 from embr.core import chipinfo
@@ -117,7 +118,18 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
 def erase(plan: ErasePlan, send: Send) -> None:
     """Connect -> InfoEvent -> security checks (any REFUSE: ResultEvent(REFUSED), nothing
     erased) -> erase the whole flash -> reset as plan.after -> ResultEvent(OK)."""
-    raise NotImplementedError
+    esp = _connect(plan.port, plan.before)
+    try:
+        esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
+        send(info)
+        if _send_checks(send, checks.check_security(state.security)):
+            send(ResultEvent(ResultStatus.REFUSED, "security features enabled; nothing erased"))
+            return
+        erase_flash(esp)
+        reset_chip(esp, plan.after)
+    finally:
+        _close(esp)
+    send(ResultEvent(ResultStatus.OK, f"flash erased ({info.flash_size or 'size unknown'})"))
 
 
 def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
@@ -125,7 +137,36 @@ def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
     read) -> range check against the detected flash size (beyond it: CheckEvent REFUSE,
     ResultEvent(REFUSED)) -> ProgressEvents (entry_index 0, address = plan.address) while
     reading to plan.output -> reset -> ResultEvent(OK) whose message gives the size read."""
-    raise NotImplementedError
+    esp = _connect(plan.port, plan.before)
+    try:
+        esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
+        send(info)
+        if _send_checks(send, checks.check_security(state.security)):
+            send(ResultEvent(ResultStatus.REFUSED, "security features enabled; nothing read"))
+            return
+        total = checks.flash_size_bytes(info.flash_size) if info.flash_size else None
+        size = plan.size if plan.size is not None else total
+        if size is None or (total is not None and plan.address + size > total):
+            message = (
+                "flash size could not be detected; give the size to read"
+                if size is None
+                else f"{plan.address:#x}+{size:#x} is beyond the {info.flash_size} flash"
+            )
+            send(CheckEvent(checks.CAPACITY, CheckLevel.REFUSE, message))
+            reset_chip(esp, plan.after)
+            send(ResultEvent(ResultStatus.REFUSED, "range not in flash; nothing read"))
+            return
+        if plan.baud is not None and plan.connection in (
+            ConnectionType.UART_BRIDGE,
+            ConnectionType.UNKNOWN,
+        ):
+            esp.change_baud(plan.baud)  # pyright: ignore[reportUnknownMemberType]  # decorated
+        cursor.index, cursor.address, cursor.progressed = 0, plan.address, False
+        esptool_read_flash(esp, plan.address, size, plan.output)
+        reset_chip(esp, plan.after)
+    finally:
+        _close(esp)
+    send(ResultEvent(ResultStatus.OK, f"{size} bytes read from {plan.address:#x}"))
 
 
 def _connect(port: str, before: str) -> ESPLoader:

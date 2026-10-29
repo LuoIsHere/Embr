@@ -11,6 +11,7 @@ import datetime
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol
 
 import esptool
@@ -20,10 +21,19 @@ from embr.app.flashplan import PlanError, assemble_plan
 from embr.app.identify import IdentifyMemory
 from embr.app.tracking import Tracker
 from embr.core.firmware.files import FileState, entry_state
-from embr.core.firmware.model import Firmware
+from embr.core.firmware.kinds import EntryKind
+from embr.core.firmware.model import AddressSource, Entry, Firmware
 from embr.core.flasher import runner
 from embr.core.flasher.checks import CheckLevel
-from embr.core.flasher.plan import FlashPlan, build_identify_plan, command_line
+from embr.core.flasher.plan import (
+    ErasePlan,
+    FlashPlan,
+    ReadPlan,
+    build_erase_plan,
+    build_identify_plan,
+    build_read_plan,
+    command_line,
+)
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -108,6 +118,10 @@ class _Job:
     start: datetime.datetime
     firmware: Firmware | None = None
     plan: FlashPlan | None = None
+    other: ErasePlan | ReadPlan | None = None
+    """The plan of an erase or read_flash job."""
+    target: tuple[str | None, str] = (None, "")
+    """Project and group for the dump firmware of a read_flash job."""
     handle: JobHandle | None = None
     info: InfoEvent | None = None
     kinds: dict[tuple[int, str], str] = field(default_factory=lambda: dict[tuple[int, str], str]())
@@ -131,7 +145,7 @@ class Operations:
         """`start_job` defaults to core.flasher.runner.start; tests pass a fake. `tracker`
         is shared with the Library and the UI; None creates one."""
         self._ctx = context
-        self._tracker = tracker
+        self._tracker = tracker or Tracker(context)
         self._memory = identify_memory
         self._dispatch = dispatch
         self._start_job: StartJob = start_job or runner.start
@@ -181,7 +195,7 @@ class Operations:
         port's VID/PID and settings are saved. The InfoEvent also updates identify_memory.
         BusyError while a job runs; flashplan.PlanError propagates."""
         self._ensure_idle()
-        firmware = self._ctx.firmware.get(firmware_id)
+        firmware = self._tracker.verify_for_flash(firmware_id, shown_digest)
         enabled = [e for e in firmware.entries if e.enabled]
         bad = [e.name for e in enabled if entry_state(e, self._ctx.paths.archive) != FileState.OK]
         if bad:
@@ -190,8 +204,10 @@ class Operations:
             snapshot = self._memory.snapshot
             if snapshot is None:
                 raise PlanError(f"{firmware.name} has no chip; identify the board first")
-            firmware.chip = snapshot.info.chip
-            self._ctx.firmware.save(firmware)
+            stored = self._ctx.firmware.get(firmware_id)
+            firmware.chip = stored.chip = snapshot.info.chip
+            self._ctx.firmware.save(stored)
+            self._tracker.invalidate(firmware_id)
         plan = assemble_plan(self._ctx, firmware, port, baud)
         record_id = new_id()
         start = self._clock()
@@ -211,7 +227,9 @@ class Operations:
         """Start an erase-flash job. Its record (operation ERASE) has no entries, project or
         firmware; chip details, MAC and the equivalent command are filled as for flash.
         BusyError while a job runs."""
-        raise NotImplementedError
+        self._ensure_idle()
+        plan = build_erase_plan(port.device, port.connection)
+        self._start_other(JobKind.ERASE, port, listener, plan)
 
     def read_flash(
         self,
@@ -232,7 +250,20 @@ class Operations:
         (address, size read, sha256, kind merged) and points at that firmware; failed,
         refused or cancelled jobs create no firmware and the record has no entry.
         JobOutcome.firmware_id is the new firmware. BusyError while a job runs."""
-        raise NotImplementedError
+        self._ensure_idle()
+        record_id = new_id()
+        output = self._ctx.paths.temp / f"read-{record_id}.bin"
+        plan = build_read_plan(
+            port.device, port.connection, str(output), address=address, size=size, baud=baud
+        )
+        self._start_other(
+            JobKind.READ_FLASH,
+            port,
+            listener,
+            plan,
+            record_id=record_id,
+            target=(project_id, device),
+        )
 
     def cancel(self) -> None:
         """Kill the running job's worker; the job then finishes as CANCELLED. No effect
@@ -277,6 +308,9 @@ class Operations:
         job.listener.on_event(event)
         if isinstance(event, ProgressEvent) and job.plan is not None:
             job.listener.on_progress(_progress(job.plan, event))
+        elif isinstance(event, ProgressEvent) and isinstance(job.other, ReadPlan):
+            percent = int(100 * min(event.cur / event.total, 1.0)) if event.total else 0
+            job.listener.on_progress(JobProgress(0, 1, event.address, "flash", percent))
         if isinstance(event, ResultEvent | ErrorEvent):
             self._finish(job, event)
 
@@ -285,6 +319,7 @@ class Operations:
         result = result_from_event(event)
         job.segment.write(f"[result] {result}: {event.message}")
         record_id: str | None = None
+        dump_id: str | None = None
         if job.kind == JobKind.FLASH and job.plan is not None and job.firmware is not None:
             record = self._record(job, result, event.message)
             self._ctx.history.add(record)
@@ -295,6 +330,19 @@ class Operations:
             )
             if result == RecordResult.OK and remember_baud(
                 self._ctx.settings, job.port, job.plan.baud or 0
+            ):
+                self._ctx.settings.save()
+        elif job.other is not None:
+            record = self._other_record(job, result, event.message)
+            self._ctx.history.add(record)
+            record_id = record.id
+            dump_id = record.firmware_id
+            job.segment.write(f"[record] {record.id} {result}, {record.duration_ms} ms")
+            baud = job.other.baud if isinstance(job.other, ReadPlan) else None
+            if (
+                result == RecordResult.OK
+                and baud
+                and remember_baud(self._ctx.settings, job.port, baud)
             ):
                 self._ctx.settings.save()
         job.segment.close()
@@ -308,8 +356,104 @@ class Operations:
                 log_file=job.segment.file_name,
                 segment_id=job.segment_id,
                 native_usb=not baud_adjustable(job.port),
+                firmware_id=dump_id,
             )
         )
+
+    def _start_other(
+        self,
+        kind: JobKind,
+        port: PortInfo,
+        listener: Listener,
+        plan: ErasePlan | ReadPlan,
+        *,
+        record_id: str | None = None,
+        target: tuple[str | None, str] = (None, ""),
+    ) -> None:
+        record_id = record_id or new_id()
+        start = self._clock()
+        segment = self._ctx.logs.open_segment(record_id, kind, port=port.device)
+        segment.write(f"$ {command_line(plan)}")
+        job = _Job(kind, listener, port, segment, record_id, start, other=plan, target=target)
+        self._run(job, plan)
+
+    def _other_record(self, job: _Job, result: RecordResult, message: str) -> FlashRecord:
+        """Record of an erase or read_flash job; a read that ended OK creates the dump
+        firmware first."""
+        plan, info = job.other, job.info
+        assert plan is not None
+        dump: Firmware | None = None
+        entries: tuple[RecordEntry, ...] = ()
+        if isinstance(plan, ReadPlan):
+            output = Path(plan.output)
+            if result == RecordResult.OK and info is not None:
+                dump = self._dump_firmware(job, plan, info, output.read_bytes())
+                entry = dump.entries[0]
+                entries = (
+                    RecordEntry(entry.name, plan.address, entry.sha256, entry.size, "merged"),
+                )
+            output.unlink(missing_ok=True)
+        refused = result == RecordResult.REFUSED
+        return FlashRecord(
+            id=job.segment_id,
+            operation=Operation.ERASE if job.kind == JobKind.ERASE else Operation.READ_FLASH,
+            timestamp=job.start.isoformat(timespec="seconds"),
+            result=result,
+            project_id=dump.project_id if dump else None,
+            project_name=self._project_name(dump.project_id) if dump else "",
+            firmware_id=dump.id if dump else None,
+            firmware_name=dump.name if dump else "",
+            device=dump.device if dump else "",
+            port=plan.port,
+            baud=plan.baud if isinstance(plan, ReadPlan) else None,
+            connection_type=plan.connection.value,
+            reset_before=plan.before,
+            reset_after=plan.after,
+            chip_detected=info.chip if info else None,
+            chip_revision=info.revision if info else None,
+            mac=info.mac if info and info.mac else None,
+            flash_size_detected=info.flash_size if info else None,
+            entries=entries,
+            refuse_reason=("; ".join(job.refusals) or message) if refused else None,
+            duration_ms=int((self._clock() - job.start).total_seconds() * 1000),
+            esptool_version=esptool.__version__,
+            command=command_line(plan),
+            log_file=job.segment.file_name,
+        )
+
+    def _dump_firmware(self, job: _Job, plan: ReadPlan, info: InfoEvent, data: bytes) -> Firmware:
+        name = f"{info.chip} dump {job.start:%Y-%m-%d %H-%M}"
+        archived = self._ctx.archive.add(
+            data, original_name=f"{name}.bin", note=f"Read from {plan.port} at {plan.address:#x}"
+        )
+        project_id, device = job.target
+        if project_id is None:
+            dump = self._ctx.firmware.create(name)
+        else:
+            dump = self._ctx.projects.create_firmware(
+                self._ctx.firmware, project_id, name, device=device
+            )
+        dump.chip = info.chip
+        dump.notes = (
+            f"Read from flash on {plan.port} ({info.chip} {info.revision}, MAC {info.mac}). "
+            "May contain Wi-Fi credentials and other secrets stored in NVS."
+        )
+        dump.entries = [
+            Entry(
+                id=new_id(),
+                name=f"{dump.name}.bin",
+                file=f"archive:{archived.sha256}",
+                sha256=archived.sha256,
+                size=len(data),
+                kind=EntryKind.MERGED,
+                address=plan.address,
+                auto_address=plan.address,
+                address_source=AddressSource.AUTO,
+                from_dump=True,
+            )
+        ]
+        self._ctx.firmware.save(dump)
+        return dump
 
     def _record(self, job: _Job, result: RecordResult, message: str) -> FlashRecord:
         plan, firmware, info = job.plan, job.firmware, job.info

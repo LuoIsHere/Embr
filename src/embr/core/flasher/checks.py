@@ -198,6 +198,11 @@ def check_files(entries: Sequence[PlanEntry]) -> Check:
     return Check(FILES, CheckLevel.PASS, f"{len(entries)} files: name, path and hash match")
 
 
+def flash_size_bytes(size: str) -> int | None:
+    """ "4MB" -> 4194304; None for anything else."""
+    return _size_bytes(size)
+
+
 def refuses(checks: Sequence[Check]) -> bool:
     """True if any check is REFUSE."""
     return any(c.level == CheckLevel.REFUSE for c in checks)

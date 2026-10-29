@@ -199,7 +199,8 @@ def build_identify_plan(
 
 def build_erase_plan(port: str, connection: ConnectionType) -> ErasePlan:
     """Erase plan with default reset modes adjusted to the connection type."""
-    raise NotImplementedError
+    before, after, _ = adjust_reset(connection, "default-reset", "hard-reset")
+    return ErasePlan(port=port, connection=connection, before=before, after=after)
 
 
 def build_read_plan(
@@ -213,18 +214,53 @@ def build_read_plan(
 ) -> ReadPlan:
     """Read plan with default reset modes adjusted to the connection type; baud as in
     build_flash_plan(). ValueError for a negative address or a size below 1."""
-    raise NotImplementedError
+    if address < 0:
+        raise ValueError(f"negative address {address:#x}")
+    if size is not None and size < 1:
+        raise ValueError(f"size must be at least 1 byte, got {size}")
+    before, after, _ = adjust_reset(connection, "default-reset", "hard-reset")
+    if connection in _NATIVE_USB:
+        baud = None
+    elif baud is None:
+        baud = DEFAULT_UART_BAUD
+    return ReadPlan(
+        port=port,
+        connection=connection,
+        baud=baud,
+        before=before,
+        after=after,
+        address=address,
+        size=size,
+        output=output,
+    )
 
 
 def erase_cli_args(plan: ErasePlan) -> list[str]:
     """--chip auto, -p, --before, --after, --no-stub (if off), erase-flash."""
-    raise NotImplementedError
+    return [*_connect_args(plan.port, None, plan.before, plan.after, plan.stub), "erase-flash"]
 
 
 def read_cli_args(plan: ReadPlan) -> list[str]:
     """--chip auto, -p, -b (UART only), --before, --after, --no-stub (if off),
     read-flash <address> <size, or ALL when None> <output>."""
-    raise NotImplementedError
+    size = "ALL" if plan.size is None else f"{plan.size:#x}"
+    return [
+        *_connect_args(plan.port, plan.baud, plan.before, plan.after, plan.stub),
+        "read-flash",
+        f"{plan.address:#x}",
+        size,
+        plan.output,
+    ]
+
+
+def _connect_args(port: str, baud: int | None, before: str, after: str, stub: bool) -> list[str]:
+    args = ["--chip", "auto", "-p", port]
+    if baud is not None:
+        args += ["-b", str(baud)]
+    args += ["--before", before, "--after", after]
+    if not stub:
+        args.append("--no-stub")
+    return args
 
 
 def cli_args(plan: FlashPlan) -> list[str]:
