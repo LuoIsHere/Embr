@@ -16,6 +16,11 @@ _IMAGE_MAGIC = 0xE9
 _CHIP_ID_OFFSET = 12  # u16 in the extended header
 _APP_DESC_MAGIC = 0xABCD5432
 _BOOTLOADER_DESC_MAGIC = 0x50
+# idf_ver[32] offsets in esp_app_desc_t and esp_bootloader_desc_t (ESP-IDF esp_app_format)
+_APP_IDF_VER = 0x70
+_BOOTLOADER_IDF_VER = 0x08
+_IDF_VER_SIZE = 32
+_DESC_READ = _APP_IDF_VER + _IDF_VER_SIZE
 
 
 @dataclass(frozen=True)
@@ -62,7 +67,14 @@ def read_image_header(data: bytes) -> ImageHeader | None:
         return None
     # esptool leaves segment attributes unannotated
     segments = cast(list[ImageSegment], image.segments)  # pyright: ignore[reportUnknownMemberType]
-    first = bytes(cast(bytes, segments[0].data)[:4]) if segments else b""  # pyright: ignore[reportUnknownMemberType]
+    desc = bytes(cast(bytes, segments[0].data)[:_DESC_READ]) if segments else b""  # pyright: ignore[reportUnknownMemberType]
+    first = desc[:4]
+    has_app_desc = len(first) == 4 and struct.unpack("<I", first)[0] == _APP_DESC_MAGIC
+    has_bootloader_desc = first[:1] == bytes([_BOOTLOADER_DESC_MAGIC])
+    idf_ver: str | None = None
+    if has_app_desc != has_bootloader_desc:  # exactly one descriptor
+        at = _APP_IDF_VER if has_app_desc else _BOOTLOADER_IDF_VER
+        idf_ver = _c_string(desc[at : at + _IDF_VER_SIZE])
     size_code = image.flash_size_freq & 0xF0
     freq_code = image.flash_size_freq & 0x0F
     return ImageHeader(
@@ -76,14 +88,21 @@ def read_image_header(data: bytes) -> ImageHeader | None:
         flash_size=chipinfo.flash_size_name(chip.name, size_code),
         segment_count=len(segments),
         segment_addresses=tuple(int(cast(int, s.addr)) for s in segments),  # pyright: ignore[reportUnknownMemberType]
-        has_app_desc=len(first) == 4 and struct.unpack("<I", first)[0] == _APP_DESC_MAGIC,
-        has_bootloader_desc=first[:1] == bytes([_BOOTLOADER_DESC_MAGIC]),
+        has_app_desc=has_app_desc,
+        has_bootloader_desc=has_bootloader_desc,
+        idf_ver=idf_ver,
     )
 
 
 def read_image_header_file(path: Path) -> ImageHeader | None:
     """read_image_header() on a file's contents."""
     return read_image_header(path.read_bytes())
+
+
+def _c_string(field: bytes) -> str | None:
+    """NUL-terminated ASCII field; None when empty or not text."""
+    text = field.split(b"\0", 1)[0].decode("ascii", "replace")
+    return text or None
 
 
 def format_revision(rev_full: int) -> str:
