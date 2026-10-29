@@ -6,9 +6,9 @@ from pathlib import Path
 
 from embr.core.storage.documents import backup_folder
 
-DB_SCHEMA_VERSION = 1
+DB_SCHEMA_VERSION = 2
 """Version 1 tables: flash_records, record_entries (design doc §3.3), archive_files,
-archive_names (§7.6)."""
+archive_names (§7.6). Version 2: flash_records.operation (flash / erase / read_flash)."""
 
 
 class NewerSchemaError(Exception):
@@ -84,5 +84,10 @@ _MIGRATIONS: dict[int, str] = {
         original_name TEXT NOT NULL, original_path TEXT, note TEXT,
         archived_at TEXT NOT NULL, source_firmware TEXT
     );
+    """,
+    # records made before erase and read_flash were recorded are all flash records
+    1: """
+    ALTER TABLE flash_records ADD COLUMN operation TEXT NOT NULL DEFAULT 'flash';
+    CREATE INDEX flash_records_operation ON flash_records (operation);
     """,
 }
