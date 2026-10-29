@@ -88,6 +88,7 @@ def assemble_plan(
         before=firmware.before,
         after=firmware.after,
         baud=baud,
+        stub=firmware.stub,
         flash=FlashSettings(mode=flash.mode, freq=flash.freq, size=flash.size),
         erase_all=firmware.erase_all,
         declared_flash_size=declared_flash_size(context, firmware),

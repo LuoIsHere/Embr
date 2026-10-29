@@ -10,12 +10,13 @@ invalidates its tracker status.
 
 import dataclasses
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from embr.app.context import AppContext
+from embr.app.flashplan import PlanError
 from embr.app.tracking import Tracker
 from embr.core.firmware import model
 from embr.core.firmware.entries import (
@@ -31,15 +32,27 @@ from embr.core.firmware.files import (
     FileState,
     confirm_entry,
     entry_state,
-    firmware_states,
     read_entry,
     relocate,
 )
-from embr.core.firmware.image_sniff import blank_otadata, parse_partition_table, sniff
-from embr.core.firmware.import_idf import IdfBuild
+from embr.core.firmware.image_sniff import (
+    PartitionTable,
+    blank_otadata,
+    parse_partition_table,
+    sniff,
+)
+from embr.core.firmware.import_idf import IdfBuild, default_firmware_name, read_build
 from embr.core.firmware.kinds import EntryKind
-from embr.core.firmware.model import Entry, Firmware, Source
+from embr.core.firmware.model import (
+    AddressSource,
+    BuildRef,
+    Entry,
+    EntryOverride,
+    Firmware,
+    Source,
+)
 from embr.core.firmware.store import default_name_from_files
+from embr.core.firmware.tracking import EntryMark, ResolveState
 from embr.core.project import Project, ProjectDefaults
 from embr.core.storage.ids import unique_name
 
@@ -100,8 +113,11 @@ class Library:
     def __init__(self, context: AppContext, tracker: Tracker | None = None) -> None:
         """`tracker` is shared with Operations and the UI; None creates one."""
         self._ctx = context
-        self._flags: dict[str, FirmwareFlag] = {}
-        self._tracker = tracker
+        self._tracker = tracker or Tracker(context)
+
+    @property
+    def tracker(self) -> Tracker:
+        return self._tracker
 
     # ---- sidebar ----------------------------------------------------------------------
 
@@ -150,16 +166,20 @@ class Library:
         """Re-check every entry by name, path and hash (done when a firmware is opened and
         before flashing) and update the firmware's flag. Tracking firmware: Tracker.check()
         decides the flag; the returned states cover their user entries only."""
-        firmware = self._ctx.firmware.get(firmware_id)
-        states = firmware_states(firmware, self._ctx.paths.archive)
-        self._flags[firmware_id] = _flag_of(states.values())
-        return states
+        status = self._tracker.check(firmware_id)
+        firmware = status.firmware
+        user = {e.id for e in firmware.user_entries}
+        return {
+            e.id: _MARK_STATES.get(status.marks.get(e.id, EntryMark.NEW), FileState.OK)
+            for e in firmware.entries
+            if not firmware.source.tracking or e.id in user
+        }
 
     def flag(self, firmware_id: str) -> FirmwareFlag:
         """The flag the tree shows for this firmware."""
-        cached = self._flags.get(firmware_id)
-        if cached is not None:
-            return cached
+        status = self._tracker.cached(firmware_id)
+        if status is not None:
+            return _FLAGS[status.state]
         return self._quick_flag(self._ctx.firmware.get(firmware_id))
 
     # ---- projects and groups ----------------------------------------------------------
@@ -260,12 +280,12 @@ class Library:
     def delete_firmware(self, firmware_id: str) -> None:
         """Archive files and flash records are kept."""
         self._ctx.firmware.delete(firmware_id)
-        self._flags.pop(firmware_id, None)
+        self._tracker.invalidate(firmware_id)
 
     def preview_idf(self, build_dir: Path) -> IdfBuild:
         """What importing `build_dir` would bring, for the import dialog. import_idf errors
         (BuildMissingError, EncryptedBuildError, IdfBuildError) propagate."""
-        raise NotImplementedError
+        return read_build(build_dir)
 
     def import_idf(
         self,
@@ -280,16 +300,30 @@ class Library:
         project copies only erase_all from its defaults); resolved at once and the first
         resolution accepted as last_resolved. import_idf errors propagate; PlanError when
         the build cannot be resolved (incomplete, target switched), nothing is created."""
-        raise NotImplementedError
+        build = read_build(build_dir)
+        stem = name.strip() or default_firmware_name(build)
+        if project_id is None:
+            firmware = self._ctx.firmware.create(stem, source=Source.IDF_BUILD)
+        else:
+            firmware = self._ctx.projects.create_firmware(
+                self._ctx.firmware, project_id, stem, device=device, source=Source.IDF_BUILD
+            )
+        firmware.build_ref = BuildRef(str(build.build_dir))
+        self._ctx.firmware.save(firmware)
+        status = self._tracker.check(firmware.id, settle=False)
+        if status.state != ResolveState.OK:
+            self.delete_firmware(firmware.id)
+            raise PlanError(f"{build.build_dir}: " + "; ".join(status.problems))
+        return self._ctx.firmware.get(firmware.id)
 
     def set_param(self, firmware_id: str, name: str, value: object) -> Firmware:
         """firmware.model.set_param() and save; its errors propagate."""
         firmware = self._ctx.firmware.get(firmware_id)
         model.set_param(firmware, name, value)
-        self._ctx.firmware.save(firmware)
+        self._save(firmware)
         return firmware
 
-    # ---- entries (fixed firmware) -----------------------------------------------------
+    # ---- entries ----------------------------------------------------------------------
 
     def add_files(self, firmware_id: str, paths: Sequence[Path]) -> list[Entry]:
         """Add one entry per file, classified by image_sniff. Partition tables are added
@@ -298,8 +332,15 @@ class Library:
         otadata entry exists, a blank otadata entry is added too. Entries placed by
         partition are re-resolved. A firmware still named UNTITLED with no entries takes
         the first file's name (without extension); a firmware without a chip takes the chip
-        of the first ESP image added. Returns the new entries."""
-        firmware = self._fixed(firmware_id)
+        of the first ESP image added. Returns the new entries. Tracking firmware: user
+        entries, addressed with the build's partition table; nothing else changes."""
+        firmware = self._ctx.firmware.get(firmware_id)
+        if firmware.source.tracking:
+            table = self._build_table(firmware_id)
+            added = [entry_from_file(path, table) for path in paths]
+            firmware.user_entries += added
+            self._save(firmware)
+            return added
         was_empty = not firmware.entries
         # tables first, so the files after them get addresses from the table
         ordered = sorted(paths, key=lambda p: parse_partition_table(p.read_bytes()) is None)
@@ -337,65 +378,115 @@ class Library:
         """Attachment placed by address or by partition (exactly one). By partition: the
         address is resolved from the enabled partition table; a missing partition or a file
         larger than it is reported by the checklist, not raised."""
-        firmware = self._fixed(firmware_id)
+        firmware = self._ctx.firmware.get(firmware_id)
         entry = attachment_entry(path, address=address, partition=partition)
-        firmware.entries.append(entry)
-        self._save_entries(firmware)
+        if firmware.source.tracking:
+            firmware.user_entries.append(entry)
+            self._save(firmware)
+        else:
+            firmware.entries.append(entry)
+            self._save_entries(firmware)
         return entry
 
     def set_entry_address(self, firmware_id: str, entry_id: str, text: str) -> Entry:
         """entries.set_address(); AddressError propagates and nothing is saved."""
-        firmware = self._fixed(firmware_id)
-        entry = _entry(firmware, entry_id)
+        firmware = self._ctx.firmware.get(firmware_id)
+        own = _own_entry(firmware, entry_id)
+        if own is not None:
+            set_address(own, text)
+            self._save_entries(firmware)
+            return own
+        entry = self._derived_entry(firmware_id, entry_id)
         set_address(entry, text)
-        self._save_entries(firmware)
+        override = firmware.entry_overrides.setdefault(entry_id, EntryOverride())
+        manual = entry.address_source == AddressSource.MANUAL
+        override.address = entry.address if manual else None
+        self._save_override(firmware, entry_id)
         return entry
 
     def set_entry_enabled(self, firmware_id: str, entry_id: str, enabled: bool) -> Entry:
-        firmware = self._fixed(firmware_id)
-        entry = _entry(firmware, entry_id)
+        firmware = self._ctx.firmware.get(firmware_id)
+        own = _own_entry(firmware, entry_id)
+        if own is not None:
+            own.enabled = enabled
+            self._save_entries(firmware)
+            return own
+        entry = self._derived_entry(firmware_id, entry_id)
         entry.enabled = enabled
-        self._save_entries(firmware)
+        override = firmware.entry_overrides.setdefault(entry_id, EntryOverride())
+        override.enabled = None if enabled else False  # derived entries start enabled
+        self._save_override(firmware, entry_id)
         return entry
 
     def set_entry_note(self, firmware_id: str, entry_id: str, note: str) -> Entry:
-        firmware = self._fixed(firmware_id)
-        entry = _entry(firmware, entry_id)
+        firmware = self._ctx.firmware.get(firmware_id)
+        own = _own_entry(firmware, entry_id)
+        if own is not None:
+            own.note = note
+            self._save(firmware)
+            return own
+        entry = self._derived_entry(firmware_id, entry_id)
         entry.note = note
-        self._ctx.firmware.save(firmware)
+        override = firmware.entry_overrides.setdefault(entry_id, EntryOverride())
+        override.note = note or None
+        self._save_override(firmware, entry_id)
         return entry
 
     def remove_entry(self, firmware_id: str, entry_id: str) -> None:
-        firmware = self._fixed(firmware_id)
-        firmware.entries.remove(_entry(firmware, entry_id))
-        self._save_entries(firmware)
+        firmware = self._ctx.firmware.get(firmware_id)
+        own = _own_entry(firmware, entry_id)
+        if own is None:
+            raise _derived_error(firmware)
+        if firmware.source.tracking:
+            firmware.user_entries.remove(own)
+            self._save(firmware)
+        else:
+            firmware.entries.remove(own)
+            self._save_entries(firmware)
 
     def copy_entry_to(self, firmware_id: str, entry_id: str, target_id: str) -> Entry:
-        """Copy an entry (same file, address, note) into another fixed firmware."""
-        entry = _entry(self._ctx.firmware.get(firmware_id), entry_id)
-        target = self._fixed(target_id)
+        """Copy an entry (same file, address, note) into another firmware (a tracking
+        target gets it as a user entry)."""
+        source = self._ctx.firmware.get(firmware_id)
+        entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
+        target = self._ctx.firmware.get(target_id)
         copy = copy_entry(entry)
-        target.entries.append(copy)
-        self._save_entries(target)
+        if copy.address_source == AddressSource.AUTO:  # no detection outside its firmware
+            copy.address_source = AddressSource.MANUAL
+        if target.source.tracking:
+            target.user_entries.append(copy)
+            self._save(target)
+        else:
+            target.entries.append(copy)
+            self._save_entries(target)
         return copy
 
     def relocate_entry(self, firmware_id: str, entry_id: str, path: Path) -> Entry:
         """Point a missing or changed "path:" entry at another file."""
-        firmware = self._fixed(firmware_id)
-        entry = _entry(firmware, entry_id)
+        firmware = self._ctx.firmware.get(firmware_id)
+        entry = _own_entry(firmware, entry_id)
+        if entry is None:
+            raise _derived_error(firmware)
         relocate(entry, path)
-        self._save_entries(firmware)
+        if firmware.source.tracking:
+            self._save(firmware)
+        else:
+            self._save_entries(firmware)
         self.check_files(firmware_id)
         return entry
 
     def confirm_entries(self, firmware_id: str) -> Firmware:
-        """Accept the current content of every CHANGED "path:" entry (new hash and size)."""
-        firmware = self._fixed(firmware_id)
+        """Accept the current content of every CHANGED "path:" entry (new hash and size).
+        Tracking firmware: Tracker.confirm() (accepts the changed build)."""
+        firmware = self._ctx.firmware.get(firmware_id)
+        if firmware.source.tracking:
+            self._tracker.confirm(firmware_id)
+            return self._ctx.firmware.get(firmware_id)
         archive = self._ctx.paths.archive
         for entry in firmware.entries:
             if entry_state(entry, archive) == FileState.CHANGED:
                 confirm_entry(entry, archive)
-        self._ctx.firmware.save(firmware)
+        self._save(firmware)
         self.check_files(firmware_id)
         return firmware
 
@@ -404,11 +495,9 @@ class Library:
     def _read(self, entry: Entry) -> bytes:
         return read_entry(entry, self._ctx.paths.archive)
 
-    def _fixed(self, firmware_id: str) -> Firmware:
-        firmware = self._ctx.firmware.get(firmware_id)
-        if firmware.source.tracking:
-            raise ValueError(f"{firmware.name}: entries of a tracking firmware come from its build")
-        return firmware
+    def _save(self, firmware: Firmware) -> None:
+        self._ctx.firmware.save(firmware)
+        self._tracker.invalidate(firmware.id)
 
     def _save_entries(self, firmware: Firmware) -> None:
         """Re-resolve entries placed by partition, then save."""
@@ -418,8 +507,25 @@ class Library:
             table = None
         if table is not None:
             resolve_partitions(firmware, table)
-        self._ctx.firmware.save(firmware)
-        self._flags.pop(firmware.id, None)
+        self._save(firmware)
+
+    def _save_override(self, firmware: Firmware, key: str) -> None:
+        if firmware.entry_overrides.get(key) == EntryOverride():
+            del firmware.entry_overrides[key]
+        self._save(firmware)
+
+    def _derived_entry(self, firmware_id: str, entry_id: str) -> Entry:
+        """A copy of a derived entry of a tracking firmware, as currently resolved."""
+        resolved = self._tracker.check(firmware_id).firmware
+        return dataclasses.replace(_entry(resolved, entry_id))
+
+    def _build_table(self, firmware_id: str) -> PartitionTable | None:
+        resolved = self._tracker.check(firmware_id).firmware
+        try:
+            table, _ = enabled_partition_table(resolved, self._read)
+        except OSError:
+            return None
+        return table
 
     def _row(self, firmware: Firmware) -> FirmwareRow:
         return FirmwareRow(
@@ -428,11 +534,15 @@ class Library:
             origin=_origin(firmware),
             source=firmware.source,
             chip=firmware.chip,
-            flag=self._flags.get(firmware.id) or self._quick_flag(firmware),
+            flag=self._cached_flag(firmware),
             project_id=firmware.project_id,
             device=firmware.device,
             notes=firmware.notes,
         )
+
+    def _cached_flag(self, firmware: Firmware) -> FirmwareFlag:
+        status = self._tracker.cached(firmware.id)
+        return _FLAGS[status.state] if status is not None else self._quick_flag(firmware)
 
     def _quick_flag(self, firmware: Firmware) -> FirmwareFlag:
         """Existence only: no hashing."""
@@ -447,13 +557,17 @@ class Library:
         return FirmwareFlag.NONE
 
 
-def _flag_of(states: Iterable[FileState]) -> FirmwareFlag:
-    found = set(states)
-    if FileState.MISSING in found:
-        return FirmwareFlag.MISSING
-    if FileState.CHANGED in found:
-        return FirmwareFlag.NEEDS_CONFIRMATION
-    return FirmwareFlag.NONE
+_FLAGS = {
+    ResolveState.OK: FirmwareFlag.NONE,
+    ResolveState.UPDATED: FirmwareFlag.NONE,
+    ResolveState.BUILDING: FirmwareFlag.NONE,
+    ResolveState.NEEDS_CONFIRMATION: FirmwareFlag.NEEDS_CONFIRMATION,
+    ResolveState.MISSING: FirmwareFlag.MISSING,
+    ResolveState.INCOMPLETE: FirmwareFlag.BLOCKED,
+    ResolveState.TARGET_SWITCHED: FirmwareFlag.BLOCKED,
+}
+
+_MARK_STATES = {EntryMark.CHANGED: FileState.CHANGED, EntryMark.MISSING: FileState.MISSING}
 
 
 def _origin(firmware: Firmware) -> str:
@@ -465,6 +579,18 @@ def _origin(firmware: Firmware) -> str:
     paths = [e for e in firmware.entries if e.file.startswith("path:")]
     first = next((e for e in paths if e.enabled), paths[0] if paths else None)
     return str(Path(first.file.removeprefix("path:")).parent) if first else ""
+
+
+def _own_entry(firmware: Firmware, entry_id: str) -> Entry | None:
+    """The firmware's stored entry: any entry of a fixed firmware, a user entry of a
+    tracking one; None for derived entries."""
+    if not firmware.source.tracking:
+        return _entry(firmware, entry_id)
+    return next((e for e in firmware.user_entries if e.id == entry_id), None)
+
+
+def _derived_error(firmware: Firmware) -> ValueError:
+    return ValueError(f"{firmware.name}: this entry comes from the build output")
 
 
 def _entry(firmware: Firmware, entry_id: str) -> Entry:

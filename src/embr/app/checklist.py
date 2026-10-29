@@ -21,6 +21,7 @@ from embr.core.firmware.entries import (
 from embr.core.firmware.files import FileState, entry_state, read_entry
 from embr.core.firmware.image_sniff import PartitionTable
 from embr.core.firmware.model import Firmware
+from embr.core.firmware.tracking import ResolveState
 from embr.core.flasher.checks import (
     CAPACITY,
     CHIP,
@@ -81,7 +82,8 @@ def preflight(
     A firmware without a chip (no ESP image among its entries) gets a WARN chip item once
     identified ("taken from the identified chip", design doc §4.3) and the LATER item
     before."""
-    items = _layout(context, firmware, identified)
+    items = [_build(status)] if status is not None and firmware.source.tracking else []
+    items += _layout(context, firmware, identified)
     items.append(_files(context, firmware))
     items.append(_reset(firmware, port))
     if identified is None:
@@ -180,6 +182,29 @@ def _files(context: AppContext, firmware: Firmware) -> CheckItem:
         "Files match",
         f"{len(enabled)} files checked: name, path and hash agree with the recorded values",
     )
+
+
+def _build(status: TrackStatus) -> CheckItem:
+    if status.state.flashable:
+        parts = [
+            p
+            for p in (status.idf_version and f"ESP-IDF {status.idf_version}", status.firmware.chip)
+            if p
+        ]
+        if status.updated_at is not None:
+            parts.append(f"updated {status.updated_at:%H:%M:%S}")
+        return CheckItem(CheckState.PASS, "Build resolved", " · ".join(parts))
+    reasons = status.problems or tuple(c.message for c in status.changes[:3])
+    return CheckItem(CheckState.REFUSE, _BUILD_TITLES[status.state], "; ".join(reasons))
+
+
+_BUILD_TITLES = {
+    ResolveState.NEEDS_CONFIRMATION: "Build changed: confirm entries",
+    ResolveState.TARGET_SWITCHED: "Target switched: rebuild",
+    ResolveState.INCOMPLETE: "Build incomplete",
+    ResolveState.MISSING: "Build output missing",
+    ResolveState.BUILDING: "Build in progress",
+}
 
 
 def _reset(firmware: Firmware, port: PortInfo | None) -> CheckItem:
