@@ -224,8 +224,15 @@ def test_port_released_after_identify_flash_and_refusal(var: str) -> None:
 
 
 def _read_plan(port: str, output: Path, address: int) -> ReadPlan:
-    connection = next(p.connection for p in list_ports() if p.device.upper() == port.upper())
-    return build_read_plan(port, connection, str(output), address=address, size=0x1000)
+    # a native USB port of a board just reset through its UART port re-enumerates briefly
+    deadline = time.monotonic() + 5
+    while True:
+        found = [p for p in list_ports() if p.device.upper() == port.upper()]
+        if found or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert found, f"{port} not present"
+    return build_read_plan(port, found[0].connection, str(output), address=address, size=0x1000)
 
 
 @pytest.mark.parametrize("var", PORT_VARS)
