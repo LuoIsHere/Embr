@@ -217,6 +217,12 @@ QLineEdit, QPlainTextEdit[kind="notes"], QComboBox {{ background: {p.panel};
 QPlainTextEdit[kind="notes"] {{ padding: 4px 6px; font-size: 12px; }}
 QLineEdit:focus, QComboBox:focus, QPlainTextEdit[kind="notes"]:focus {{ border-color: {p.accent}; }}
 QLineEdit[kind="search"] {{ padding-left: 24px; min-height: 26px; }}
+QLineEdit[kind="cell"] {{ background: transparent; border: 1px solid transparent;
+  border-radius: 4px; padding: 0px 4px; min-height: 22px; }}
+QLineEdit[kind="cell"]:hover, QLineEdit[kind="cell"]:focus {{ border-color: {p.line};
+  background: {p.panel_2}; }}
+QLineEdit[kind="cell"][mono="1"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
+#tabline {{ border-bottom: 1px solid {p.line_2}; }}
 QLineEdit[kind="mono"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
 QComboBox:disabled {{ color: {p.fg_3}; background: {p.panel_2}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
@@ -229,6 +235,8 @@ QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; }}
 #tree::item {{ border-radius: 5px; padding: 0px; }}
 #tree::item:hover {{ background: {p.hover}; }}
 #tree::item:selected {{ background: {p.sel}; color: {p.fg}; }}
+#tree QWidget[dropping="1"] {{ border: 2px dashed {p.accent}; background: {p.accent_soft};
+  border-radius: 5px; }}
 
 /* ---- tables and lists ---- */
 QTableView {{ background: {p.panel}; border: none; gridline-color: transparent;

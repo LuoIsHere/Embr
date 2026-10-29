@@ -1,7 +1,16 @@
 """Small building blocks styled by theme.style_sheet() through dynamic properties."""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QResizeEvent
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 def restyle(widget: QWidget) -> None:
@@ -38,11 +47,61 @@ def label(
     return widget
 
 
+class ElidedLabel(QLabel):
+    """One line that ends in "…" when it does not fit; the full text is the tooltip."""
+
+    def __init__(
+        self, text: str = "", mode: Qt.TextElideMode = Qt.TextElideMode.ElideRight
+    ) -> None:
+        super().__init__()
+        self._full = ""
+        self._mode = mode
+        self.setMinimumWidth(1)
+        self.set_full_text(text)
+
+    def set_full_text(self, text: str) -> None:
+        self._full = text
+        self.setToolTip(text)
+        self._elide()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(1, super().minimumSizeHint().height())
+
+    def sizeHint(self) -> QSize:
+        return QSize(
+            self.fontMetrics().horizontalAdvance(self._full) + 2, super().sizeHint().height()
+        )
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        width = max(self.width(), 1)
+        self.setText(self.fontMetrics().elidedText(self._full, self._mode, width))
+
+
+def elided(
+    text: str, *, tone: str | None = None, mono: bool = False, middle: bool = False
+) -> ElidedLabel:
+    mode = Qt.TextElideMode.ElideMiddle if middle else Qt.TextElideMode.ElideRight
+    widget = ElidedLabel(text, mode)
+    if tone:
+        widget.setProperty("tone", tone)
+    if mono:
+        widget.setProperty("mono", "1")
+    return widget
+
+
 def tag(text: str, kind: str) -> QLabel:
     """Small coloured status label; kind: ok, warn, bad, info, gray."""
     widget = QLabel(text)
     widget.setProperty("tag", kind)
     widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     return widget
 
 

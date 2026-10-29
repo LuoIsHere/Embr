@@ -62,6 +62,20 @@ def app_icon() -> QIcon:
     return result
 
 
+def logo_pixmap(size: int) -> QPixmap:
+    """The Embr icon at `size` logical pixels, sharp on high-DPI screens."""
+    name = "embr-icon-small.svg" if size <= 24 else "embr-icon.svg"
+    data = files("embr.resources").joinpath("logo").joinpath(name).read_bytes()
+    renderer = QSvgRenderer(QByteArray(data))
+    scale = 3
+    pixmap = QPixmap(QSize(size * scale, size * scale))
+    pixmap.setDevicePixelRatio(scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    with _painter(pixmap) as painter:
+        renderer.render(painter, QRectF(0, 0, size, size))
+    return pixmap
+
+
 def _pixmap(name: str, color: str, size: int) -> QPixmap:
     template, body = SHAPES[name]
     renderer = QSvgRenderer(QByteArray(template.format(color=color, body=body).encode()))
