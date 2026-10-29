@@ -1,0 +1,951 @@
+"""Center column: firmware header, Entries / Parameters / Records tabs (design doc §6.1
+"中间工作区 — 选中固件时")."""
+
+from pathlib import Path
+from typing import cast
+
+from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QFontMetrics
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPlainTextEdit,
+    QScrollArea,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from embr.app.flashplan import image_header
+from embr.app.library import FirmwareFlag
+from embr.core import chipinfo
+from embr.core.firmware.entries import AddressError
+from embr.core.firmware.files import FileState, read_entry
+from embr.core.firmware.image_header import format_revision
+from embr.core.firmware.image_sniff import parse_partition_table
+from embr.core.firmware.model import AddressSource, Entry, Firmware, Source, editable_params
+from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
+from embr.core.history import FlashRecord, RecordResult
+from embr.ui.owner import Owner
+from embr.ui.sidebar import PLUS, chip_name
+from embr.ui.widgets import button, clear_layout, elided, label, tag
+
+EN_DASH = f" {chr(0x2013)} "
+
+SOURCE_LABELS = {
+    Source.MANUAL: ("fixed", "gray"),
+    Source.ARCHIVED: ("archived", "gray"),
+    Source.IDF_BUILD: ("tracks IDF build", "info"),
+    Source.PIO_BUILD: ("tracks PIO build", "info"),
+}
+CONNECTION_LABELS = {
+    "uart_bridge": "UART bridge",
+    "usb_serial_jtag": "USB-Serial/JTAG",
+    "usb_otg": "USB-OTG",
+    "unknown": "serial port",
+}
+RESULT_TAGS = {
+    RecordResult.OK: "ok",
+    RecordResult.REFUSED: "warn",
+    RecordResult.FAILED: "bad",
+    RecordResult.CANCELLED: "bad",
+}
+
+
+def crumb(owner: Owner, firmware: Firmware) -> str:
+    if firmware.project_id is None:
+        return "Standalone"
+    try:
+        project = owner.library.project(firmware.project_id).name
+    except KeyError:
+        project = "?"
+    return f"{project} / {firmware.device or 'Ungrouped'}"
+
+
+class Header(QWidget):
+    """Breadcrumb, name, tags, the ⋯ menu and the grey notes line."""
+
+    def __init__(self, owner: Owner) -> None:
+        super().__init__()
+        self._owner = owner
+        self.row = QHBoxLayout()
+        self.row.setContentsMargins(0, 0, 0, 0)
+        self.row.setSpacing(8)
+        self.notes = label("", tone="3")
+        self.notes.setStyleSheet("font-size: 12px;")
+        self.menu_button = button("⋯", "ibtn", tooltip="Firmware actions")
+        self.menu = QMenu(self)
+        self.menu.addAction("Rename…\tF2", lambda: owner.firmware_action("rename"))
+        self.menu.addAction("Duplicate", lambda: owner.firmware_action("duplicate"))
+        self.menu.addAction("Move to project…", lambda: owner.firmware_action("move"))
+        self.menu.addSeparator()
+        self.menu.addAction("Delete…", lambda: owner.firmware_action("delete"))
+        self.menu_button.clicked.connect(
+            lambda: self.menu.popup(
+                self.menu_button.mapToGlobal(QPoint(0, self.menu_button.height() + 4))
+            )
+        )
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addLayout(self.row)
+        top.addStretch(1)
+        top.addWidget(self.menu_button)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 0)
+        layout.setSpacing(4)
+        layout.addLayout(top)
+        layout.addWidget(self.notes)
+
+    def show_firmware(self, firmware: Firmware, flag: FirmwareFlag) -> None:
+        clear_layout(self.row)
+        self.menu_button.show()
+        self.row.addWidget(label(crumb(self._owner, firmware), tone="3"))
+        name = QLabel(firmware.name)
+        name.setProperty("heading", "1")
+        self.row.addWidget(name)
+        if firmware.chip:
+            self.row.addWidget(tag(chip_name(firmware.chip), "gray"))
+        self.row.addWidget(tag(*SOURCE_LABELS[firmware.source]))
+        if flag == FirmwareFlag.NEEDS_CONFIRMATION:
+            self.row.addWidget(tag("needs confirmation", "warn"))
+        elif flag == FirmwareFlag.MISSING:
+            self.row.addWidget(tag("file missing", "bad"))
+        if firmware.read_only:
+            self.row.addWidget(tag("created by a newer Embr", "warn"))
+        text = firmware.notes or "no note — edit on the Parameters tab"
+        self.notes.setText(
+            self.notes.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, 900)
+        )
+        self.notes.setToolTip(firmware.notes or "No note yet. Edit it on the Parameters tab.")
+
+    def show_project(self, owner: Owner, project_id: str) -> None:
+        clear_layout(self.row)
+        project = owner.library.project(project_id)
+        count = len(owner.library.project_firmware(project_id))
+        self.row.addWidget(label("Project", tone="3"))
+        name = QLabel(project.name)
+        name.setProperty("heading", "1")
+        self.row.addWidget(name)
+        self.row.addWidget(tag(f"{count} firmware", "gray"))
+        self.row.addWidget(tag(f"{len(project.devices)} groups", "gray"))
+        self.menu_button.hide()
+        self.notes.setText(project.notes or "no note — edit below")
+        self.notes.setToolTip(project.notes or "No note yet.")
+
+
+class Banner(QFrame):
+    """Warning strip above the tabs, with an optional action button."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("banner")
+        self.text = QLabel()
+        self.text.setWordWrap(True)
+        self.action = button("", "ibtn")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(9, 7, 9, 7)
+        layout.addWidget(self.text, 1)
+        layout.addWidget(self.action)
+        self.hide()
+
+    def show_text(self, text: str, action: str = "") -> None:
+        self.text.setText(text)
+        self.action.setText(action)
+        self.action.setVisible(bool(action))
+        self.show()
+
+
+class EntriesTab(QWidget):
+    COLUMNS = ("", "Address", "Name", "Kind", "Address source", "Image requires", "Note")
+
+    def __init__(self, owner: Owner) -> None:
+        super().__init__()
+        self._owner = owner
+        self._firmware: Firmware | None = None
+        self.setAcceptDrops(True)
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setObjectName("entries")
+        self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
+        self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._context_menu)
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        header = self.table.horizontalHeader()
+        header.setHighlightSections(False)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        for column, mode in enumerate(
+            (
+                QHeaderView.ResizeMode.Fixed,
+                QHeaderView.ResizeMode.Fixed,
+                QHeaderView.ResizeMode.Fixed,
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.Stretch,
+            )
+        ):
+            header.setSectionResizeMode(column, mode)
+        self.table.setColumnWidth(0, 28)
+        self.table.setColumnWidth(1, 104)
+        self.table.itemChanged.connect(self._toggled)
+        self.add_button = button(f"{PLUS} Add entry (or drop bin files here)", "addrow")
+        self.add_menu = QMenu(self)
+        self.add_menu.addAction("Files…", self._add_files)
+        self.add_menu.addAction("Attachment…", self._add_attachment)
+        self.add_button.clicked.connect(
+            lambda: self.add_menu.popup(
+                self.add_button.mapToGlobal(QPoint(0, self.add_button.height()))
+            )
+        )
+        add_row = QFrame()
+        add_row.setObjectName("addrow")
+        add_row.setFixedHeight(40)
+        row_layout = QHBoxLayout(add_row)
+        row_layout.setContentsMargins(6, 0, 6, 0)
+        row_layout.addWidget(self.add_button, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.table)
+        layout.addWidget(add_row)
+        layout.addStretch(1)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._filling = False
+
+    def show_firmware(self, firmware: Firmware, states: dict[str, FileState]) -> None:
+        self._firmware = firmware
+        locked = self._owner.is_locked(firmware.id) or firmware.read_only
+        self._filling = True
+        self.table.setRowCount(0)
+        rows = sorted(firmware.entries, key=lambda e: (e.address is None, e.address or 0))
+        self.table.setRowCount(len(rows))
+        for row, entry in enumerate(rows):
+            self._fill_row(row, entry, states.get(entry.id, FileState.OK), locked)
+        self._filling = False
+        self.add_button.setEnabled(not locked)
+        header_height = self.table.horizontalHeader().sizeHint().height()
+        self._fit_columns()
+        scroll = self.table.horizontalScrollBar().sizeHint().height()
+        self.table.setFixedHeight(header_height + 30 * len(rows) + 2 + scroll)
+
+    def _fit_columns(self) -> None:
+        """Cell widgets do not take part in ResizeToContents: the name column (name plus
+        status tags) is measured with the fonts the style sheet gives them."""
+        firmware = self._firmware
+        if firmware is None:
+            return
+        text = self.table.fontMetrics()
+        small = QFont(self.table.font())
+        small.setPixelSize(10)
+        small.setBold(True)
+        tags = QFontMetrics(small)
+        widest = self.table.horizontalHeader().sectionSizeHint(2)
+        for row in range(self.table.rowCount()):
+            cell = self.table.cellWidget(row, 2)
+            names = [w.text() for w in cell.findChildren(QLabel) if w.property("tag") is None]
+            labels = [w.text() for w in cell.findChildren(QLabel) if w.property("tag") is not None]
+            width = sum(text.horizontalAdvance(n) for n in names) + 24
+            width += sum(tags.horizontalAdvance(t) + 10 + 4 for t in labels)
+            widest = max(widest, width + 8)
+        self.table.setColumnWidth(2, widest)
+
+    def _fill_row(self, row: int, entry: Entry, state: FileState, locked: bool) -> None:
+        dim = "3" if not entry.enabled else None
+        check = QTableWidgetItem()
+        check.setData(Qt.ItemDataRole.UserRole, entry.id)
+        flags = Qt.ItemFlag.ItemIsEnabled
+        if not locked:
+            flags |= Qt.ItemFlag.ItemIsUserCheckable
+        check.setFlags(flags)
+        check.setCheckState(Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
+        self.table.setItem(row, 0, check)
+        address = QLineEdit("" if entry.address is None else f"0x{entry.address:X}")
+        address.setProperty("kind", "cell")
+        address.setProperty("mono", "1")
+        address.setPlaceholderText("address")
+        address.setReadOnly(locked)
+        hint = "Hex address. Clear the field and confirm to restore the detected address"
+        if entry.auto_address is not None and entry.auto_address != entry.address:
+            hint += f" (0x{entry.auto_address:X})"
+        address.setToolTip(hint)
+        address.editingFinished.connect(lambda e=entry, w=address: self._address(e, w))
+        self.table.setCellWidget(row, 1, _cell(address))
+        self.table.setCellWidget(row, 2, self._name_cell(entry, state, dim))
+        p = self._owner.palette
+        for column, text, color in (
+            (3, entry.kind.value, p.fg_3 if dim else p.fg_2),
+            (4, _address_source(entry), p.fg_3),
+            (5, self._requires(entry), p.fg_3),
+        ):
+            item = QTableWidgetItem(text)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item.setForeground(QColor(color))
+            self.table.setItem(row, column, item)
+        note = QLineEdit(entry.note)
+        note.setProperty("kind", "cell")
+        note.setPlaceholderText("add note")
+        note.setReadOnly(locked)
+        note.editingFinished.connect(lambda e=entry, w=note: self._note(e, w))
+        self.table.setCellWidget(row, 6, _cell(note))
+
+    def _name_cell(self, entry: Entry, state: FileState, dim: str | None) -> QWidget:
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(6, 0, 6, 0)
+        layout.setSpacing(4)
+        layout.addWidget(label(entry.name, tone=dim))
+        if entry.file.startswith("archive:"):
+            layout.addWidget(tag("archived", "gray"))
+        if state == FileState.CHANGED:
+            layout.addWidget(tag("content changed", "warn"))
+        elif state == FileState.MISSING:
+            layout.addWidget(tag("file missing", "bad"))
+        if entry.auto_added:
+            layout.addWidget(tag("added automatically", "gray"))
+        layout.addStretch(1)
+        scheme, _, rest = entry.file.partition(":")
+        widget.setToolTip(
+            rest
+            if scheme == "path"
+            else f"data/archive/{rest}.bin, original name {entry.name}"
+            if scheme == "archive"
+            else "0xFF bytes, generated when flashing"
+        )
+        return widget
+
+    def _requires(self, entry: Entry) -> str:
+        header = image_header(self._owner.context, entry)
+        if header is None or header.chip is None:
+            return "—"
+        low, high = format_revision(header.min_rev_full), format_revision(header.max_rev_full)
+        return f"chip {low}{EN_DASH}{high}"
+
+    # ---- edits ------------------------------------------------------------------------
+
+    def _toggled(self, item: QTableWidgetItem) -> None:
+        if self._filling or item.column() != 0 or self._firmware is None:
+            return
+        entry_id = item.data(Qt.ItemDataRole.UserRole)
+        enabled = item.checkState() == Qt.CheckState.Checked
+        self._owner.library.set_entry_enabled(self._firmware.id, str(entry_id), enabled)
+        self._owner.changed()
+
+    def _address(self, entry: Entry, widget: QLineEdit) -> None:
+        if self._firmware is None or widget.isReadOnly():
+            return
+        current = "" if entry.address is None else f"0x{entry.address:X}"
+        text = widget.text().strip()
+        if text == current:
+            return
+        try:
+            updated = self._owner.library.set_entry_address(self._firmware.id, entry.id, text)
+        except AddressError:
+            self._owner.note(
+                "error", f"[entry] {entry.name}: '{text}' is not a hex address; kept {current}"
+            )
+            widget.setText(current)
+            return
+        if not text:
+            restored = "none" if updated.address is None else f"0x{updated.address:X}"
+            self._owner.note(
+                "dim", f"[entry] {entry.name}: address cleared, restored detected {restored}"
+            )
+        self._owner.changed()
+
+    def _note(self, entry: Entry, widget: QLineEdit) -> None:
+        if self._firmware is None or widget.isReadOnly() or widget.text() == entry.note:
+            return
+        self._owner.library.set_entry_note(self._firmware.id, entry.id, widget.text().strip())
+        entry.note = widget.text().strip()
+
+    def _add_files(self) -> None:
+        if self._firmware is None:
+            return
+        names, _ = QFileDialog.getOpenFileNames(
+            self, "Add entries", "", "Binary files (*.bin);;All files (*)"
+        )
+        if names:
+            self._add_paths([Path(n) for n in names])
+
+    def _add_paths(self, paths: list[Path]) -> None:
+        if self._firmware is None:
+            return
+        try:
+            added = self._owner.library.add_files(self._firmware.id, paths)
+        except (OSError, ValueError) as exc:
+            self._owner.note("error", f"[entry] {exc}")
+            return
+        for entry in added:
+            where = "no address" if entry.address is None else f"0x{entry.address:X}"
+            self._owner.note("dim", f"[entry] added {entry.name} as {entry.kind.value} at {where}")
+        self._owner.changed()
+
+    def _add_attachment(self) -> None:
+        firmware = self._firmware
+        if firmware is None:
+            return
+        name, _ = QFileDialog.getOpenFileName(self, "Add attachment", "", "All files (*)")
+        if not name:
+            return
+        partitions = self._partitions(firmware)
+        choices = [f"Partition: {p}" for p in partitions] + ["At an address…"]
+        choice, ok = QInputDialog.getItem(self, "Place attachment", "Placement", choices, 0, False)
+        if not ok:
+            return
+        try:
+            if choice.startswith("Partition: "):
+                partition = choice.removeprefix("Partition: ")
+                self._owner.library.add_attachment(firmware.id, Path(name), partition=partition)
+            else:
+                text, ok = QInputDialog.getText(self, "Place attachment", "Hex address")
+                if not ok:
+                    return
+                address = int(text.strip(), 16)
+                self._owner.library.add_attachment(firmware.id, Path(name), address=address)
+        except (OSError, ValueError) as exc:
+            self._owner.note("error", f"[entry] {exc}")
+            return
+        self._owner.changed()
+
+    def _partitions(self, firmware: Firmware) -> list[str]:
+        for entry in firmware.entries:
+            if entry.enabled and entry.kind.value == "partition_table":
+                try:
+                    table = parse_partition_table(
+                        read_entry(entry, self._owner.context.paths.archive)
+                    )
+                except OSError:
+                    return []
+                return [p.name for p in table.partitions] if table else []
+        return []
+
+    def _context_menu(self, pos: QPoint) -> None:
+        firmware = self._firmware
+        row = self.table.rowAt(pos.y())
+        item = self.table.item(row, 0) if row >= 0 else None
+        if firmware is None or item is None or self._owner.is_locked(firmware.id):
+            return
+        entry_id = str(item.data(Qt.ItemDataRole.UserRole))
+        entry = next((e for e in firmware.entries if e.id == entry_id), None)
+        if entry is None:
+            return
+        menu = QMenu(self)
+        relocate = menu.addAction("Re-locate…")
+        relocate.setEnabled(entry.file.startswith("path:"))
+        copy_to = menu.addAction("Copy to firmware…")
+        menu.addSeparator()
+        remove = menu.addAction("Remove entry")
+        chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if chosen is relocate:
+            name, _ = QFileDialog.getOpenFileName(
+                self, f"Re-locate {entry.name}", "", "All files (*)"
+            )
+            if name:
+                self._owner.library.relocate_entry(firmware.id, entry.id, Path(name))
+                self._owner.note("dim", f"[entry] {entry.name} now points at {name}")
+        elif chosen is copy_to:
+            self._copy_to(firmware, entry)
+        elif chosen is remove:
+            self._owner.library.remove_entry(firmware.id, entry.id)
+            self._owner.note("dim", f"[entry] removed {entry.name}")
+        else:
+            return
+        self._owner.changed()
+
+    def _copy_to(self, firmware: Firmware, entry: Entry) -> None:
+        targets = [
+            f
+            for f in self._owner.context.firmware.all()
+            if f.id != firmware.id and not f.source.tracking
+        ]
+        if not targets:
+            self._owner.note("note", "[entry] no other fixed firmware to copy to")
+            return
+        names = [f"{f.name}  ({crumb(self._owner, f)})" for f in targets]
+        choice, ok = QInputDialog.getItem(
+            self, "Copy entry", f"Copy {entry.name} to", names, 0, False
+        )
+        if ok:
+            target = targets[names.index(choice)]
+            self._owner.library.copy_entry_to(firmware.id, entry.id, target.id)
+            self._owner.note("dim", f"[entry] copied {entry.name} to '{target.name}'")
+
+    # ---- dropping files from Explorer ---------------------------------------------------
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        firmware = self._firmware
+        if (
+            event.mimeData().hasUrls()
+            and firmware is not None
+            and not self._owner.is_locked(firmware.id)
+            and not firmware.source.tracking
+        ):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = [Path(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()]
+        files = [p for p in paths if p.is_file()]
+        if files:
+            event.acceptProposedAction()
+            self._add_paths(files)
+
+
+class ParamsTab(QWidget):
+    def __init__(self, owner: Owner) -> None:
+        super().__init__()
+        self._owner = owner
+        self._firmware: Firmware | None = None
+        self.grid = QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(12)
+        self.grid.setVerticalSpacing(8)
+        self.grid.setColumnMinimumWidth(0, 150)
+        self.grid.setColumnStretch(1, 1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.grid)
+        self.extra = QVBoxLayout()
+        layout.addLayout(self.extra)
+        layout.addStretch(1)
+
+    def show_firmware(self, firmware: Firmware) -> None:
+        self._firmware = firmware
+        clear_layout(self.grid)
+        clear_layout(self.extra)
+        locked = self._owner.is_locked(firmware.id) or firmware.read_only
+        editable: frozenset[str] = frozenset() if locked else editable_params(firmware)
+        self._row = 0
+        name = QLineEdit(firmware.name)
+        name.setMaximumWidth(420)
+        name.setReadOnly(locked)
+        name.editingFinished.connect(lambda: self._rename(name))
+        self._add("Name", name, "unique within the project, or among standalone firmware")
+        self._add("Chip", self._chip(firmware, "chip" in editable))
+        self._add(*self._origin(firmware))
+        self._add("Flash mode / freq / size", self._flash(firmware, "flash_mode" in editable))
+        self._add(
+            "Reset before",
+            self._combo(firmware, "before", BEFORE_MODES, firmware.before, "before" in editable),
+            "saved setting; may be adjusted to the connection type, see Checks",
+        )
+        self._add(
+            "Reset after",
+            self._combo(firmware, "after", AFTER_MODES, firmware.after, "after" in editable),
+        )
+        erase = QCheckBox("erase the whole flash first (clears NVS)")
+        erase.setChecked(firmware.erase_all)
+        erase.setEnabled("erase_all" in editable)
+        erase.toggled.connect(self._set_erase_all)
+        self._add("Erase all before flashing", erase)
+        group = (
+            (firmware.device or "(ungrouped)") if firmware.project_id else "— (standalone firmware)"
+        )
+        self._add(
+            "Group", label(group, tone="2"), "change via the ⋯ menu → Move, or drag in the sidebar"
+        )
+        notes = NotesEdit(
+            firmware.notes, "What this firmware is, which board revision, why it exists…"
+        )
+        notes.setReadOnly("notes" not in editable)
+        notes.committed.connect(self._set_notes)
+        self._add(
+            "Notes", notes, "shown in grey next to the name; saved when the field loses focus"
+        )
+        tags = QLineEdit(", ".join(firmware.tags))
+        tags.setPlaceholderText("comma-separated, e.g. release, s3")
+        tags.setMaximumWidth(420)
+        tags.setReadOnly("tags" not in editable)
+        tags.editingFinished.connect(
+            lambda: self._set("tags", [t.strip() for t in tags.text().split(",") if t.strip()])
+        )
+        self._add("Tags", tags)
+        if firmware.source == Source.ARCHIVED:
+            self.extra.addWidget(
+                _box(
+                    "Archive",
+                    [
+                        "Fixed snapshot: files are referenced by content hash (archive:<sha256>), "
+                        "the original path is no longer needed.",
+                        "Entry names are the recorded original file names; notes are editable.",
+                    ],
+                )
+            )
+
+    def _add(self, title: str, widget: QWidget, note: str = "") -> None:
+        caption = label(title, tone="3")
+        caption.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.grid.addWidget(caption, self._row, 0)
+        if note:
+            box = QWidget()
+            column = QVBoxLayout(box)
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(2)
+            column.addWidget(widget)
+            small = label(note, tone="3")
+            small.setStyleSheet("font-size: 12px;")
+            small.setWordWrap(True)
+            column.addWidget(small)
+            widget = box
+        self.grid.addWidget(widget, self._row, 1)
+        self._row += 1
+
+    def _origin(self, firmware: Firmware) -> tuple[str, QWidget]:
+        if firmware.source == Source.ARCHIVED:
+            return "Archived from", label(firmware.archived_from or "—", tone="2")
+        paths = [e for e in firmware.entries if e.file.startswith("path:")]
+        first = next((e for e in paths if e.enabled), paths[0] if paths else None)
+        text = str(Path(first.file.removeprefix("path:")).parent) if first else "—"
+        widget = elided(text, mono=True, middle=True)
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        column.addWidget(widget)
+        small = label("fixed firmware: entries are recorded by name, path and hash", tone="3")
+        small.setStyleSheet("font-size: 12px;")
+        column.addWidget(small)
+        return "Files folder", box
+
+    def _chip(self, firmware: Firmware, editable: bool) -> QWidget:
+        if not editable:
+            return _derived(
+                f"{chip_name(firmware.chip)} ({firmware.chip})" if firmware.chip else "—"
+            )
+        combo = QComboBox()
+        combo.addItem("(not set)", "")
+        for chip in chipinfo.supported_chips():
+            combo.addItem(f"{chip.display_name} ({chip.name})", chip.name)
+        combo.setCurrentIndex(max(combo.findData(firmware.chip or ""), 0))
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        combo.activated.connect(
+            lambda: combo.currentData() and self._set("chip", str(combo.currentData()))
+        )
+        return _left(combo)
+
+    def _flash(self, firmware: Firmware, editable: bool) -> QWidget:
+        flash = firmware.flash
+        if not editable:
+            return _derived(f"{flash.mode} / {flash.freq} / {flash.size}")
+        chip = chipinfo.get_chip(firmware.chip) if firmware.chip else None
+        freqs = (
+            chip.flash_freqs
+            if chip
+            else sorted({f for c in chipinfo.supported_chips() for f in c.flash_freqs})
+        )
+        sizes = (
+            chip.flash_sizes
+            if chip
+            else sorted({s for c in chipinfo.supported_chips() for s in c.flash_sizes})
+        )
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(
+            self._combo(firmware, "flash_mode", ("keep", *chipinfo.FLASH_MODES), flash.mode, True)
+        )
+        row.addWidget(self._combo(firmware, "flash_freq", ("keep", *freqs), flash.freq, True))
+        row.addWidget(
+            self._combo(firmware, "flash_size", ("keep", "detect", *sizes), flash.size, True)
+        )
+        row.addWidget(label("keep = leave the bootloader header as built", tone="3"))
+        row.addStretch(1)
+        return widget
+
+    def _combo(
+        self, firmware: Firmware, name: str, options: tuple[str, ...], value: str, editable: bool
+    ) -> QWidget:
+        if not editable:
+            return _derived(value)
+        combo = QComboBox()
+        combo.addItems(list(options))
+        combo.setCurrentText(value)
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        combo.activated.connect(lambda: self._set(name, combo.currentText()))
+        return _left(combo) if name in ("before", "after") else combo
+
+    def _set_erase_all(self, on: bool) -> None:
+        self._set("erase_all", on)
+
+    def _set_notes(self, text: str) -> None:
+        self._set("notes", text)
+
+    def _set(self, name: str, value: object) -> None:
+        firmware = self._firmware
+        if firmware is None:
+            return
+        try:
+            self._owner.library.set_param(firmware.id, name, value)
+        except ValueError as exc:
+            self._owner.note("error", f"[firmware] {firmware.name}: {exc}")
+        else:
+            shown = ", ".join(cast(list[str], value)) if isinstance(value, list) else value
+            if name != "notes":
+                self._owner.note("dim", f"[firmware] {firmware.name}: {name} → {shown}")
+        self._owner.changed()
+
+    def _rename(self, widget: QLineEdit) -> None:
+        firmware = self._firmware
+        if firmware is None or widget.isReadOnly() or widget.text().strip() == firmware.name:
+            return
+        try:
+            renamed = self._owner.library.rename_firmware(firmware.id, widget.text())
+        except ValueError:
+            widget.setText(firmware.name)
+            return
+        self._owner.note("dim", f"[firmware] renamed to '{renamed.name}'")
+        self._owner.changed()
+
+
+class RecordsTab(QWidget):
+    def __init__(self, owner: Owner) -> None:
+        super().__init__()
+        self._owner = owner
+        self.list = QVBoxLayout()
+        self.list.setContentsMargins(0, 0, 0, 0)
+        self.list.setSpacing(0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        hint = label(
+            "Click a record to show its section of that day's log (logs/YYYY-MM-DD.log).", tone="3"
+        )
+        hint.setStyleSheet("font-size: 12px;")
+        layout.addWidget(hint)
+        layout.addLayout(self.list)
+        layout.addStretch(1)
+
+    def show_firmware(self, firmware: Firmware) -> None:
+        clear_layout(self.list)
+        records = self._owner.context.history.query(firmware_id=firmware.id)
+        if not records:
+            self.list.addWidget(label("No flash records yet.", tone="3"))
+            return
+        for record in records:
+            self.list.addWidget(self._row(record))
+
+    def _row(self, record: FlashRecord) -> QWidget:
+        row = RecordRow(record.log_file, record.id)
+        row.clicked.connect(self._owner.show_log_segment)
+        grid = QHBoxLayout(row)
+        grid.setContentsMargins(4, 7, 4, 7)
+        grid.setSpacing(12)
+        stamp = record.timestamp.replace("T", " ")[:16]
+        time = label(stamp)
+        time.setFixedWidth(130)
+        grid.addWidget(time)
+        middle = QVBoxLayout()
+        middle.setSpacing(2)
+        link = CONNECTION_LABELS.get(record.connection_type, record.connection_type)
+        port = f"{record.port} · {link}" + (f" · {record.baud}" if record.baud else "")
+        if record.mac:
+            port += f" · MAC {record.mac}"
+        middle.addWidget(label(port))
+        middle.addWidget(label(_summary(record), tone="3"))
+        grid.addLayout(middle, 1)
+        grid.addWidget(tag(record.result.value, RESULT_TAGS[record.result]))
+        return row
+
+
+class RecordRow(QFrame):
+    clicked = Signal(str, str)
+    """log file name, segment id."""
+
+    def __init__(self, log_file: str, segment_id: str) -> None:
+        super().__init__()
+        self.setObjectName("rec")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._target = (log_file, segment_id)
+
+    def mousePressEvent(self, event: object) -> None:  # type: ignore[override]
+        self.clicked.emit(*self._target)
+
+
+class NotesEdit(QPlainTextEdit):
+    """Multi-line notes, committed when the field loses focus."""
+
+    committed = Signal(str)
+
+    def __init__(self, text: str, placeholder: str) -> None:
+        super().__init__(text)
+        self.setProperty("kind", "notes")
+        self.setPlaceholderText(placeholder)
+        self.setMaximumWidth(420)
+        self.setFixedHeight(64)
+        self._initial = text
+
+    def focusOutEvent(self, event: object) -> None:  # type: ignore[override]
+        super().focusOutEvent(event)  # type: ignore[arg-type]
+        text = self.toPlainText().strip()
+        if text != self._initial:
+            self._initial = text
+            self.committed.emit(text)
+
+
+class FirmwareView(QWidget):
+    """Header, banner, tabs and the tab pages for one firmware."""
+
+    def __init__(self, owner: Owner) -> None:
+        super().__init__()
+        self._owner = owner
+        self.banner = Banner()
+        self.banner.action.clicked.connect(self._confirm)
+        self.tabs = QHBoxLayout()
+        self.tabs.setContentsMargins(14, 8, 14, 0)
+        self.tabs.setSpacing(2)
+        self.tab_group = QButtonGroup(self)
+        self.pages = QStackedWidget()
+        self.entries = EntriesTab(owner)
+        self.params = ParamsTab(owner)
+        self.records = RecordsTab(owner)
+        for index, (name, page) in enumerate(
+            (("Entries", self.entries), ("Parameters", self.params), ("Records", self.records))
+        ):
+            tab_button = button(name, "tab")
+            tab_button.setCheckable(True)
+            tab_button.setChecked(index == 0)
+            self.tab_group.addButton(tab_button, index)
+            self.tabs.addWidget(tab_button)
+            self.pages.addWidget(_scrolling(page))
+        self.tabs.addStretch(1)
+        self.tab_group.idClicked.connect(self.pages.setCurrentIndex)
+        tab_line = QFrame()
+        tab_line.setObjectName("tabline")
+        tab_line.setLayout(self.tabs)
+        body = QVBoxLayout()
+        body.setContentsMargins(14, 10, 14, 0)
+        body.addWidget(self.banner)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(tab_line)
+        layout.addLayout(body)
+        layout.addWidget(self.pages, 1)
+        self._firmware: Firmware | None = None
+
+    def show_firmware(
+        self, firmware: Firmware, states: dict[str, FileState], flag: FirmwareFlag
+    ) -> None:
+        self._firmware = firmware
+        missing = [e.name for e in firmware.entries if states.get(e.id) == FileState.MISSING]
+        changed = [e.name for e in firmware.entries if states.get(e.id) == FileState.CHANGED]
+        if missing:
+            self.banner.show_text(
+                f"Files missing: {', '.join(missing)}. Re-locate them (right-click an entry) "
+                "or remove the entries; flashing is blocked until then."
+            )
+        elif changed:
+            self.banner.show_text(
+                f"Files changed on disk since the last check: {', '.join(changed)} (content). "
+                "Flashing is blocked until you confirm the list below.",
+                "Confirm entries",
+            )
+        else:
+            self.banner.hide()
+        self.banner.action.setEnabled(not self._owner.is_locked(firmware.id))
+        self.entries.show_firmware(firmware, states)
+        self.params.show_firmware(firmware)
+        self.records.show_firmware(firmware)
+
+    def _confirm(self) -> None:
+        firmware = self._firmware
+        if firmware is None:
+            return
+        self._owner.library.confirm_entries(firmware.id)
+        self._owner.note("ok", f"[entries] {firmware.name}: entries confirmed")
+        self._owner.changed()
+
+
+def _summary(record: FlashRecord) -> str:
+    if record.result == RecordResult.REFUSED and record.refuse_reason:
+        return record.refuse_reason
+    seconds = record.duration_ms / 1000
+    written = sum(1 for e in record.entries if not e.skipped)
+    skipped = len(record.entries) - written
+    text = f"{len(record.entries)} entries, {seconds:.1f} s"
+    if skipped:
+        text += f" · {skipped} already in flash"
+    if record.reset_after:
+        text += f" · after={record.reset_after}"
+    return text
+
+
+def _address_source(entry: Entry) -> str:
+    if entry.address_source == AddressSource.PARTITION:
+        return f"partition {entry.partition}"
+    return entry.address_source.value
+
+
+def _derived(text: str) -> QWidget:
+    widget = QWidget()
+    row = QHBoxLayout(widget)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    row.addWidget(label(text, tone="2"))
+    row.addWidget(tag("derived", "gray"))
+    row.addStretch(1)
+    return widget
+
+
+def _left(widget: QWidget) -> QWidget:
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.addWidget(widget)
+    row.addStretch(1)
+    return box
+
+
+def _cell(widget: QWidget) -> QWidget:
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(4, 0, 4, 0)
+    row.addWidget(widget)
+    return box
+
+
+def _box(title: str, lines: list[str]) -> QWidget:
+    frame = QFrame()
+    frame.setObjectName("box")
+    frame.setMaximumWidth(640)
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(0, 0, 0, 8)
+    layout.setSpacing(4)
+    head = QLabel(title)
+    head.setObjectName("boxhead")
+    layout.addWidget(head)
+    for line in lines:
+        item = label(f"•  {line}", tone="2", wrap=True)
+        item.setContentsMargins(10, 0, 10, 0)
+        layout.addWidget(item)
+    return frame
+
+
+def _scrolling(page: QWidget) -> QScrollArea:
+    area = QScrollArea()
+    area.setObjectName("pane")
+    area.setWidgetResizable(True)
+    area.setFrameShape(QFrame.Shape.NoFrame)
+    holder = QWidget()
+    layout = QVBoxLayout(holder)
+    layout.setContentsMargins(14, 10, 14, 10)
+    layout.addWidget(page)
+    area.setWidget(holder)
+    return area
