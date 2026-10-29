@@ -15,24 +15,20 @@ Event order for a flash job:
 7. reset as plan.after -> ResultEvent(OK)
 
 An identify job sends InfoEvent, then ResultEvent(OK). LogEvents may appear anywhere.
+
+ESPTOOL_CFGFILE is set by embr.main before this package is imported: importing it imports
+esptool, which reads its config file at that moment.
 """
 
 import io
-import os
 import sys
 import threading
 import traceback
 from contextlib import redirect_stdout
-from importlib.resources import files
 from typing import TextIO
 
 from embr.core.flasher.plan import IdentifyPlan
 from embr.core.flasher.protocol import ErrorEvent, Event, ProtocolError, decode_task, encode_event
-
-
-def esptool_config_path() -> str:
-    """Bundled esptool.cfg, so user-level esptool configs cannot change behaviour."""
-    return str(files("embr.resources").joinpath("esptool.cfg"))
 
 
 def run(stdin: TextIO, stdout: TextIO) -> int:
@@ -53,8 +49,6 @@ def run(stdin: TextIO, stdout: TextIO) -> int:
         send(ErrorEvent(f"invalid task: {exc}", ""))
         return 2
 
-    # esptool reads its config when imported; point it at ours first
-    os.environ.setdefault("ESPTOOL_CFGFILE", esptool_config_path())
     from esptool.logger import log
 
     from embr.core.flasher.worker import jobs

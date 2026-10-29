@@ -1,9 +1,13 @@
 """Worker process (`python -m embr --worker`) without hardware; each run has a timeout."""
 
+import os
+import subprocess
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
-from embr_testkit import idf_entries, missing_port, run_worker
+from embr_testkit import WORKER_TIMEOUT, idf_entries, missing_port, run_worker
 
 from embr.core.flasher.checks import FILES, RESET, CheckLevel
 from embr.core.flasher.plan import FlashPlan, FlashSettings, IdentifyPlan, PlanEntry
@@ -77,3 +81,31 @@ def test_malformed_task_gives_error_and_nonzero_exit(text: str) -> None:
     code, events = run_worker(text)
     assert code != 0
     assert isinstance(_terminal([e for e in events if not isinstance(e, LogEvent)]), ErrorEvent)
+
+
+_TIMEOUT_PROBE = """
+import io, sys
+sys.stdin = io.StringIO("not json")
+import embr.main
+embr.main.main(["--worker"])
+import esptool.loader
+print("DEFAULT_TIMEOUT=" + repr(esptool.loader.DEFAULT_TIMEOUT))
+"""
+
+
+def test_worker_ignores_user_esptool_config(tmp_path: Path) -> None:
+    hostile = tmp_path / "esptool.cfg"
+    hostile.write_text("[esptool]\ntimeout = 99\n", encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-c", _TIMEOUT_PROBE],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=WORKER_TIMEOUT,
+        cwd=tmp_path,
+        env={**os.environ, "ESPTOOL_CFGFILE": str(hostile)},
+        check=False,
+    )
+    marked = [line for line in proc.stdout.splitlines() if line.startswith("DEFAULT_TIMEOUT=")]
+    assert len(marked) == 1, (proc.stdout, proc.stderr)
+    assert float(marked[0].removeprefix("DEFAULT_TIMEOUT=")) == 3.0
