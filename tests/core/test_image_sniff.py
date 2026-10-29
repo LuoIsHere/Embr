@@ -158,6 +158,15 @@ def test_padded_and_single_images() -> None:
     assert find_merged(idf_app_path("esp32_hello").read_bytes()) is None
 
 
+@pytest.mark.parametrize("sample", ["esp32s3_hello", "esp32_hello"])
+def test_app_with_table_bytes_at_merged_offset_is_app(sample: str) -> None:
+    # a plain app whose bytes at 0x4000 happen to be a partition table has no bootloader
+    data = bytearray(idf_app_path(sample).read_bytes())
+    table = _table_file(sample).read_bytes()
+    data[0x4000 : 0x4000 + len(table)] = table
+    assert sniff(bytes(data), "app.bin").kind == EntryKind.APP
+
+
 # --- partition tables --------------------------------------------------------------------
 
 

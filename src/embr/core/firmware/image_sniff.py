@@ -115,9 +115,10 @@ def parse_partition_table(data: bytes) -> PartitionTable | None:
 
 def find_merged(data: bytes) -> tuple[int, str] | None:
     """(start offset, chip) if `data` is a merged image: for a candidate bootloader offset
-    BL (from chipinfo) and start T in {0, BL}, file offset BL - T holds an image whose chip's
-    bootloader offset is BL, and a partition table is found at file offset 0x8000 - T or, failing
-    that, at a 0x1000-aligned offset in the first 64 KiB. None otherwise."""
+    BL (from chipinfo) and start T in {0, BL}, file offset BL - T holds a bootloader image
+    whose chip's bootloader offset is BL, and a partition table is found at file offset
+    0x8000 - T or, failing that, at a 0x1000-aligned offset in the first 64 KiB. None
+    otherwise."""
     found = _find_merged(data)
     return (found[0], found[1]) if found else None
 
@@ -206,6 +207,9 @@ def _find_merged(data: bytes) -> tuple[int, str, ImageHeader, PartitionTable] | 
             if header is None or header.chip is None:
                 continue
             if chipinfo.get_chip(header.chip).bootloader_offset != bl:
+                continue
+            # with start == bl the image is at file offset 0, so a plain app gets this far
+            if _image_kind(header) != EntryKind.BOOTLOADER:
                 continue
             table = _table_inside(data, start)
             if table is not None:
