@@ -1,20 +1,36 @@
 """The main window: wires the panels to the app layer."""
 
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
 
 import esptool
-from PySide6.QtCore import QPoint, QUrl
+from PySide6.QtCore import QEvent, QPoint, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QKeySequence, QPalette, QShortcut
-from PySide6.QtWidgets import QApplication, QMenu, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QMenu,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from embr import __version__
+from embr.app.archiving import Archiver
 from embr.app.checklist import can_flash, preflight
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, preview_command
 from embr.app.identify import IdentifyMemory
 from embr.app.library import Library
+from embr.app.merging import Merger
 from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
+from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
+from embr.app.tracking import BuildChangedError, TrackStatus
+from embr.core.firmware.import_idf import IdfBuildError
+from embr.core.firmware.store import default_name_archived
+from embr.core.firmware.tracking import ResolveState
 from embr.core.flasher.checks import CheckLevel
+from embr.core.flasher.merge import MergeError
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -107,9 +123,19 @@ class EmbrWindow(FrameWindow):
         self.setWindowIcon(app_icon())
         self._context = context
         self._library = Library(context)
+        tracker = self._library.tracker
         self._memory = IdentifyMemory()
         self._dispatcher = MainThreadDispatcher(self)
-        self._ops = Operations(context, self._memory, self._dispatcher.dispatch)
+        self._ops = Operations(context, self._memory, self._dispatcher.dispatch, tracker=tracker)
+        self._archiver = Archiver(context, tracker)
+        self._merger = Merger(context, tracker)
+        self._schedule = RefreshSchedule()
+        self._schedule.seed(context.history)
+        self._shown: tuple[str, ResolveState, str] | None = None
+        """Firmware id, state and digest the workspace shows (flash compares the digest)."""
+        self._round: list[str] = []
+        self._round_changed = False
+        self._job_kind: JobKind | None = None
         self._signals = JobSignals(self)
         self._selection: tuple[str, str] | None = None
         self._query = ""
@@ -153,6 +179,12 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.query_changed.connect(self._search)
         self.sidebar_panel.new_firmware.connect(self._new_firmware)
         self.sidebar_panel.new_project.connect(self._new_project)
+        self.sidebar_panel.import_idf.connect(self._import_idf)
+        self.firmware_view.entries.archive_requested.connect(self._archive_entry)
+        self.firmware_view.entries.merge_requested.connect(self._merge)
+        self.connection.erase_clicked.connect(self._erase)
+        self.connection.read_clicked.connect(self._read)
+        self.connection.records_clicked.connect(self._board_records)
         self.sidebar_panel.tree.move_requested.connect(self._move)
         self.connection.port_changed.connect(self._port_changed)
         self.connection.baud_changed.connect(self._refresh_right)
@@ -188,6 +220,10 @@ class EmbrWindow(FrameWindow):
         self.ports.start()
         if not self.ports.ports:
             self.connection.set_ports(())
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(REFRESH_SECONDS * 1000)
+        self._refresh_timer.timeout.connect(self._start_round)
+        self._refresh_timer.start()
         self.changed()
 
     # ---- Owner ------------------------------------------------------------------------
@@ -213,11 +249,14 @@ class EmbrWindow(FrameWindow):
         self.connection.log_lines([(level, text)])
 
     def select_firmware(self, firmware_id: str) -> None:
+        self._leave_selection()
+        self._schedule.touch(firmware_id)
         self._selection = ("firmware", firmware_id)
         self._last_outcome = None
         self.changed()
 
     def select_project(self, project_id: str) -> None:
+        self._leave_selection()
         self._selection = ("project", project_id)
         self._last_outcome = None
         self.changed()
@@ -271,6 +310,12 @@ class EmbrWindow(FrameWindow):
             if placement is not None:
                 self._move(firmware_id, placement.project_id, placement.device)
                 return
+        elif name == "archive":
+            self._archive_version(firmware_id)
+            return
+        elif name == "directory":
+            self._change_build_dir(firmware_id)
+            return
         elif name == "delete":
             accepted, _ = dialogs.confirm(
                 self,
@@ -315,11 +360,8 @@ class EmbrWindow(FrameWindow):
         selection = self._selection
         try:
             if selection is not None and selection[0] == "firmware":
-                firmware = self._library.firmware(selection[1])
-                states = self._library.check_files(firmware.id)
-                flag = self._library.flag(firmware.id)
-                self.header.show_firmware(firmware, flag)
-                self.firmware_view.show_firmware(firmware, states, flag)
+                status = self._library.tracker.check(selection[1])
+                self._show_status(status)
                 self.pages.setCurrentWidget(self.firmware_view)
                 return
             if selection is not None and selection[0] == "project":
@@ -329,6 +371,7 @@ class EmbrWindow(FrameWindow):
                 return
         except KeyError:  # deleted meanwhile
             self._selection = None
+        self._shown = None
         self.header.hide()
         self.pages.setCurrentWidget(self.empty_view)
         return
@@ -345,8 +388,10 @@ class EmbrWindow(FrameWindow):
             self.connection.set_flash_enabled(False)
             self.cmdbar.set_command("(select a firmware to see its command)")
         else:
-            firmware = self._library.firmware(firmware_id)
-            items = preflight(self._context, firmware, port, snapshot)
+            tracker = self._library.tracker
+            status = tracker.cached(firmware_id) or tracker.check(firmware_id)
+            firmware = status.firmware
+            items = preflight(self._context, firmware, port, snapshot, status)
             self.connection.show_checks(items)
             self.connection.set_flash_enabled(can_flash(items) and port is not None and not busy)
             command = preview_command(
@@ -354,6 +399,12 @@ class EmbrWindow(FrameWindow):
             )
             self.cmdbar.set_command(command or "(add entries with addresses to see the command)")
         self.connection.identify.setEnabled(port is not None and not busy)
+        self.connection.set_board_actions(
+            port is not None
+            and snapshot is not None
+            and snapshot.port.device == port.device
+            and not busy
+        )
         outcome = self._last_outcome
         if (
             outcome is not None
@@ -474,6 +525,7 @@ class EmbrWindow(FrameWindow):
             self.note("error", f"[identify] {exc}")
             return
         self._job_firmware = None
+        self._job_kind = JobKind.IDENTIFY
         self.connection.set_running(True)
         self.connection.show_progress(0, "Connecting…")
 
@@ -492,13 +544,28 @@ class EmbrWindow(FrameWindow):
         self.connection.log_lines(
             [("dim", f"# job flash · {firmware.name} · {port_text(port)} · {_now()}")]
         )
+        shown = self._shown[2] if self._shown and self._shown[0] == firmware_id else None
         try:
-            self._ops.flash(firmware_id, port, self.connection.selected_baud(), self._signals)
+            self._ops.flash(
+                firmware_id,
+                port,
+                self.connection.selected_baud(),
+                self._signals,
+                shown_digest=shown,
+            )
+        except BuildChangedError as exc:
+            self.note("warning", f"[flash] not started: {exc}")
+            self.changed()
+            if exc.building:
+                QTimer.singleShot(SETTLE_RECHECK_MS, self._recheck_selected)
+            return
         except (PlanError, BusyError, OSError, ValueError) as exc:
             self.note("error", f"[flash] {exc}")
             self._refresh_right()
             return
         self._job_firmware = firmware_id
+        self._job_kind = JobKind.FLASH
+        self._schedule.touch(firmware_id)
         self.connection.set_running(True)
         self.connection.show_progress(0, "Connecting…")
         self._refresh_tree()
@@ -548,10 +615,13 @@ class EmbrWindow(FrameWindow):
 
     def _job_progress(self, progress: object) -> None:
         if isinstance(progress, JobProgress):
-            text = (
-                f"Writing 0x{progress.address:X} {progress.name} "
-                f"({progress.entry_index + 1}/{progress.entry_count})"
-            )
+            if self._job_kind == JobKind.READ_FLASH:
+                text = f"Reading from 0x{progress.address:X}"
+            else:
+                text = (
+                    f"Writing 0x{progress.address:X} {progress.name} "
+                    f"({progress.entry_index + 1}/{progress.entry_count})"
+                )
             self.connection.show_progress(progress.percent, text)
 
     def _job_finished(self, outcome: object) -> None:
@@ -559,10 +629,27 @@ class EmbrWindow(FrameWindow):
             return
         self._last_outcome = outcome
         self._job_firmware = None
+        self._job_kind = None
         self.connection.set_running(False)
         if self._ports_pending:
             self._apply_ports()
-        if outcome.kind == JobKind.IDENTIFY:
+        if outcome.result == RecordResult.FAILED and _port_unavailable(outcome.message):
+            self._memory.select_port(None)
+            self.note("warning", "The port could not be opened (in use or disconnected).")
+        if outcome.kind in (JobKind.ERASE, JobKind.READ_FLASH):
+            done = outcome.result == RecordResult.OK
+            self.connection.show_progress(
+                100 if done else self.connection.progress.value(), RESULT_TEXT[outcome.result]
+            )
+            self.note(
+                "ok" if done else "warning",
+                f"{RESULT_TEXT[outcome.result]}. Record saved. Port released.",
+            )
+            if done and outcome.firmware_id is not None:
+                self.note("note", "[read] saved as a new firmware; it may contain secrets (NVS)")
+                self.select_firmware(outcome.firmware_id)
+                return
+        elif outcome.kind == JobKind.IDENTIFY:
             done = outcome.result == RecordResult.OK
             self.connection.show_progress(0, "Identified" if done else RESULT_TEXT[outcome.result])
             self.note("dim", "Port released.")
@@ -578,11 +665,217 @@ class EmbrWindow(FrameWindow):
                 self.note("warning", "Flash content may be incomplete.")
         self.changed()
 
+    # ---- tracking: selection, activation, periodic re-check ---------------------------
+
+    def _show_status(self, status: TrackStatus) -> None:
+        self.header.show_firmware(status, self._library.flag(status.firmware_id))
+        self.firmware_view.show_firmware(status)
+        self._shown = (status.firmware_id, status.state, status.digest)
+        if status.state == ResolveState.BUILDING:
+            QTimer.singleShot(SETTLE_RECHECK_MS, self._recheck_selected)
+
+    def _leave_selection(self) -> None:
+        firmware_id = self._selected_firmware_id()
+        if firmware_id is not None:
+            self._library.tracker.mark_seen(firmware_id)
+
+    def _recheck_selected(self) -> None:
+        """Window activated, a build settling, a flash refused: check the selection and
+        refresh when it differs from what is shown."""
+        firmware_id = self._selected_firmware_id()
+        if firmware_id is None or self.is_locked(firmware_id):
+            return
+        try:
+            status = self._library.tracker.check(firmware_id)
+        except KeyError:
+            return
+        if self._shown != (firmware_id, status.state, status.digest):
+            self.changed()
+
+    def _start_round(self) -> None:
+        if self._ops.busy or self.isMinimized() or self._round:
+            return
+        existing = [f.id for f in self._context.firmware.all()]
+        self._round = self._schedule.round(self._selected_firmware_id(), existing)
+        self._round_changed = False
+        QTimer.singleShot(0, self._next_in_round)
+
+    def _next_in_round(self) -> None:
+        """One firmware per event loop pass, so a round never blocks the window."""
+        if not self._round or self._ops.busy:
+            self._round = []
+            return
+        firmware_id = self._round.pop(0)
+        tracker = self._library.tracker
+        before = tracker.cached(firmware_id)
+        try:
+            status = tracker.check(firmware_id)
+        except KeyError:
+            self._schedule.forget(firmware_id)
+        else:
+            if before is None or (before.state, before.digest) != (status.state, status.digest):
+                self._round_changed = True
+        if self._round:
+            QTimer.singleShot(0, self._next_in_round)
+        elif self._round_changed:
+            selected = self._selected_firmware_id()
+            if selected is not None and not self.is_locked(selected):
+                self.changed()
+            else:
+                self._refresh_tree()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            QTimer.singleShot(0, self._recheck_selected)
+
+    # ---- stage two actions --------------------------------------------------------------
+
+    def _import_idf(self) -> None:
+        project_id, device = self._current_placement()
+        request = dialogs.import_idf(self, self._library, project_id, device)
+        if request is None:
+            return
+        try:
+            firmware = self._library.import_idf(
+                request.build_dir,
+                name=request.name,
+                project_id=request.placement.project_id,
+                device=request.placement.device,
+            )
+        except (PlanError, IdfBuildError, OSError) as exc:
+            self.note("error", f"[import] {exc}")
+            return
+        self.note("ok", f"[import] '{firmware.name}' follows {request.build_dir}")
+        self.select_firmware(firmware.id)
+
+    def _archive_version(self, firmware_id: str) -> None:
+        try:
+            entries = self._archiver.preview(firmware_id)
+        except PlanError as exc:
+            self.note("error", f"[archive] {exc}")
+            return
+        firmware = self._library.firmware(firmware_id)
+        answer = dialogs.archive_version(
+            self, firmware.name, default_name_archived(firmware.name, date.today()), entries
+        )
+        if answer is None:
+            return
+        try:
+            archived = self._archiver.archive_version(firmware_id, name=answer[0], notes=answer[1])
+        except (PlanError, OSError) as exc:
+            self.note("error", f"[archive] {exc}")
+            return
+        self.note("ok", f"[archive] '{archived.name}' created; '{firmware.name}' is unchanged")
+        self.select_firmware(archived.id)
+
+    def _archive_entry(self, entry_id: str) -> None:
+        firmware_id = self._selected_firmware_id()
+        if firmware_id is None:
+            return
+        try:
+            entry = self._archiver.archive_entry(firmware_id, entry_id)
+        except (PlanError, ValueError, OSError) as exc:
+            self.note("error", f"[archive] {exc}")
+            return
+        self.note("ok", f"[archive] {entry.name} copied into the archive")
+        self.changed()
+
+    def _change_build_dir(self, firmware_id: str) -> None:
+        firmware = self._library.firmware(firmware_id)
+        start = firmware.build_ref.path if firmware.build_ref else ""
+        chosen = QFileDialog.getExistingDirectory(self, "Build directory", start)
+        if not chosen:
+            return
+        status = self._library.tracker.set_build_dir(firmware_id, Path(chosen))
+        self.note("dim", f"[build] {firmware.name} now follows {chosen} ({status.state.value})")
+        self.changed()
+
+    def _clean_archive(self) -> None:
+        files = self._archiver.unreferenced()
+        if dialogs.clean_archive(self, files):
+            self._archiver.clean([f.sha256 for f in files])
+            self.note("warning", f"[archive] {len(files)} unreferenced files deleted")
+
+    def _merge(self) -> None:
+        firmware_id = self._selected_firmware_id()
+        if firmware_id is None:
+            return
+        status = self._library.tracker.check(firmware_id)
+        firmware = status.firmware
+        paths = [Path(e.file[5:]) for e in firmware.entries if e.file.startswith("path:")]
+        folder = paths[0].parent if paths else self._context.paths.root
+        request = dialogs.merge(
+            self, self._merger, firmware, folder / f"{firmware.name}_merged.bin"
+        )
+        if request is None:
+            return
+        try:
+            created = self._merger.merge(firmware_id, *request)
+        except (PlanError, MergeError, OSError) as exc:
+            self.note("error", f"[merge] {exc}")
+            return
+        self.note("ok", f"[merge] written to {request[0]}")
+        if created is not None:
+            self.select_firmware(created.id)
+
+    def _board_job(self, kind: JobKind) -> None:
+        port = self.connection.selected_port()
+        snapshot = self._memory.snapshot
+        if port is None or snapshot is None or self._ops.busy:
+            return
+        request: dialogs.ReadRequest | None = None
+        if kind == JobKind.ERASE:
+            if not dialogs.erase_flash(self, port.device, snapshot.info):
+                return
+        else:
+            project_id, device = self._current_placement()
+            request = dialogs.read_flash(self, self._library, snapshot.info, project_id, device)
+            if request is None:
+                return
+        self._last_outcome = None
+        self.connection.clear_log()
+        self.connection.log_lines([("dim", f"# job {kind.value} · {port_text(port)} · {_now()}")])
+        try:
+            if request is None:
+                self._ops.erase(port, self._signals)
+            else:
+                self._ops.read_flash(
+                    port,
+                    self.connection.selected_baud(),
+                    self._signals,
+                    address=request.address,
+                    size=request.size,
+                    project_id=request.placement.project_id,
+                    device=request.placement.device,
+                )
+        except (BusyError, OSError, ValueError) as exc:
+            self.note("error", f"[{kind.value}] {exc}")
+            return
+        self._job_firmware = None
+        self._job_kind = kind
+        self.connection.set_running(True)
+        self.connection.show_progress(0, "Connecting…")
+
+    def _erase(self) -> None:
+        self._board_job(JobKind.ERASE)
+
+    def _read(self) -> None:
+        self._board_job(JobKind.READ_FLASH)
+
+    def _board_records(self) -> None:
+        snapshot = self._memory.snapshot
+        if snapshot is None or not snapshot.info.mac:
+            return
+        records = self._context.history.query(mac=snapshot.info.mac)
+        dialogs.board_records(self, snapshot.info.mac, records, self.show_log_segment)
+
     # ---- window -----------------------------------------------------------------------
 
     def _window_menu(self) -> None:
         menu = QMenu(self)
         menu.addAction("Settings…", lambda: dialogs.settings(self, self._context.paths))
+        menu.addAction("Clean archive…", self._clean_archive)
         menu.addSeparator()
         menu.addAction("About Embr", lambda: dialogs.about(self, esptool.__version__))
         button = self.topbar.menu_button
@@ -644,3 +937,13 @@ class EmbrWindow(FrameWindow):
 
 def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+SETTLE_RECHECK_MS = 2500
+"""Look again after a build was seen settling (app.tracking.SETTLE_SECONDS plus margin)."""
+
+
+def _port_unavailable(message: str) -> bool:
+    """The job could not open its port: in use by another program, or gone."""
+    text = message.lower()
+    return any(k in text for k in ("could not open", "port is busy", "access is denied"))

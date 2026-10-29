@@ -185,6 +185,7 @@ class Sidebar(QWidget):
     project_selected = Signal(str)
     new_firmware = Signal()
     new_project = Signal()
+    import_idf = Signal()
     query_changed = Signal(str)
 
     def __init__(self) -> None:
@@ -201,6 +202,9 @@ class Sidebar(QWidget):
         self.new_menu = QMenu(self)
         self.new_menu.addAction("New firmware", self.new_firmware.emit).setToolTip(
             "fixed, add entries by hand"
+        )
+        self.new_menu.addAction("Import ESP-IDF build…", self.import_idf.emit).setToolTip(
+            "follows a build directory"
         )
         self.new_menu.addSeparator()
         self.new_menu.addAction("New project", self.new_project.emit)
@@ -320,7 +324,7 @@ class Sidebar(QWidget):
             row.meta.addWidget(tag(*source))
         if fw.flag == FirmwareFlag.NEEDS_CONFIRMATION:
             row.meta.addWidget(tag("!", "warn"))
-        elif fw.flag == FirmwareFlag.MISSING:
+        elif fw.flag in (FirmwareFlag.MISSING, FirmwareFlag.BLOCKED):
             row.meta.addWidget(tag(TIMES, "bad"))
         if fw.id == self._busy_id:
             row.meta.addWidget(tag("flashing", "info"))

@@ -53,6 +53,10 @@ class ConnectionPanel(QWidget):
     port_changed = Signal()
     baud_changed = Signal()
     identify_clicked = Signal()
+    erase_clicked = Signal()
+    read_clicked = Signal()
+    records_clicked = Signal()
+    """Board records of the identified MAC."""
     flash_clicked = Signal()
     """Flash, or Cancel while a job runs."""
     expand_toggled = Signal(bool)
@@ -70,6 +74,15 @@ class ConnectionPanel(QWidget):
         self.port = QComboBox()
         self.baud = QComboBox()
         self.identify = button("Connect && identify")
+        board_hint = "Available after Connect & identify on this port"
+        self.erase = button("Erase flash…")
+        self.erase.setToolTip(board_hint)
+        self.read = button("Read flash…")
+        self.read.setToolTip(board_hint)
+        board = QHBoxLayout()
+        board.setSpacing(6)
+        board.addWidget(self.erase, 1)
+        board.addWidget(self.read, 1)
         self.identity = QVBoxLayout()
         self.identity.setContentsMargins(0, 0, 0, 0)
         connect = QVBoxLayout()
@@ -77,6 +90,7 @@ class ConnectionPanel(QWidget):
         connect.addLayout(_row("Port", self.port))
         connect.addLayout(_row("Baud", self.baud))
         connect.addWidget(self.identify)
+        connect.addLayout(board)
         connect.addLayout(self.identity)
         # ---- checks ----
         self.checks = QVBoxLayout()
@@ -166,6 +180,8 @@ class ConnectionPanel(QWidget):
         self.port.activated.connect(lambda: self.port_changed.emit())
         self.baud.activated.connect(lambda: self.baud_changed.emit())
         self.identify.clicked.connect(self.identify_clicked.emit)
+        self.erase.clicked.connect(self.erase_clicked.emit)
+        self.read.clicked.connect(self.read_clicked.emit)
         self.flash.clicked.connect(self.flash_clicked.emit)
         self.expand.clicked.connect(self._toggle_expand)
         self.log_folder.clicked.connect(self.log_folder_clicked.emit)
@@ -268,6 +284,7 @@ class ConnectionPanel(QWidget):
                 "Identified",
                 label(f"{snapshot.time.strftime('%H:%M:%S')} · port released", tone="3"),
             ),
+            ("Records", self._records_link()),
         ]
         for row, (key, widget) in enumerate(rows):
             caption = label(key, tone="3")
@@ -278,6 +295,20 @@ class ConnectionPanel(QWidget):
             grid.addWidget(widget, row, 1)
         grid.setColumnStretch(1, 1)
         self.identity.addLayout(grid)
+
+    def set_board_actions(self, enabled: bool) -> None:
+        """Erase / Read flash: only with a snapshot for the selected port and no job."""
+        for widget in (self.erase, self.read):
+            widget.setEnabled(enabled and not self._running)
+
+    def _records_link(self) -> QLabel:
+        link = QLabel('<a href="records">Board records (all operations on this MAC)</a>')
+        link.setTextFormat(Qt.TextFormat.RichText)
+        link.linkActivated.connect(self._records_activated)
+        return link
+
+    def _records_activated(self, _href: str) -> None:
+        self.records_clicked.emit()
 
     # ---- checks and hint --------------------------------------------------------------
 
@@ -319,6 +350,8 @@ class ConnectionPanel(QWidget):
         self.flash.style().unpolish(self.flash)
         self.flash.style().polish(self.flash)
         self.identify.setEnabled(not running)
+        if running:
+            self.set_board_actions(False)
         self.port.setEnabled(not running and bool(self._ports))
         self.baud.setEnabled(not running and self.selected_baud() is not None)
 

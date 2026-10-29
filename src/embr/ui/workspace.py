@@ -1,6 +1,8 @@
 """Center column: firmware header, Entries / Parameters / Records tabs (design doc §6.1
 "中间工作区 — 选中固件时")."""
 
+import html
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -31,12 +33,14 @@ from PySide6.QtWidgets import (
 
 from embr.app.flashplan import image_header
 from embr.app.library import FirmwareFlag
+from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
 from embr.core.firmware.entries import AddressError
-from embr.core.firmware.files import FileState, read_entry
+from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import format_revision
 from embr.core.firmware.image_sniff import parse_partition_table
 from embr.core.firmware.model import AddressSource, Entry, Firmware, Source, editable_params
+from embr.core.firmware.tracking import ChangeKind, EntryMark, ResolveState
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.history import FlashRecord, RecordResult
 from embr.ui.owner import Owner
@@ -44,6 +48,11 @@ from embr.ui.sidebar import PLUS, chip_name
 from embr.ui.widgets import button, clear_layout, elided, label, tag
 
 EN_DASH = f" {chr(0x2013)} "
+MARK_TAGS = {
+    EntryMark.CHANGED: ("content changed", "warn"),
+    EntryMark.NEW: ("new file", "warn"),
+    EntryMark.MISSING: ("file missing", "bad"),
+}
 
 SOURCE_LABELS = {
     Source.MANUAL: ("fixed", "gray"),
@@ -56,6 +65,10 @@ CONNECTION_LABELS = {
     "usb_serial_jtag": "USB-Serial/JTAG",
     "usb_otg": "USB-OTG",
     "unknown": "serial port",
+}
+STATE_TAGS = {
+    ResolveState.TARGET_SWITCHED: "target switched",
+    ResolveState.INCOMPLETE: "build incomplete",
 }
 RESULT_TAGS = {
     RecordResult.OK: "ok",
@@ -91,6 +104,9 @@ class Header(QWidget):
         self.menu.addAction("Rename…\tF2", lambda: owner.firmware_action("rename"))
         self.menu.addAction("Duplicate", lambda: owner.firmware_action("duplicate"))
         self.menu.addAction("Move to project…", lambda: owner.firmware_action("move"))
+        self.archive_action = self.menu.addAction(
+            "Archive this version…", lambda: owner.firmware_action("archive")
+        )
         self.menu.addSeparator()
         self.menu.addAction("Delete…", lambda: owner.firmware_action("delete"))
         self.menu_button.clicked.connect(
@@ -109,7 +125,8 @@ class Header(QWidget):
         layout.addLayout(top)
         layout.addWidget(self.notes)
 
-    def show_firmware(self, firmware: Firmware, flag: FirmwareFlag) -> None:
+    def show_firmware(self, status: TrackStatus, flag: FirmwareFlag) -> None:
+        firmware = status.firmware
         clear_layout(self.row)
         self.menu_button.show()
         self.row.addWidget(label(crumb(self._owner, firmware), tone="3"))
@@ -122,7 +139,12 @@ class Header(QWidget):
         if flag == FirmwareFlag.NEEDS_CONFIRMATION:
             self.row.addWidget(tag("needs confirmation", "warn"))
         elif flag == FirmwareFlag.MISSING:
-            self.row.addWidget(tag("file missing", "bad"))
+            missing = "build output missing" if firmware.source.tracking else "file missing"
+            self.row.addWidget(tag(missing, "bad"))
+        elif flag == FirmwareFlag.BLOCKED:
+            self.row.addWidget(tag(STATE_TAGS.get(status.state, "build incomplete"), "bad"))
+        if status.updated_at is not None:
+            self.row.addWidget(tag(f"Build updated {status.updated_at:%H:%M:%S}", "info"))
         if firmware.read_only:
             self.row.addWidget(tag("created by a newer Embr", "warn"))
         text = firmware.notes or "no note — edit on the Parameters tab"
@@ -130,6 +152,9 @@ class Header(QWidget):
             self.notes.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, 900)
         )
         self.notes.setToolTip(firmware.notes or "No note yet. Edit it on the Parameters tab.")
+        self.archive_action.setEnabled(
+            status.state.flashable and any(e.file.startswith("path:") for e in firmware.entries)
+        )
 
     def show_project(self, owner: Owner, project_id: str) -> None:
         clear_layout(self.row)
@@ -154,14 +179,18 @@ class Banner(QFrame):
         self.setObjectName("banner")
         self.text = QLabel()
         self.text.setWordWrap(True)
+        self.text.setTextFormat(Qt.TextFormat.RichText)
         self.action = button("", "ibtn")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(9, 7, 9, 7)
         layout.addWidget(self.text, 1)
         layout.addWidget(self.action)
+        self.mode = ""
         self.hide()
 
-    def show_text(self, text: str, action: str = "") -> None:
+    def show_text(self, text: str, action: str = "", mode: str = "") -> None:
+        """`mode` tells the owner what the button does ("confirm", "directory")."""
+        self.mode = mode
         self.text.setText(text)
         self.action.setText(action)
         self.action.setVisible(bool(action))
@@ -170,6 +199,9 @@ class Banner(QFrame):
 
 class EntriesTab(QWidget):
     COLUMNS = ("", "Address", "Name", "Kind", "Address source", "Image requires", "Note")
+    archive_requested = Signal(str)
+    """entry id"""
+    merge_requested = Signal()
 
     def __init__(self, owner: Owner) -> None:
         super().__init__()
@@ -220,6 +252,10 @@ class EntriesTab(QWidget):
         row_layout = QHBoxLayout(add_row)
         row_layout.setContentsMargins(6, 0, 6, 0)
         row_layout.addWidget(self.add_button, 1)
+        self.merge_button = button("Merge to .bin…", "ibtn")
+        self.merge_button.setFixedWidth(130)
+        self.merge_button.clicked.connect(self.merge_requested.emit)
+        row_layout.addWidget(self.merge_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
@@ -230,7 +266,7 @@ class EntriesTab(QWidget):
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._filling = False
 
-    def show_firmware(self, firmware: Firmware, states: dict[str, FileState]) -> None:
+    def show_firmware(self, firmware: Firmware, marks: Mapping[str, EntryMark]) -> None:
         self._firmware = firmware
         locked = self._owner.is_locked(firmware.id) or firmware.read_only
         self._filling = True
@@ -238,9 +274,10 @@ class EntriesTab(QWidget):
         rows = sorted(firmware.entries, key=lambda e: (e.address is None, e.address or 0))
         self.table.setRowCount(len(rows))
         for row, entry in enumerate(rows):
-            self._fill_row(row, entry, states.get(entry.id, FileState.OK), locked)
+            self._fill_row(row, entry, marks.get(entry.id), locked)
         self._filling = False
         self.add_button.setEnabled(not locked)
+        self.merge_button.setEnabled(any(e.enabled for e in firmware.entries))
         header_height = self.table.horizontalHeader().sizeHint().height()
         self._fit_columns()
         scroll = self.table.horizontalScrollBar().sizeHint().height()
@@ -267,7 +304,7 @@ class EntriesTab(QWidget):
             widest = max(widest, width + 8)
         self.table.setColumnWidth(2, widest)
 
-    def _fill_row(self, row: int, entry: Entry, state: FileState, locked: bool) -> None:
+    def _fill_row(self, row: int, entry: Entry, mark: EntryMark | None, locked: bool) -> None:
         dim = "3" if not entry.enabled else None
         check = QTableWidgetItem()
         check.setData(Qt.ItemDataRole.UserRole, entry.id)
@@ -288,7 +325,7 @@ class EntriesTab(QWidget):
         address.setToolTip(hint)
         address.editingFinished.connect(lambda e=entry, w=address: self._address(e, w))
         self.table.setCellWidget(row, 1, _cell(address))
-        self.table.setCellWidget(row, 2, self._name_cell(entry, state, dim))
+        self.table.setCellWidget(row, 2, self._name_cell(entry, mark, dim))
         p = self._owner.palette
         for column, text, color in (
             (3, entry.kind.value, p.fg_3 if dim else p.fg_2),
@@ -306,7 +343,7 @@ class EntriesTab(QWidget):
         note.editingFinished.connect(lambda e=entry, w=note: self._note(e, w))
         self.table.setCellWidget(row, 6, _cell(note))
 
-    def _name_cell(self, entry: Entry, state: FileState, dim: str | None) -> QWidget:
+    def _name_cell(self, entry: Entry, mark: EntryMark | None, dim: str | None) -> QWidget:
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(6, 0, 6, 0)
@@ -314,10 +351,8 @@ class EntriesTab(QWidget):
         layout.addWidget(label(entry.name, tone=dim))
         if entry.file.startswith("archive:"):
             layout.addWidget(tag("archived", "gray"))
-        if state == FileState.CHANGED:
-            layout.addWidget(tag("content changed", "warn"))
-        elif state == FileState.MISSING:
-            layout.addWidget(tag("file missing", "bad"))
+        if mark is not None:
+            layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
             layout.addWidget(tag("added automatically", "gray"))
         layout.addStretch(1)
@@ -447,12 +482,18 @@ class EntriesTab(QWidget):
         entry = next((e for e in firmware.entries if e.id == entry_id), None)
         if entry is None:
             return
+        derived = firmware.source.tracking and entry.id not in {e.id for e in firmware.user_entries}
         menu = QMenu(self)
         relocate = menu.addAction("Re-locate…")
-        relocate.setEnabled(entry.file.startswith("path:"))
+        relocate.setEnabled(entry.file.startswith("path:") and not derived)
+        archive = menu.addAction("Archive this file")
+        archive.setEnabled(entry.file.startswith("path:") and not derived)
         copy_to = menu.addAction("Copy to firmware…")
         menu.addSeparator()
         remove = menu.addAction("Remove entry")
+        remove.setEnabled(not derived)
+        if derived:
+            remove.setToolTip("Comes from the build output; untick it to leave it out")
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is relocate:
             name, _ = QFileDialog.getOpenFileName(
@@ -461,6 +502,9 @@ class EntriesTab(QWidget):
             if name:
                 self._owner.library.relocate_entry(firmware.id, entry.id, Path(name))
                 self._owner.note("dim", f"[entry] {entry.name} now points at {name}")
+        elif chosen is archive:
+            self.archive_requested.emit(entry.id)
+            return
         elif chosen is copy_to:
             self._copy_to(firmware, entry)
         elif chosen is remove:
@@ -471,13 +515,9 @@ class EntriesTab(QWidget):
         self._owner.changed()
 
     def _copy_to(self, firmware: Firmware, entry: Entry) -> None:
-        targets = [
-            f
-            for f in self._owner.context.firmware.all()
-            if f.id != firmware.id and not f.source.tracking
-        ]
+        targets = [f for f in self._owner.context.firmware.all() if f.id != firmware.id]
         if not targets:
-            self._owner.note("note", "[entry] no other fixed firmware to copy to")
+            self._owner.note("note", "[entry] no other firmware to copy to")
             return
         names = [f"{f.name}  ({crumb(self._owner, f)})" for f in targets]
         choice, ok = QInputDialog.getItem(
@@ -496,7 +536,6 @@ class EntriesTab(QWidget):
             event.mimeData().hasUrls()
             and firmware is not None
             and not self._owner.is_locked(firmware.id)
-            and not firmware.source.tracking
         ):
             event.acceptProposedAction()
 
@@ -610,6 +649,8 @@ class ParamsTab(QWidget):
     def _origin(self, firmware: Firmware) -> tuple[str, QWidget]:
         if firmware.source == Source.ARCHIVED:
             return "Archived from", label(firmware.archived_from or "—", tone="2")
+        if firmware.build_ref is not None:
+            return "Build directory", self._build_dir(firmware)
         paths = [e for e in firmware.entries if e.file.startswith("path:")]
         first = next((e for e in paths if e.enabled), paths[0] if paths else None)
         text = str(Path(first.file.removeprefix("path:")).parent) if first else "—"
@@ -623,6 +664,35 @@ class ParamsTab(QWidget):
         small.setStyleSheet("font-size: 12px;")
         column.addWidget(small)
         return "Files folder", box
+
+    def _build_dir(self, firmware: Firmware) -> QWidget:
+        assert firmware.build_ref is not None
+        status = self._owner.library.tracker.cached(firmware.id)
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(elided(firmware.build_ref.path, mono=True, middle=True), 1)
+        change = button("Change…", "ibtn")
+        change.setEnabled(not self._owner.is_locked(firmware.id))
+        change.clicked.connect(lambda: self._owner.firmware_action("directory"))
+        row.addWidget(change)
+        column.addLayout(row)
+        resolved = (firmware.last_resolved or {}).get("resolved_at")
+        facts = [
+            "exists" if Path(firmware.build_ref.path).is_dir() else "not found",
+            f"last resolved {str(resolved).replace('T', ' ')}" if resolved else "",
+            f"ESP-IDF {status.idf_version}" if status and status.idf_version else "",
+            f"sdkconfig target {status.configured_target}"
+            if status and status.configured_target
+            else "",
+        ]
+        small = label(" · ".join(f for f in facts if f), tone="3")
+        small.setStyleSheet("font-size: 12px;")
+        column.addWidget(small)
+        return box
 
     def _chip(self, firmware: Firmware, editable: bool) -> QWidget:
         if not editable:
@@ -806,7 +876,7 @@ class FirmwareView(QWidget):
         super().__init__()
         self._owner = owner
         self.banner = Banner()
-        self.banner.action.clicked.connect(self._confirm)
+        self.banner.action.clicked.connect(self._banner_action)
         self.tabs = QHBoxLayout()
         self.tabs.setContentsMargins(14, 8, 14, 0)
         self.tabs.setSpacing(2)
@@ -840,12 +910,26 @@ class FirmwareView(QWidget):
         layout.addWidget(self.pages, 1)
         self._firmware: Firmware | None = None
 
-    def show_firmware(
-        self, firmware: Firmware, states: dict[str, FileState], flag: FirmwareFlag
-    ) -> None:
+    def show_firmware(self, status: TrackStatus) -> None:
+        firmware = status.firmware
         self._firmware = firmware
-        missing = [e.name for e in firmware.entries if states.get(e.id) == FileState.MISSING]
-        changed = [e.name for e in firmware.entries if states.get(e.id) == FileState.CHANGED]
+        if firmware.source.tracking:
+            self._tracking_banner(status)
+        else:
+            self._fixed_banner(status)
+        self.banner.action.setEnabled(not self._owner.is_locked(firmware.id))
+        self.entries.show_firmware(firmware, status.marks)
+        self.params.show_firmware(firmware)
+        self.records.show_firmware(firmware)
+
+    def _fixed_banner(self, status: TrackStatus) -> None:
+        entries = status.firmware.entries
+        missing = [
+            html.escape(e.name) for e in entries if status.marks.get(e.id) == EntryMark.MISSING
+        ]
+        changed = [
+            html.escape(e.name) for e in entries if status.marks.get(e.id) == EntryMark.CHANGED
+        ]
         if missing:
             self.banner.show_text(
                 f"Files missing: {', '.join(missing)}. Re-locate them (right-click an entry) "
@@ -856,17 +940,61 @@ class FirmwareView(QWidget):
                 f"Files changed on disk since the last check: {', '.join(changed)} (content). "
                 "Flashing is blocked until you confirm the list below.",
                 "Confirm entries",
+                "confirm",
             )
         else:
             self.banner.hide()
-        self.banner.action.setEnabled(not self._owner.is_locked(firmware.id))
-        self.entries.show_firmware(firmware, states)
-        self.params.show_firmware(firmware)
-        self.records.show_firmware(firmware)
 
-    def _confirm(self) -> None:
+    def _tracking_banner(self, status: TrackStatus) -> None:
+        firmware = status.firmware
+        problems = html.escape("; ".join(status.problems))
+        if status.state == ResolveState.TARGET_SWITCHED:
+            self.banner.show_text(
+                f"Target switched, rebuild needed: the configuration targets "
+                f"<b>{status.configured_target}</b>, the build output is still "
+                f"<b>{firmware.chip}</b>. Run <code>idf.py build</code>; flashing, archiving "
+                "and merging are blocked until then."
+            )
+        elif status.state == ResolveState.INCOMPLETE:
+            self.banner.show_text(
+                f"Build incomplete: {problems}. Wait for the build to finish or rebuild; "
+                "flashing is blocked."
+            )
+        elif status.state == ResolveState.BUILDING:
+            self.banner.show_text("The build output is being written; checking again shortly.")
+        elif status.state == ResolveState.MISSING:
+            resolved = (firmware.last_resolved or {}).get("resolved_at")
+            when = str(resolved).replace("T", " ") if resolved else "never"
+            self.banner.show_text(
+                f"{problems}. Last resolved {when}; the entries below are that snapshot and "
+                "cannot be flashed until the directory exists again.",
+                "Change directory…",
+                "directory",
+            )
+        elif status.state == ResolveState.NEEDS_CONFIRMATION:
+            first = [c for c in status.changes if c.kind != ChangeKind.GROUP_HINT]
+            lines = "".join(f"<br>•&nbsp;{html.escape(c.message)}" for c in first[:8])
+            more = f"<br>…and {len(first) - 8} more" if len(first) > 8 else ""
+            hint = (
+                "<br>The device group may need adjusting."
+                if any(c.kind == ChangeKind.GROUP_HINT for c in status.changes)
+                else ""
+            )
+            self.banner.show_text(
+                f"The build output changed since it was last confirmed:{lines}{more}{hint}"
+                "<br>Flashing is blocked until you confirm.",
+                "Confirm entries",
+                "confirm",
+            )
+        else:
+            self.banner.hide()
+
+    def _banner_action(self) -> None:
         firmware = self._firmware
         if firmware is None:
+            return
+        if self.banner.mode == "directory":
+            self._owner.firmware_action("directory")
             return
         self._owner.library.confirm_entries(firmware.id)
         self._owner.note("ok", f"[entries] {firmware.name}: entries confirmed")
