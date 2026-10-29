@@ -1,0 +1,23 @@
+schema = 1
+kind = "fs"
+toolchain = "ESP-IDF v6.1 (components/fatfs, components/spiffs)"
+content = "one file, hello.txt, containing the ASCII text 'embr fixture'"
+rebuild = "run the commands below in the ESP-IDF v6.1 environment, with <dir> holding hello.txt"
+
+[files."fat_raw.bin"]
+sha256 = "709d646e884bd7b154491347acb197c74da27a307f666ab2d238e91618c04c93"
+size = 131072
+command = "python $IDF_PATH/components/fatfs/fatfsgen.py <dir> --output_file fat_raw.bin --partition_size 0x20000"
+purpose = "FAT image without wear levelling: boot sector at offset 0x0"
+
+[files."fat_wl.bin"]
+sha256 = "8b7d110a5bcb00d15f20d9a37dc2d4d2ecca05a295d3d6358210e57e196ff125"
+size = 131072
+command = "python $IDF_PATH/components/fatfs/wl_fatfsgen.py <dir> --output_file fat_wl.bin --partition_size 0x20000"
+purpose = "FAT image with wear levelling: one 0xFF dummy sector, boot sector at offset 0x1000"
+
+[files."spiffs.bin"]
+sha256 = "fbd46342c411cac9045b96db83aadeddf3211367b1c71035f8e3628bdd72a65e"
+size = 131072
+command = "python $IDF_PATH/components/spiffs/spiffsgen.py 0x20000 <dir> spiffs.bin"
+purpose = "SPIFFS image (no reliable magic); recognised only by matching a spiffs partition size"

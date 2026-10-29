@@ -34,6 +34,7 @@ _MD5_MAGIC = b"\xeb\xeb"
 _OTADATA_NAMES = ("ota_data_initial.bin", "boot_app0.bin")
 _OTADATA_DEFAULTS = {"boot_app0.bin": 0xE000}  # PIO Arduino; IDF uses 0xD000
 _MERGED_SCAN_LIMIT = 0x10000
+_FAT_WL_SECTOR = 0x1000
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,9 @@ def sniff(data: bytes, file_name: str, table: PartitionTable | None = None) -> S
     file system, else UNKNOWN. ESP images: a bootloader descriptor means bootloader, an app
     descriptor means app; without a descriptor, all segments in RAM means bootloader and a
     segment mapped to flash means app; conflicting signals give UNKNOWN. otadata: name
-    ota_data_initial.bin / boot_app0.bin, or 8 KiB of 0xFF. Never raises for bad input."""
+    ota_data_initial.bin / boot_app0.bin, or 8 KiB of 0xFF. File systems: littlefs by its
+    superblock name, FAT by its boot sector, SPIFFS (no magic) only when exactly one spiffs
+    partition has the file's size. Never raises for bad input."""
     merged = _find_merged(data)
     if merged is not None:
         start, chip, header, inner = merged
@@ -172,6 +175,12 @@ def sniff(data: bytes, file_name: str, table: PartitionTable | None = None) -> S
     if b"littlefs" in data[:0x1000]:
         part = _fs_partition(table)
         return SniffResult(EntryKind.FS, None, part.offset if part else None, True, None, None)
+    if _is_fat(data):
+        part = table.first(TYPE_DATA, SUBTYPE_FAT) if table else None
+        return SniffResult(EntryKind.FS, None, part.offset if part else None, True, None, None)
+    spiffs = _spiffs_by_size(table, len(data))
+    if spiffs is not None:
+        return SniffResult(EntryKind.FS, None, spiffs.offset, True, None, None)
     return SniffResult(EntryKind.UNKNOWN, None, None, False, None, None)
 
 
@@ -226,6 +235,36 @@ def _table_inside(data: bytes, start: int) -> PartitionTable | None:
         if table is not None:
             return table
     return None
+
+
+def _is_fat(data: bytes) -> bool:
+    """FAT boot sector at 0x0, or at 0x1000 after the 0xFF dummy sector that ESP-IDF's
+    wl_fatfsgen.py puts in front of wear-levelled images."""
+    if _fat_boot_sector(data):
+        return True
+    dummy = data[:_FAT_WL_SECTOR]
+    return dummy == b"\xff" * _FAT_WL_SECTOR and _fat_boot_sector(data[_FAT_WL_SECTOR:])
+
+
+def _fat_boot_sector(sector: bytes) -> bool:
+    if len(sector) < 512 or sector[0] not in (0xEB, 0xE9) or sector[510:512] != b"\x55\xaa":
+        return False
+    (bytes_per_sector,) = struct.unpack_from("<H", sector, 11)
+    if bytes_per_sector not in (512, 1024, 2048, 4096):
+        return False
+    return sector[0x36:0x39] == b"FAT" or sector[0x52:0x57] == b"FAT32"
+
+
+def _spiffs_by_size(table: PartitionTable | None, size: int) -> Partition | None:
+    """The only spiffs partition of exactly `size` bytes (SPIFFS has no reliable magic)."""
+    if table is None:
+        return None
+    matches = [
+        p
+        for p in table.partitions
+        if p.type == TYPE_DATA and p.subtype == SUBTYPE_SPIFFS and p.size == size
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _fs_partition(table: PartitionTable | None) -> Partition | None:

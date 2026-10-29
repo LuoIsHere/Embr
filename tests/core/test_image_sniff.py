@@ -9,6 +9,9 @@ from embr_testkit import FIXTURES, IDF, idf_app_path, idf_expect
 from embr.core import chipinfo
 from embr.core.firmware.image_header import read_image_header
 from embr.core.firmware.image_sniff import (
+    SUBTYPE_FAT,
+    SUBTYPE_SPIFFS,
+    TYPE_DATA,
     TYPE_PARTITION_TABLE,
     PartitionTable,
     SniffResult,
@@ -21,6 +24,7 @@ from embr.core.firmware.image_sniff import (
 from embr.core.firmware.kinds import EntryKind
 
 SYNTH = FIXTURES / "synthetic"
+FS = FIXTURES / "fs"
 OTA = IDF / "esp32s3_ota_custom/build"
 PIO_S3 = FIXTURES / "pio/arduino_esp32s3_otadata"
 CHIP_SAMPLES = ["esp32_hello", "esp32s3_hello", "esp32p4_rev1_hello"]
@@ -165,6 +169,40 @@ def test_app_with_table_bytes_at_merged_offset_is_app(sample: str) -> None:
     table = _table_file(sample).read_bytes()
     data[0x4000 : 0x4000 + len(table)] = table
     assert sniff(bytes(data), "app.bin").kind == EntryKind.APP
+
+
+# --- file system images ------------------------------------------------------------------
+
+FS_OFFSET = 0x110000
+FS_SIZE = 0x20000
+
+
+def _fs_table(subtype: int, size: int = FS_SIZE) -> PartitionTable:
+    entry = b"\xaa\x50" + bytes([TYPE_DATA, subtype])
+    entry += struct.pack("<II", FS_OFFSET, size) + b"storage".ljust(16, b"\x00")
+    entry += struct.pack("<I", 0)
+    table = parse_partition_table(entry.ljust(0xC00, b"\xff"))
+    assert table is not None
+    return table
+
+
+@pytest.mark.parametrize("name", ["fat_raw.bin", "fat_wl.bin"])
+def test_fat_images(name: str) -> None:
+    placed = _sniff(FS / name, _fs_table(SUBTYPE_FAT))
+    assert (placed.kind, placed.address, placed.confirm) == (EntryKind.FS, FS_OFFSET, True)
+    unplaced = _sniff(FS / name)
+    assert (unplaced.kind, unplaced.address, unplaced.confirm) == (EntryKind.FS, None, True)
+
+
+def test_spiffs_placed_by_partition_size() -> None:
+    result = _sniff(FS / "spiffs.bin", _fs_table(SUBTYPE_SPIFFS))
+    assert (result.kind, result.address, result.confirm) == (EntryKind.FS, FS_OFFSET, True)
+
+
+@pytest.mark.parametrize("size", [None, 0x30000])
+def test_spiffs_without_matching_partition_is_unknown(size: int | None) -> None:
+    table = None if size is None else _fs_table(SUBTYPE_SPIFFS, size)
+    assert _sniff(FS / "spiffs.bin", table).kind == EntryKind.UNKNOWN
 
 
 # --- partition tables --------------------------------------------------------------------
