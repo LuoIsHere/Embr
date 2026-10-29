@@ -14,7 +14,8 @@ Event order for a flash job:
    then EntryEvent(WRITTEN or SKIPPED)
 7. reset as plan.after -> ResultEvent(OK)
 
-An identify job sends InfoEvent, then ResultEvent(OK). LogEvents may appear anywhere.
+An identify job sends InfoEvent, then ResultEvent(OK). Erase and read_flash jobs: see
+jobs.erase() and jobs.read_flash(). LogEvents may appear anywhere.
 
 ESPTOOL_CFGFILE is set by embr.main before this package is imported: importing it imports
 esptool, which reads its config file at that moment.
@@ -27,7 +28,7 @@ import traceback
 from contextlib import redirect_stdout
 from typing import TextIO
 
-from embr.core.flasher.plan import IdentifyPlan
+from embr.core.flasher.plan import ErasePlan, IdentifyPlan, ReadPlan
 from embr.core.flasher.protocol import ErrorEvent, Event, ProtocolError, decode_task, encode_event
 
 
@@ -62,6 +63,10 @@ def run(stdin: TextIO, stdout: TextIO) -> int:
         with redirect_stdout(sink):
             if isinstance(task, IdentifyPlan):
                 jobs.identify(task, send)
+            elif isinstance(task, ErasePlan):
+                jobs.erase(task, send)
+            elif isinstance(task, ReadPlan):
+                jobs.read_flash(task, send, cursor)
             else:
                 jobs.flash(task, send, cursor)
     except BaseException as exc:  # KeyboardInterrupt included: always end with an event

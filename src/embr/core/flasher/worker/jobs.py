@@ -18,7 +18,14 @@ from esptool.loader import ESPLoader
 from embr.core import chipinfo
 from embr.core.flasher import checks
 from embr.core.flasher.checks import Check, CheckLevel, ChipState, SecurityState
-from embr.core.flasher.plan import ROM_BAUD, FlashPlan, IdentifyPlan, write_flash_kwargs
+from embr.core.flasher.plan import (
+    ROM_BAUD,
+    ErasePlan,
+    FlashPlan,
+    IdentifyPlan,
+    ReadPlan,
+    write_flash_kwargs,
+)
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -105,6 +112,20 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
         _close(esp)
     skipped = len(plan.entries) - written
     send(ResultEvent(ResultStatus.OK, f"{written} written, {skipped} already in flash"))
+
+
+def erase(plan: ErasePlan, send: Send) -> None:
+    """Connect -> InfoEvent -> security checks (any REFUSE: ResultEvent(REFUSED), nothing
+    erased) -> erase the whole flash -> reset as plan.after -> ResultEvent(OK)."""
+    raise NotImplementedError
+
+
+def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
+    """Connect -> InfoEvent -> security checks (any REFUSE: ResultEvent(REFUSED), nothing
+    read) -> range check against the detected flash size (beyond it: CheckEvent REFUSE,
+    ResultEvent(REFUSED)) -> ProgressEvents (entry_index 0, address = plan.address) while
+    reading to plan.output -> reset -> ResultEvent(OK) whose message gives the size read."""
+    raise NotImplementedError
 
 
 def _connect(port: str, before: str) -> ESPLoader:

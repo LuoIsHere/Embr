@@ -1,7 +1,11 @@
 """Use cases on projects, groups, firmware and entries, and the sidebar tree.
 
-Every change is saved before the method returns. Entry operations apply to fixed firmware
-(manual, archived); for tracking firmware they raise ValueError.
+Every change is saved before the method returns. Entry operations on fixed firmware
+(manual, archived) change its entries. On tracking firmware: address, enabled state and
+note of a derived entry (id = tracking.entry_key()) go to entry_overrides; added files and
+attachments become user_entries; removing, relocating or copying into a derived entry raises
+ValueError; user entries behave like fixed entries. Every change to a tracking firmware
+invalidates its tracker status.
 """
 
 import dataclasses
@@ -12,6 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from embr.app.context import AppContext
+from embr.app.tracking import Tracker
 from embr.core.firmware import model
 from embr.core.firmware.entries import (
     attachment_entry,
@@ -31,6 +36,7 @@ from embr.core.firmware.files import (
     relocate,
 )
 from embr.core.firmware.image_sniff import blank_otadata, parse_partition_table, sniff
+from embr.core.firmware.import_idf import IdfBuild
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware, Source
 from embr.core.firmware.store import default_name_from_files
@@ -47,6 +53,8 @@ class FirmwareFlag(StrEnum):
     """Tag "!": an entry file's content changed since it was recorded."""
     MISSING = "missing"
     """Tag with the multiplication sign: an entry file (or the build directory) is gone."""
+    BLOCKED = "blocked"
+    """Same tag: the build is incomplete or its target was switched without a rebuild."""
 
 
 @dataclass(frozen=True)
@@ -89,9 +97,11 @@ class Tree:
 
 
 class Library:
-    def __init__(self, context: AppContext) -> None:
+    def __init__(self, context: AppContext, tracker: Tracker | None = None) -> None:
+        """`tracker` is shared with Operations and the UI; None creates one."""
         self._ctx = context
         self._flags: dict[str, FirmwareFlag] = {}
+        self._tracker = tracker
 
     # ---- sidebar ----------------------------------------------------------------------
 
@@ -99,8 +109,10 @@ class Library:
         """Projects sorted by name with their groups and firmware (by name), then standalone
         firmware. `query` (case-insensitive substring): a project whose name matches keeps
         all its firmware; otherwise only firmware whose name matches are kept, and projects
-        left with none are dropped. Flags come from the last file check of each firmware
-        (check_files()), or a cheap existence check when it has not been checked yet."""
+        left with none are dropped. Flags come from the tracker's cached status of each
+        firmware (NEEDS_CONFIRMATION -> "!", MISSING -> MISSING, INCOMPLETE and
+        TARGET_SWITCHED -> BLOCKED; never a file access), or a cheap existence check when it
+        has not been checked yet."""
         q = query.strip().casefold()
         everything = self._ctx.firmware.all()
         rows = {f.id: self._row(f) for f in everything}
@@ -136,7 +148,8 @@ class Library:
 
     def check_files(self, firmware_id: str) -> dict[str, FileState]:
         """Re-check every entry by name, path and hash (done when a firmware is opened and
-        before flashing) and update the firmware's flag."""
+        before flashing) and update the firmware's flag. Tracking firmware: Tracker.check()
+        decides the flag; the returned states cover their user entries only."""
         firmware = self._ctx.firmware.get(firmware_id)
         states = firmware_states(firmware, self._ctx.paths.archive)
         self._flags[firmware_id] = _flag_of(states.values())
@@ -248,6 +261,26 @@ class Library:
         """Archive files and flash records are kept."""
         self._ctx.firmware.delete(firmware_id)
         self._flags.pop(firmware_id, None)
+
+    def preview_idf(self, build_dir: Path) -> IdfBuild:
+        """What importing `build_dir` would bring, for the import dialog. import_idf errors
+        (BuildMissingError, EncryptedBuildError, IdfBuildError) propagate."""
+        raise NotImplementedError
+
+    def import_idf(
+        self,
+        build_dir: Path,
+        *,
+        name: str = "",
+        project_id: str | None = None,
+        device: str = "",
+    ) -> Firmware:
+        """New IDF_BUILD firmware following `build_dir`: name (default
+        import_idf.default_firmware_name(), made unique), project and group as given (a
+        project copies only erase_all from its defaults); resolved at once and the first
+        resolution accepted as last_resolved. import_idf errors propagate; PlanError when
+        the build cannot be resolved (incomplete, target switched), nothing is created."""
+        raise NotImplementedError
 
     def set_param(self, firmware_id: str, name: str, value: object) -> Firmware:
         """firmware.model.set_param() and save; its errors propagate."""

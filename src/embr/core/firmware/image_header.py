@@ -39,6 +39,10 @@ class ImageHeader:
     """First segment starts with the bootloader descriptor magic byte 0x50."""
     segment_addresses: tuple[int, ...] = ()
     """Load address of every segment, in image order."""
+    idf_ver: str | None = None
+    """ESP-IDF version string from the descriptor (esp_app_desc_t.idf_ver at 0x70 of the
+    first segment's data, or the bootloader descriptor's idf_ver at 0x08), NUL-stripped,
+    at most 31 characters; None without a descriptor."""
 
 
 def read_image_header(data: bytes) -> ImageHeader | None:

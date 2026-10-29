@@ -10,7 +10,7 @@ from types import UnionType
 from typing import Union, cast, get_args, get_origin, get_type_hints
 
 from embr.core.flasher.checks import CheckLevel, SecurityState
-from embr.core.flasher.plan import FlashPlan, IdentifyPlan
+from embr.core.flasher.plan import ErasePlan, FlashPlan, IdentifyPlan, ReadPlan
 
 
 class ProtocolError(ValueError):
@@ -100,12 +100,12 @@ class ErrorEvent:
 
 
 Event = InfoEvent | CheckEvent | LogEvent | ProgressEvent | EntryEvent | ResultEvent | ErrorEvent
-Task = IdentifyPlan | FlashPlan
+Task = IdentifyPlan | FlashPlan | ErasePlan | ReadPlan
 
 
 def encode_task(task: Task) -> str:
     """Task as a single JSON document (no trailing newline)."""
-    kind = "identify" if isinstance(task, IdentifyPlan) else "flash"
+    kind = next(name for name, cls in _TASK_TYPES.items() if isinstance(task, cls))
     return json.dumps({"kind": kind, "plan": asdict(task)})
 
 
@@ -152,7 +152,12 @@ _EVENT_NAMES: dict[type, str] = {
 _EVENT_TYPES: dict[str, type] = {name: cls for cls, name in _EVENT_NAMES.items()}
 
 
-_TASK_TYPES: dict[str, type] = {"identify": IdentifyPlan, "flash": FlashPlan}
+_TASK_TYPES: dict[str, type] = {
+    "identify": IdentifyPlan,
+    "flash": FlashPlan,
+    "erase": ErasePlan,
+    "read_flash": ReadPlan,
+}
 
 
 def _convert(tp: object, value: object) -> object:

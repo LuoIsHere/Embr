@@ -11,6 +11,7 @@ from enum import StrEnum
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, declared_flash_size, plan_entries
 from embr.app.identify import IdentifySnapshot
+from embr.app.tracking import TrackStatus
 from embr.core.firmware.entries import (
     Problem,
     check_layout,
@@ -58,8 +59,13 @@ def preflight(
     firmware: Firmware,
     port: PortInfo | None,
     identified: IdentifySnapshot | None,
+    status: TrackStatus | None = None,
 ) -> list[CheckItem]:
-    """In this order:
+    """For a tracking firmware `status` is its Tracker status and `firmware` its resolved
+    copy; the list then starts with a build item: PASS "Build resolved" (with the IDF
+    version and chip, and the time it was followed when UPDATED), REFUSE for MISSING,
+    INCOMPLETE, TARGET_SWITCHED, BUILDING and NEEDS_CONFIRMATION (with the problems or the
+    first changes). Then, in this order:
     1. layout: overlapping enabled entries, entries without address, beyond the identified
        flash size, more than one enabled partition table, partition placement problems;
        one PASS item when there are none ("No address overlap")

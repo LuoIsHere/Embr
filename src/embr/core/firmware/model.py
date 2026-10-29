@@ -96,6 +96,9 @@ class Firmware:
     before: str = "default-reset"
     after: str = "hard-reset"
     erase_all: bool = False
+    stub: bool = True
+    """Load the flasher stub. IDF tracking: extra_esptool_args.stub (derived, not stored);
+    always True for other firmware."""
     entries: list[Entry] = field(default_factory=lambda: list[Entry]())
     """Fixed firmware: all entries. Tracking firmware: derived entries of the last resolve
     (not stored; rebuilt by the resolver)."""

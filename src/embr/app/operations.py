@@ -18,6 +18,7 @@ import esptool
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, assemble_plan
 from embr.app.identify import IdentifyMemory
+from embr.app.tracking import Tracker
 from embr.core.firmware.files import FileState, entry_state
 from embr.core.firmware.model import Firmware
 from embr.core.flasher import runner
@@ -49,6 +50,8 @@ StartJob = Callable[[Task, Callable[[Event], None]], JobHandle]
 class JobKind(StrEnum):
     IDENTIFY = "identify"
     FLASH = "flash"
+    ERASE = "erase"
+    READ_FLASH = "read_flash"
 
 
 class BusyError(RuntimeError):
@@ -72,12 +75,14 @@ class JobOutcome:
     result: RecordResult
     message: str
     record_id: str | None
-    """The flash record; None for identify (not recorded)."""
+    """The record; None for identify (not recorded)."""
     log_file: str
     segment_id: str
     """Header id of the job's log segment (the record id for flash)."""
     native_usb: bool
     """The port was USB-Serial/JTAG or USB-OTG: the UI shows the manual reset hint."""
+    firmware_id: str | None = None
+    """read_flash that ended OK: the dump firmware created from it."""
 
 
 class Listener(Protocol):
@@ -121,9 +126,12 @@ class Operations:
         *,
         start_job: StartJob | None = None,
         clock: Callable[[], datetime.datetime] = datetime.datetime.now,
+        tracker: Tracker | None = None,
     ) -> None:
-        """`start_job` defaults to core.flasher.runner.start; tests pass a fake."""
+        """`start_job` defaults to core.flasher.runner.start; tests pass a fake. `tracker`
+        is shared with the Library and the UI; None creates one."""
         self._ctx = context
+        self._tracker = tracker
         self._memory = identify_memory
         self._dispatch = dispatch
         self._start_job: StartJob = start_job or runner.start
@@ -150,9 +158,20 @@ class Operations:
         job = _Job(JobKind.IDENTIFY, listener, port, segment, segment_id, start)
         self._run(job, build_identify_plan(port.device, port.connection))
 
-    def flash(self, firmware_id: str, port: PortInfo, baud: int | None, listener: Listener) -> None:
-        """Start a flash job for a fixed firmware. Before starting: the entry files are
-        checked again; a firmware without a chip takes the identified chip (saved) or
+    def flash(
+        self,
+        firmware_id: str,
+        port: PortInfo,
+        baud: int | None,
+        listener: Listener,
+        *,
+        shown_digest: str | None = None,
+    ) -> None:
+        """Start a flash job. Before starting: Tracker.verify_for_flash(firmware_id,
+        shown_digest) (app.tracking.BuildChangedError when the firmware differs from the shown
+        one or is being built, PlanError when it is not flashable; no job, no record), so a
+        tracking firmware is flashed as currently resolved; the entry files are checked
+        again; a firmware without a chip takes the identified chip (saved) or
         flashplan.PlanError is raised when nothing is identified; the plan is assembled
         (blank entries written to temp/). The log segment header carries the record id.
         At the end the record is saved with the plan's reset modes, connection type, baud,
@@ -187,6 +206,33 @@ class Operations:
         job = _Job(JobKind.FLASH, listener, port, segment, record_id, start, firmware, plan)
         job.kinds = {(e.address, e.name): str(e.kind) for e in enabled if e.address is not None}
         self._run(job, plan)
+
+    def erase(self, port: PortInfo, listener: Listener) -> None:
+        """Start an erase-flash job. Its record (operation ERASE) has no entries, project or
+        firmware; chip details, MAC and the equivalent command are filled as for flash.
+        BusyError while a job runs."""
+        raise NotImplementedError
+
+    def read_flash(
+        self,
+        port: PortInfo,
+        baud: int | None,
+        listener: Listener,
+        *,
+        address: int = 0,
+        size: int | None = None,
+        project_id: str | None = None,
+        device: str = "",
+    ) -> None:
+        """Start a read-flash job writing to temp/. On OK the content is archived and a
+        fixed MANUAL firmware is created in the given project and group: chip from the
+        InfoEvent, one enabled MERGED entry at `address` ("archive:<sha256>", from_dump),
+        flash parameters "keep", name "<chip> dump YYYY-MM-DD HH-MM" (made unique), notes
+        saying it may contain credentials. The record (operation READ_FLASH) has one entry
+        (address, size read, sha256, kind merged) and points at that firmware; failed,
+        refused or cancelled jobs create no firmware and the record has no entry.
+        JobOutcome.firmware_id is the new firmware. BusyError while a job runs."""
+        raise NotImplementedError
 
     def cancel(self) -> None:
         """Kill the running job's worker; the job then finishes as CANCELLED. No effect

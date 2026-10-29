@@ -78,6 +78,35 @@ class IdentifyPlan:
     stub: bool = True
 
 
+@dataclass(frozen=True)
+class ErasePlan:
+    """Erase the whole flash (no firmware involved)."""
+
+    port: str
+    connection: ConnectionType
+    before: str
+    after: str
+    stub: bool = True
+
+
+@dataclass(frozen=True)
+class ReadPlan:
+    """Read flash into a file in temp/ (dump)."""
+
+    port: str
+    connection: ConnectionType
+    baud: int | None
+    """None on native USB."""
+    before: str
+    after: str
+    address: int
+    size: int | None
+    """Bytes to read; None reads to the end of the detected flash."""
+    output: str
+    """Absolute path the worker writes; the app moves the content into the archive."""
+    stub: bool = True
+
+
 def adjust_reset(
     connection: ConnectionType, before: str, after: str
 ) -> tuple[str, str, tuple[str, ...]]:
@@ -168,6 +197,36 @@ def build_identify_plan(
     return IdentifyPlan(port=port, connection=connection, before=new_before, after=new_after)
 
 
+def build_erase_plan(port: str, connection: ConnectionType) -> ErasePlan:
+    """Erase plan with default reset modes adjusted to the connection type."""
+    raise NotImplementedError
+
+
+def build_read_plan(
+    port: str,
+    connection: ConnectionType,
+    output: str,
+    *,
+    address: int = 0,
+    size: int | None = None,
+    baud: int | None = None,
+) -> ReadPlan:
+    """Read plan with default reset modes adjusted to the connection type; baud as in
+    build_flash_plan(). ValueError for a negative address or a size below 1."""
+    raise NotImplementedError
+
+
+def erase_cli_args(plan: ErasePlan) -> list[str]:
+    """--chip auto, -p, --before, --after, --no-stub (if off), erase-flash."""
+    raise NotImplementedError
+
+
+def read_cli_args(plan: ReadPlan) -> list[str]:
+    """--chip auto, -p, -b (UART only), --before, --after, --no-stub (if off),
+    read-flash <address> <size, or ALL when None> <output>."""
+    raise NotImplementedError
+
+
 def cli_args(plan: FlashPlan) -> list[str]:
     """esptool v5 arguments (without the program name) equivalent to the plan:
     --chip, -p, -b (UART only), --before, --after, --no-stub (if stub is off), write-flash,
@@ -191,9 +250,15 @@ def cli_args(plan: FlashPlan) -> list[str]:
     return args
 
 
-def command_line(plan: FlashPlan) -> str:
+def command_line(plan: FlashPlan | ErasePlan | ReadPlan) -> str:
     """`esptool ...` command line for display and copying, quoted for Windows."""
-    return subprocess.list2cmdline(["esptool", *cli_args(plan)])
+    if isinstance(plan, ErasePlan):
+        args = erase_cli_args(plan)
+    elif isinstance(plan, ReadPlan):
+        args = read_cli_args(plan)
+    else:
+        args = cli_args(plan)
+    return subprocess.list2cmdline(["esptool", *args])
 
 
 def write_flash_kwargs(plan: FlashPlan) -> dict[str, object]:

@@ -3,6 +3,7 @@
 import sqlite3
 from dataclasses import dataclass
 
+from embr.core.archive import Archive
 from embr.core.firmware.store import FirmwareStore
 from embr.core.history import History
 from embr.core.logs import LogBook
@@ -21,6 +22,7 @@ class AppContext:
     history: History
     logs: LogBook
     settings: Settings
+    archive: Archive
 
     def close(self) -> None:
         """Save the settings and close the database."""
@@ -40,4 +42,5 @@ def open_context(paths: AppPaths) -> AppContext:
         history=History(database),
         logs=LogBook(paths.logs),
         settings=Settings(paths.settings, paths.backup),
+        archive=Archive(paths.archive, database),
     )
