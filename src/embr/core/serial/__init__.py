@@ -1,11 +1,20 @@
-"""Serial port enumeration and connection type detection. Never opens a port."""
+"""Serial port enumeration, connection type detection, hotplug comparison and remembered
+baud rates. Never opens a port."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
 from serial.tools import list_ports as _list_ports
 
 from embr.core import chipinfo
+from embr.core.storage.settings import Settings
+
+DEFAULT_BAUD = 460800
+"""Default for adjustable ports; the same as `idf.py flash -b`."""
+
+BAUD_SECTION = "baud"
+"""settings.ini section; keys are "vvvv:pppp" (lower-case hex VID:PID)."""
 
 
 class ConnectionType(StrEnum):
@@ -65,6 +74,58 @@ def list_ports() -> list[PortInfo]:
             )
         )
     return sorted(ports, key=lambda p: _natural_key(p.device))
+
+
+@dataclass(frozen=True)
+class PortChange:
+    added: tuple[PortInfo, ...]
+    removed: tuple[PortInfo, ...]
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added or self.removed)
+
+
+class PortWatcher:
+    """Compares successive port lists. It has no thread or timer: the caller decides when
+    to poll (the UI adapter polls on WM_DEVICECHANGE plus a slow timer, design doc §7.3).
+
+    Ports are compared by identity: device name, VID, PID and serial number. A port that
+    vanished and came back with the same identity between two polls is no change; one that
+    came back with a different identity is reported as removed (old) and added (new)."""
+
+    def __init__(self, enumerate_ports: Callable[[], list[PortInfo]] = list_ports) -> None:
+        """`enumerate_ports` is replaceable for tests. The first poll() reports every port
+        present as added."""
+        raise NotImplementedError
+
+    @property
+    def ports(self) -> tuple[PortInfo, ...]:
+        """The port list seen by the last poll(), sorted like list_ports(); empty before the
+        first poll."""
+        raise NotImplementedError
+
+    def poll(self) -> PortChange:
+        """Enumerate once and report what changed since the previous poll. Added and removed
+        ports are sorted like list_ports()."""
+        raise NotImplementedError
+
+
+def baud_adjustable(port: PortInfo) -> bool:
+    """False for native USB (USB-Serial/JTAG, USB-OTG), where baud rate does not apply."""
+    raise NotImplementedError
+
+
+def default_baud(settings: Settings, port: PortInfo) -> int | None:
+    """Baud to preselect for a port: None when not adjustable; else the rate remembered for
+    its VID/PID, else DEFAULT_BAUD."""
+    raise NotImplementedError
+
+
+def remember_baud(settings: Settings, port: PortInfo, baud: int) -> bool:
+    """After a successful flash: store `baud` for the port's VID/PID. Not stored (False) for
+    native USB and for ports without VID/PID. The caller saves the settings."""
+    raise NotImplementedError
 
 
 def _natural_key(device: str) -> tuple[str, int]:
