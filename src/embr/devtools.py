@@ -1,6 +1,6 @@
 """Command-line demo of the flashing engine, for checks on real boards.
 
-python -m embr.devtools ports
+python -m embr.devtools ports [--watch]
 python -m embr.devtools identify -p COM3
 python -m embr.devtools flash -p COM3 --chip esp32s3 0x0:bootloader.bin 0x8000:pt.bin ...
 """
@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import sys
 import threading
+import time
 from pathlib import Path
 
 from embr.core import serial
@@ -79,10 +80,31 @@ def _run(task: Task) -> int:
     return 0 if status[0] == ResultStatus.OK else 1
 
 
+def _port_line(p: serial.PortInfo) -> str:
+    ids = f"{p.vid:04X}:{p.pid:04X}" if p.vid is not None and p.pid is not None else "-"
+    return f"{p.device:8} {ids:10} {p.connection:16} {p.description}"
+
+
+def _watch() -> int:
+    # the app polls on WM_DEVICECHANGE; a plain timer is enough to check PortWatcher here
+    watcher = serial.PortWatcher()
+    try:
+        while True:
+            change = watcher.poll()
+            for p in change.removed:
+                print(f"- {_port_line(p)}", flush=True)
+            for p in change.added:
+                print(f"+ {_port_line(p)}", flush=True)
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="embr.devtools")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("ports")
+    ports = sub.add_parser("ports")
+    ports.add_argument("--watch", action="store_true", help="report plug and unplug until Ctrl+C")
     ident = sub.add_parser("identify")
     ident.add_argument("-p", "--port", required=True)
     flash = sub.add_parser("flash")
@@ -96,9 +118,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "ports":
+        if args.watch:
+            return _watch()
         for p in serial.list_ports():
-            ids = f"{p.vid:04X}:{p.pid:04X}" if p.vid is not None and p.pid is not None else "-"
-            print(f"{p.device:8} {ids:10} {p.connection:16} {p.description}")
+            print(_port_line(p))
         return 0
     port = _port(args.port)
     if args.command == "identify":

@@ -97,35 +97,62 @@ class PortWatcher:
     def __init__(self, enumerate_ports: Callable[[], list[PortInfo]] = list_ports) -> None:
         """`enumerate_ports` is replaceable for tests. The first poll() reports every port
         present as added."""
-        raise NotImplementedError
+        self._enumerate = enumerate_ports
+        self._ports: tuple[PortInfo, ...] = ()
 
     @property
     def ports(self) -> tuple[PortInfo, ...]:
         """The port list seen by the last poll(), sorted like list_ports(); empty before the
         first poll."""
-        raise NotImplementedError
+        return self._ports
 
     def poll(self) -> PortChange:
         """Enumerate once and report what changed since the previous poll. Added and removed
         ports are sorted like list_ports()."""
-        raise NotImplementedError
+        current = tuple(sorted(self._enumerate(), key=lambda p: _natural_key(p.device)))
+        before = {_identity(p) for p in self._ports}
+        after = {_identity(p) for p in current}
+        added = tuple(p for p in current if _identity(p) not in before)
+        removed = tuple(p for p in self._ports if _identity(p) not in after)
+        self._ports = current
+        return PortChange(added, removed)
 
 
 def baud_adjustable(port: PortInfo) -> bool:
     """False for native USB (USB-Serial/JTAG, USB-OTG), where baud rate does not apply."""
-    raise NotImplementedError
+    return port.connection not in (ConnectionType.USB_SERIAL_JTAG, ConnectionType.USB_OTG)
 
 
 def default_baud(settings: Settings, port: PortInfo) -> int | None:
     """Baud to preselect for a port: None when not adjustable; else the rate remembered for
     its VID/PID, else DEFAULT_BAUD."""
-    raise NotImplementedError
+    if not baud_adjustable(port):
+        return None
+    key = _baud_key(port)
+    stored = settings.get(BAUD_SECTION, key) if key else None
+    if stored is not None and stored.isdecimal() and int(stored) > 0:
+        return int(stored)
+    return DEFAULT_BAUD
 
 
 def remember_baud(settings: Settings, port: PortInfo, baud: int) -> bool:
     """After a successful flash: store `baud` for the port's VID/PID. Not stored (False) for
     native USB and for ports without VID/PID. The caller saves the settings."""
-    raise NotImplementedError
+    key = _baud_key(port)
+    if key is None or not baud_adjustable(port):
+        return False
+    settings.set(BAUD_SECTION, key, str(baud))
+    return True
+
+
+def _identity(port: PortInfo) -> tuple[str, int | None, int | None, str | None]:
+    return port.device, port.vid, port.pid, port.serial_number
+
+
+def _baud_key(port: PortInfo) -> str | None:
+    if port.vid is None or port.pid is None:
+        return None
+    return f"{port.vid:04x}:{port.pid:04x}"
 
 
 def _natural_key(device: str) -> tuple[str, int]:
