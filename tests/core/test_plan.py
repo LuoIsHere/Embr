@@ -10,12 +10,18 @@ from esptool import cli as esptool_cli
 
 from embr.core.flasher.plan import (
     DEFAULT_UART_BAUD,
+    ErasePlan,
     FlashPlan,
     FlashSettings,
+    ReadPlan,
     adjust_reset,
+    build_erase_plan,
     build_flash_plan,
+    build_read_plan,
     cli_args,
     command_line,
+    erase_cli_args,
+    read_cli_args,
     write_flash_kwargs,
 )
 from embr.core.serial import ConnectionType
@@ -145,3 +151,68 @@ def test_command_line() -> None:
     assert list(lexer)[1:] == cli_args(plan)
     assert "--skip-flashed" in line
     assert "--skip-flashed" not in command_line(_plan(erase_all=True))
+
+
+# --- erase and read plans ---------------------------------------------------------------
+
+
+def test_erase_and_read_plans_adjust_reset_and_baud() -> None:
+    for connection in (UART, JTAG, OTG):
+        before, after, _ = adjust_reset(connection, "default-reset", "hard-reset")
+        erase = build_erase_plan("COM3", connection)
+        read = build_read_plan("COM3", connection, "dump.bin")
+        assert (erase.before, erase.after) == (read.before, read.after) == (before, after)
+        assert (read.address, read.size) == (0, None)
+        uart = connection is UART
+        assert read.baud == (DEFAULT_UART_BAUD if uart else None)
+        assert build_read_plan("COM3", connection, "d", baud=921600).baud == (
+            921600 if uart else None
+        )
+    with pytest.raises(ValueError):
+        build_read_plan("COM3", UART, "d", address=-1)
+    with pytest.raises(ValueError):
+        build_read_plan("COM3", UART, "d", size=0)
+
+
+DUMP = str(Path("dump.bin").resolve())
+SERIAL_PLANS: dict[str, ErasePlan | ReadPlan] = {
+    "erase": ErasePlan("COM3", UART, "default-reset", "hard-reset"),
+    "read_all": ReadPlan("COM3", UART, 460800, "default-reset", "hard-reset", 0x0, None, DUMP),
+    "read_jtag_no_stub": ReadPlan(
+        "COM3", JTAG, None, "usb-reset", "watchdog-reset", 0x10000, 0x2000, DUMP, stub=False
+    ),
+}
+
+
+@pytest.mark.parametrize("variant", list(SERIAL_PLANS))
+def test_erase_and_read_cli_args(variant: str) -> None:
+    plan = SERIAL_PLANS[variant]
+    if isinstance(plan, ErasePlan):
+        args, command, baud = erase_cli_args(plan), "erase-flash", None
+    else:
+        args, command, baud = read_cli_args(plan), "read-flash", plan.baud
+    group: Any = esptool_cli
+    group._esp = None
+    ctx: Any = group.make_context("esptool", list(args))
+    with ctx:
+        sub: Any = group.commands[command].make_context(
+            command, args[args.index(command) + 1 :], parent=ctx
+        )
+    options: dict[str, Any] = dict(ctx.params)
+    assert (options["chip"], options["port"]) == ("auto", plan.port)
+    assert (options["before"], options["after"]) == (plan.before, plan.after)
+    assert options["no_stub"] is (not plan.stub)
+    assert ("-b" in args or "--baud" in args) is (baud is not None)
+    if baud is not None:
+        assert options["baud"] == baud
+    if isinstance(plan, ReadPlan):
+        params: dict[str, Any] = dict(sub.params)
+        size = "ALL" if plan.size is None else plan.size
+        assert (params["address"], params["size"], params["output"]) == (
+            plan.address,
+            size,
+            plan.output,
+        )
+    lexer = shlex.shlex(command_line(plan), posix=True)
+    lexer.whitespace_split, lexer.escape = True, ""
+    assert list(lexer) == ["esptool", *args]

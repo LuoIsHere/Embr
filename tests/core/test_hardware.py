@@ -1,6 +1,7 @@
 """Real-board tests; each skips unless its port variable is set:
 EMBR_TEST_PORT_UART (ESP32/ESP32-S3 on a UART bridge), EMBR_TEST_PORT_USB (native USB),
-EMBR_TEST_PORT_P4 (ESP32-P4). They write the hello_world fixtures to the board."""
+EMBR_TEST_PORT_P4 (ESP32-P4). They write the hello_world fixtures to the board. Erase is
+never run on a board (it would destroy its firmware); read_flash only reads a small region."""
 
 import os
 import re
@@ -14,7 +15,14 @@ import serial
 from embr_testkit import IDF, idf_entries, idf_expect, make_entry
 
 from embr.core.flasher.checks import REVISION, CheckLevel
-from embr.core.flasher.plan import FlashPlan, PlanEntry, build_flash_plan, build_identify_plan
+from embr.core.flasher.plan import (
+    FlashPlan,
+    PlanEntry,
+    ReadPlan,
+    build_flash_plan,
+    build_identify_plan,
+    build_read_plan,
+)
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -212,4 +220,32 @@ def test_port_released_after_identify_flash_and_refusal(var: str) -> None:
         after="hard-reset",
     )
     assert _status(_run(refused)) is ResultStatus.REFUSED
+    _assert_released(port)
+
+
+def _read_plan(port: str, output: Path, address: int) -> ReadPlan:
+    connection = next(p.connection for p in list_ports() if p.device.upper() == port.upper())
+    return build_read_plan(port, connection, str(output), address=address, size=0x1000)
+
+
+@pytest.mark.parametrize("var", PORT_VARS)
+def test_read_flash_region_then_port_released(var: str, tmp_path: Path) -> None:
+    port = _port(var)
+    output = tmp_path / "dump.bin"
+    events = _run(_read_plan(port, output, 0x0))
+    assert _status(events) is ResultStatus.OK
+    assert output.stat().st_size == 0x1000
+    progress = [e for e in events if isinstance(e, ProgressEvent)]
+    assert progress and all((e.entry_index, e.address) == (0, 0x0) for e in progress)
+    _assert_released(port)
+
+
+@pytest.mark.parametrize("var", PORT_VARS)
+def test_read_beyond_the_flash_is_refused(var: str, tmp_path: Path) -> None:
+    port = _port(var)
+    output = tmp_path / "dump.bin"
+    events = _run(_read_plan(port, output, 0x8000000))  # 128 MB: beyond any flash here
+    assert _status(events) is ResultStatus.REFUSED
+    assert any(isinstance(e, CheckEvent) and e.level is CheckLevel.REFUSE for e in events)
+    assert not any(isinstance(e, ProgressEvent) for e in events)
     _assert_released(port)

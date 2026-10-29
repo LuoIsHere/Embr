@@ -31,6 +31,12 @@ def test_idf_app_header_matches_expect(sample: str) -> None:
         settings["flash_size"],
     )
     assert header.has_app_desc and not header.has_bootloader_desc
+    # the descriptors carry the same IDF_VER as the build metadata
+    build = IDF / sample / "build"
+    description = json.loads((build / "project_description.json").read_text(encoding="utf-8"))
+    boot = read_image_header_file(build / "bootloader/bootloader.bin")
+    assert boot is not None
+    assert header.idf_ver == boot.idf_ver == description["git_revision"][:31]
 
 
 def test_p4_rev1_and_rev3() -> None:

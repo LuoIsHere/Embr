@@ -6,7 +6,7 @@ import pytest
 from embr_testkit import idf_entries
 
 from embr.core.flasher.checks import CheckLevel, SecurityState
-from embr.core.flasher.plan import FlashPlan, FlashSettings, IdentifyPlan
+from embr.core.flasher.plan import ErasePlan, FlashPlan, FlashSettings, IdentifyPlan, ReadPlan
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -50,6 +50,26 @@ def test_task_round_trip() -> None:
         IdentifyPlan(
             port="COM12", connection=ConnectionType.USB_OTG, before="no-reset", after="no-reset"
         ),
+        ErasePlan(
+            port="COM3",
+            connection=ConnectionType.USB_SERIAL_JTAG,
+            before="default-reset",
+            after="watchdog-reset",
+            stub=False,
+        ),
+    ]
+    tasks += [
+        ReadPlan(
+            port="COM3",
+            connection=ConnectionType.UART_BRIDGE,
+            baud=921600,
+            before="default-reset",
+            after="hard-reset",
+            address=0x1000,
+            size=size,
+            output="dump.bin",
+        )
+        for size in (None, 0x2000)
     ]
     for task in tasks:
         text = encode_task(task)

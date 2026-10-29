@@ -1,16 +1,30 @@
 """app/library: use cases on projects, firmware and entries (design doc §3.1, §3.4, §5)."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from app_testkit import build_files, copy_files, find_row, fixed_firmware
+from app_testkit import (
+    Clock,
+    build_files,
+    copy_files,
+    find_row,
+    fixed_firmware,
+    idf_project,
+    set_target,
+    write_newer,
+)
 
 from embr.app.context import AppContext
+from embr.app.flashplan import PlanError
 from embr.app.library import UNTITLED, FirmwareFlag, Library
+from embr.app.tracking import Tracker
 from embr.core.firmware.entries import AddressError
 from embr.core.firmware.files import FileState
+from embr.core.firmware.import_idf import BuildMissingError
 from embr.core.firmware.kinds import EntryKind
-from embr.core.firmware.model import AddressSource, Source
+from embr.core.firmware.model import AddressSource, EntryOverride, Source
+from embr.core.firmware.tracking import ResolveState
 from embr.core.project import ProjectDefaults
 
 APP = build_files("esp32s3_hello")[2]
@@ -165,9 +179,90 @@ def test_delete_project(library: Library, delete_firmware: bool) -> None:
         assert library.firmware(firmware.id).project_id is None
 
 
-def test_entry_operations_refuse_tracking_firmware(library: Library, context: AppContext) -> None:
-    tracked = context.firmware.create("tracked", source=Source.IDF_BUILD)
+# ---- IDF tracking firmware ---------------------------------------------------------------
+
+HELLO_APP = "app:hello_esp32s3.bin"
+
+
+def _tracked(context: AppContext) -> tuple[Library, Tracker]:
+    tracker = Tracker(context, clock=Clock())
+    return Library(context, tracker), tracker
+
+
+def test_import_idf_creates_a_tracking_firmware(context: AppContext, tmp_path: Path) -> None:
+    library, _ = _tracked(context)
+    build = idf_project("esp32s3_hello", tmp_path / "hello")
+    project = library.create_project("p")
+    library.set_project_defaults(
+        project.id, ProjectDefaults(before="no-reset", after="no-reset", erase_all=True)
+    )
+    assert library.preview_idf(build).project_name == "hello_esp32s3"
+    assert context.firmware.all() == []
+
+    firmware = library.import_idf(build, project_id=project.id, device="board")
+    stored = context.firmware.get(firmware.id)
+    assert (stored.name, stored.source, stored.project_id, stored.device) == (
+        "hello_esp32s3",
+        Source.IDF_BUILD,
+        project.id,
+        "board",
+    )
+    # only erase_all comes from the project; reset modes come from the build
+    assert (stored.before, stored.after, stored.erase_all) == ("default-reset", "hard-reset", True)
+    assert stored.build_ref is not None
+    assert Path(stored.build_ref.path).resolve() == build.resolve()
+    assert stored.last_resolved is not None
+    assert library.import_idf(build, project_id=project.id).name == "hello_esp32s3 (2)"
+
+
+UNUSABLE: dict[str, tuple[Callable[[Path], None], type[Exception]]] = {
+    "target_switched": (lambda b: set_target(b, "esp32p4"), PlanError),
+    "build_missing": (lambda b: (b / "flasher_args.json").unlink(), BuildMissingError),
+}
+
+
+@pytest.mark.parametrize("case", list(UNUSABLE))
+def test_import_idf_creates_nothing_for_an_unusable_build(
+    context: AppContext, tmp_path: Path, case: str
+) -> None:
+    change, error = UNUSABLE[case]
+    library, _ = _tracked(context)
+    build = idf_project("esp32s3_hello", tmp_path / "hello")
+    change(build)
+    with pytest.raises(error):
+        library.import_idf(build)
+    assert context.firmware.all() == []
+
+
+def test_entry_changes_on_tracking_firmware(context: AppContext, tmp_path: Path) -> None:
+    library, tracker = _tracked(context)
+    firmware = library.import_idf(idf_project("esp32s3_hello", tmp_path / "hello"))
+    tracker.check(firmware.id)
+
+    library.set_entry_address(firmware.id, HELLO_APP, "0x20000")
+    library.set_entry_enabled(firmware.id, HELLO_APP, False)
+    library.set_entry_note(firmware.id, HELLO_APP, "main app")
+    stored = context.firmware.get(firmware.id)
+    assert stored.entry_overrides[HELLO_APP] == EntryOverride(0x20000, False, "main app")
+    # the change is seen at once, although no build file changed
+    app = next(e for e in tracker.check(firmware.id).firmware.entries if e.id == HELLO_APP)
+    assert (app.address, app.enabled, app.note) == (0x20000, False, "main app")
+
+    data = tmp_path / "data.bin"
+    write_newer(data, b"Z" * 0x1000)
+    user = library.add_attachment(firmware.id, data, address=0x300000)
+    assert [e.id for e in context.firmware.get(firmware.id).user_entries] == [user.id]
     with pytest.raises(ValueError):
-        library.add_files(tracked.id, [APP])
-    with pytest.raises(ValueError):
-        library.add_attachment(tracked.id, APP, address=0x300000)
+        library.remove_entry(firmware.id, HELLO_APP)
+    library.remove_entry(firmware.id, user.id)
+    assert context.firmware.get(firmware.id).user_entries == []
+
+
+def test_switched_target_is_flagged_blocked(context: AppContext, tmp_path: Path) -> None:
+    library, tracker = _tracked(context)
+    build = idf_project("esp32s3_hello", tmp_path / "hello")
+    firmware = library.import_idf(build)
+    set_target(build, "esp32p4")
+
+    assert tracker.check(firmware.id).state is ResolveState.TARGET_SWITCHED
+    assert find_row(library.tree(), firmware.id).flag == FirmwareFlag.BLOCKED

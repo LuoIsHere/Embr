@@ -1,10 +1,13 @@
-"""app/operations: identify and flash jobs with a fake worker process (design doc §3.3, §7.2).
+"""app/operations: identify, flash, erase and read-flash jobs with a fake worker process
+(design doc §3.3, §7.2).
 
 The fake worker is `python -c` printing protocol lines, started through the real runner.
 `dispatch` queues each callable and the test thread runs the queue, as the Qt adapter
 does on the main thread; every wait has a timeout.
 """
 
+import datetime
+import hashlib
 import queue
 import sys
 import time
@@ -19,9 +22,12 @@ from embr.app.flashplan import PlanError
 from embr.app.identify import IdentifyMemory
 from embr.app.library import Library
 from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
+from embr.app.tracking import BuildChangedError
+from embr.core.firmware.kinds import EntryKind
+from embr.core.firmware.model import FlashParams, Source
 from embr.core.flasher import runner
-from embr.core.flasher.checks import CHIP, CheckLevel
-from embr.core.flasher.plan import IdentifyPlan
+from embr.core.flasher.checks import CHIP, SECURITY, CheckLevel
+from embr.core.flasher.plan import ErasePlan, IdentifyPlan, ReadPlan
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -68,6 +74,19 @@ class FakeWorker:
         return runner.start(task, on_event, command=[sys.executable, "-c", self.script])
 
 
+class DumpWorker(FakeWorker):
+    """FakeWorker that also writes `data` to the read plan's output, as the worker does."""
+
+    def __init__(self, events: Sequence[Event], data: bytes) -> None:
+        super().__init__(events)
+        self.data = data
+
+    def __call__(self, task: Task, on_event: Callable[[Event], None]) -> runner.JobHandle:
+        if isinstance(task, ReadPlan):
+            Path(task.output).write_bytes(self.data)
+        return super().__call__(task, on_event)
+
+
 class Recorder:
     def __init__(self) -> None:
         self.events: list[Event] = []
@@ -105,13 +124,20 @@ class Pump:
 
 
 class Setup:
-    def __init__(self, context: AppContext, worker: FakeWorker) -> None:
+    def __init__(
+        self,
+        context: AppContext,
+        worker: FakeWorker,
+        clock: Callable[[], datetime.datetime] = datetime.datetime.now,
+    ) -> None:
         self.context = context
         self.worker = worker
         self.memory = IdentifyMemory()
         self.pump = Pump()
         self.recorder = Recorder()
-        self.ops = Operations(context, self.memory, self.pump.dispatch, start_job=worker)
+        self.ops = Operations(
+            context, self.memory, self.pump.dispatch, start_job=worker, clock=clock
+        )
 
     def flash(
         self, firmware_id: str, port: PortInfo = BRIDGE, baud: int | None = 921600
@@ -263,3 +289,109 @@ def test_firmware_without_chip_needs_identification(
     assert setup.worker.tasks == []
     assert context.history.query() == []
     assert not setup.ops.busy
+
+
+def test_flash_refuses_a_firmware_that_differs_from_the_shown_one(
+    library: Library, context: AppContext
+) -> None:
+    firmware = fixed_firmware(library, HELLO)
+    setup = Setup(context, FakeWorker(FLASH_OK))
+    with pytest.raises(BuildChangedError):
+        setup.ops.flash(firmware.id, BRIDGE, None, setup.recorder, shown_digest="0" * 16)
+    assert setup.worker.tasks == []
+    assert context.history.query() == []
+    assert not setup.ops.busy
+
+
+def test_erase_writes_a_record_without_firmware(context: AppContext) -> None:
+    setup = Setup(context, FakeWorker([INFO, ResultEvent(ResultStatus.OK, "erased")]))
+    setup.ops.erase(BRIDGE, setup.recorder)
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert isinstance(setup.worker.tasks[0], ErasePlan)
+    (record,) = context.history.query()
+    assert (outcome.kind, outcome.record_id) == (JobKind.ERASE, record.id)
+    assert (record.operation, record.result, record.entries) == (
+        Operation.ERASE,
+        RecordResult.OK,
+        (),
+    )
+    assert (record.firmware_id, record.project_id) == (None, None)
+    assert (record.chip_detected, record.mac) == ("esp32s3", MAC)
+    assert "erase-flash" in record.command
+
+
+def test_read_flash_creates_a_dump_firmware(library: Library, context: AppContext) -> None:
+    project = library.create_project("p")
+    data = bytes(range(256)) * 16
+    sha = hashlib.sha256(data).hexdigest()
+    events: list[Event] = [
+        INFO,
+        ProgressEvent(0, 0x0, len(data), len(data), "r"),
+        ResultEvent(ResultStatus.OK, f"{len(data)} bytes read"),
+    ]
+    start = datetime.datetime(2026, 1, 2, 3, 4)
+    setup = Setup(context, DumpWorker(events, data), clock=lambda: start)
+    setup.ops.read_flash(
+        BRIDGE, 921600, setup.recorder, size=len(data), project_id=project.id, device="board"
+    )
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    (task,) = setup.worker.tasks
+    assert isinstance(task, ReadPlan) and (task.address, task.size) == (0x0, len(data))
+    assert Path(task.output).resolve().is_relative_to(context.paths.temp.resolve())
+    assert outcome.firmware_id is not None
+    firmware = library.firmware(outcome.firmware_id)
+    assert (firmware.name, firmware.source, firmware.chip) == (
+        "esp32s3 dump 2026-01-02 03-04",
+        Source.MANUAL,
+        "esp32s3",
+    )
+    assert (firmware.project_id, firmware.device, firmware.flash) == (
+        project.id,
+        "board",
+        FlashParams(),
+    )
+    assert firmware.notes  # warns that a dump may contain credentials
+    (entry,) = firmware.entries
+    assert (entry.kind, entry.address, entry.file, entry.size) == (
+        EntryKind.MERGED,
+        0x0,
+        f"archive:{sha}",
+        len(data),
+    )
+    assert entry.enabled and entry.from_dump and context.archive.has(sha)
+
+    (record,) = context.history.query()
+    assert (record.operation, record.result, record.firmware_id) == (
+        Operation.READ_FLASH,
+        RecordResult.OK,
+        firmware.id,
+    )
+    assert [(e.address, e.size, e.sha256, e.kind) for e in record.entries] == [
+        (0x0, len(data), sha, "merged")
+    ]
+
+
+def test_refused_read_creates_no_firmware(context: AppContext) -> None:
+    events: list[Event] = [
+        INFO,
+        CheckEvent(SECURITY, CheckLevel.REFUSE, "secure download mode"),
+        ResultEvent(ResultStatus.REFUSED, "refused"),
+    ]
+    setup = Setup(context, FakeWorker(events))
+    setup.ops.read_flash(BRIDGE, None, setup.recorder)
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert (outcome.kind, outcome.result, outcome.firmware_id) == (
+        JobKind.READ_FLASH,
+        RecordResult.REFUSED,
+        None,
+    )
+    assert context.firmware.all() == []
+    (record,) = context.history.query()
+    assert (record.operation, record.entries, record.firmware_id) == (
+        Operation.READ_FLASH,
+        (),
+        None,
+    )
