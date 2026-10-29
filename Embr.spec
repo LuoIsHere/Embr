@@ -2,7 +2,10 @@
 # Build with: uv run pyinstaller Embr.spec --noconfirm
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-datas = [("src/embr/resources/esptool.cfg", "embr/resources")]
+datas = [
+    ("src/embr/resources/esptool.cfg", "embr/resources"),
+    ("src/embr/resources/logo/*.svg", "embr/resources/logo"),
+]
 datas += collect_data_files("esptool")  # stub flasher images
 datas += collect_data_files("esp_pylib")
 

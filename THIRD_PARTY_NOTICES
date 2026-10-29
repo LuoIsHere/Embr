@@ -23,3 +23,7 @@ reedsolo 1.7.0             Unlicense OR MIT-0
 colorama 0.4.6             BSD-3-Clause
 typing_extensions 4.16.0   PSF-2.0
 tomli-w 1.2.0              MIT
+
+Bundled assets
+--------------
+Lucide icons (menu, panel-left, search)   ISC   https://lucide.dev
