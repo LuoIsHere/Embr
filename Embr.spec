@@ -26,6 +26,7 @@ exe = EXE(
     exclude_binaries=True,
     name="Embr",
     console=False,
+    icon="src/embr/resources/logo/embr.ico",  # made by scripts/make_icon.py
     upx=False,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="Embr", upx=False)
