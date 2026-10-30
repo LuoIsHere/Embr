@@ -13,6 +13,7 @@ from app_testkit import (
     copy_files,
     fixed_firmware,
     multi_chip_firmware,
+    p4_lines_firmware,
 )
 
 from embr.app.context import AppContext
@@ -176,6 +177,24 @@ def test_multi_chip_firmware_has_no_plan_before_identification(
     assert preview_command(context, firmware, None, None) == ""
     command = preview_command(context, firmware, None, None, chip="esp32p4")
     assert "hello_esp32p4_rev1.bin" in command and "hello_esp32s3.bin" not in command
+
+
+APPS = {100: "hello_esp32p4_rev1.bin", 301: "hello_esp32p4_rev3.bin"}
+
+
+@pytest.mark.parametrize(("revision", "subfolder"), [(100, "."), (301, "rev3")])
+def test_plan_for_a_p4_revision_takes_only_its_line(
+    context: AppContext, tmp_path: Path, revision: int, subfolder: str
+) -> None:
+    # both lines' builds sit at 0x2000 / 0x8000 / 0x10000; the tables' lines are chosen by hand
+    firmware = p4_lines_firmware(context, tmp_path)
+    plan = assemble_plan(context, firmware, BRIDGE, None, chip="esp32p4", revision=revision)
+    assert [e.address for e in plan.entries] == [0x2000, 0x8000, 0x10000]
+    folders = {Path(e.path).parent for e in plan.entries}
+    assert folders == {(tmp_path / subfolder).resolve()}
+    command = preview_command(context, firmware, None, None, chip="esp32p4", revision=revision)
+    other = next(name for rev, name in APPS.items() if rev != revision)
+    assert APPS[revision] in command and other not in command
 
 
 def test_firmware_with_files_outside_its_folder_still_plans(

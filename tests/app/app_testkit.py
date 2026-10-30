@@ -15,6 +15,7 @@ from embr.app.context import AppContext
 from embr.app.identify import IdentifySnapshot
 from embr.app.library import FirmwareRow, Library, Tree
 from embr.core.firmware.entries import attachment_entry, entry_from_file
+from embr.core.firmware.image_header import NO_MAX_REVISION
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.checks import SecurityState
@@ -84,24 +85,54 @@ def fixed_firmware(library: Library, files: list[Path], name: str = "fw") -> Fir
     return library.firmware(firmware.id)
 
 
-def multi_chip_firmware(context: AppContext, folder: Path, name: str = "multi") -> Firmware:
-    """Fixed firmware holding the hello builds for esp32s3 (copied to `folder`) and esp32p4
-    (copied to folder/p4), stored directly: entries as sniffed, each partition table with
-    its chip chosen by hand, folder = `folder`. The P4 bootloader (0x2000) overlaps the S3
-    one and both tables sit at 0x8000, so only per-chip handling keeps them apart."""
+def _stored_firmware(
+    context: AppContext, folder: Path, name: str, builds: list[tuple[str, Path, str, str]]
+) -> Firmware:
+    """Fixed firmware stored directly, folder = `folder`: for each (sample, subfolder, chip,
+    line) the sample's build copied to the subfolder, entries as sniffed, the partition
+    table with chip and line chosen by hand."""
     firmware = context.firmware.create(name)
     firmware.folder = str(folder.resolve())
-    for chip, files in (
-        ("esp32s3", copy_files(build_files("esp32s3_hello"), folder)),
-        ("esp32p4", copy_files(build_files("esp32p4_rev1_hello"), folder / "p4")),
-    ):
-        for path in files:
+    for sample, subfolder, chip, line in builds:
+        for path in copy_files(build_files(sample), subfolder):
             entry = entry_from_file(path)
             if entry.kind == EntryKind.PARTITION_TABLE:
-                entry.chip = chip
+                entry.chip, entry.chip_line = chip, line
             firmware.entries.append(entry)
     context.firmware.save(firmware)
     return context.firmware.get(firmware.id)
+
+
+def multi_chip_firmware(context: AppContext, folder: Path, name: str = "multi") -> Firmware:
+    """Fixed firmware holding the hello builds for esp32s3 (copied to `folder`) and esp32p4
+    v0-v1 (copied to folder/p4), stored directly: entries as sniffed, each partition table
+    with its MCU chosen by hand, folder = `folder`. The P4 bootloader (0x2000) overlaps the
+    S3 one and both tables sit at 0x8000, so only per-chip handling keeps them apart."""
+    builds = [
+        ("esp32s3_hello", folder, "esp32s3", ""),
+        ("esp32p4_rev1_hello", folder / "p4", "esp32p4", "v0-v1"),
+    ]
+    return _stored_firmware(context, folder, name, builds)
+
+
+def p4_lines_firmware(context: AppContext, folder: Path, name: str = "p4") -> Firmware:
+    """Fixed firmware holding the ESP32-P4 hello builds for v0-v1 (copied to `folder`) and
+    v3 (copied to folder/rev3), stored as multi_chip_firmware(), each table with its line.
+    Both builds use the same addresses, so only per-line handling keeps them apart."""
+    builds = [
+        ("esp32p4_rev1_hello", folder, "esp32p4", "v0-v1"),
+        ("esp32p4_rev3_hello", folder / "rev3", "esp32p4", "v3"),
+    ]
+    return _stored_firmware(context, folder, name, builds)
+
+
+def spanning_app(path: Path) -> Path:
+    """The P4 v0-v1 hello app written to `path` with max_rev_full patched to "no upper
+    limit" (v0.0 and later), so its range spans both P4 lines."""
+    data = bytearray(build_files("esp32p4_rev1_hello")[2].read_bytes())
+    data[17:19] = NO_MAX_REVISION.to_bytes(2, "little")  # extended header, after min_rev_full
+    write_newer(path, bytes(data))
+    return path.resolve()
 
 
 def entry_ids_under(firmware: Firmware, folder: Path) -> set[str]:

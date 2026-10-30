@@ -12,6 +12,7 @@ from app_testkit import (
     fixed_firmware,
     info,
     multi_chip_firmware,
+    p4_lines_firmware,
     snapshot,
 )
 
@@ -84,8 +85,8 @@ def test_matching_chip_passes_everything(
 @pytest.mark.parametrize(
     ("sample", "event", "mentions"),
     [
-        # the chip matches, so the only possible refusal is the v3.x-only image range
-        ("esp32p4_rev3_hello", info("esp32p4", 1, 0), ""),
+        # chip and line match, so the only possible refusal is the v3.1+ image range
+        ("esp32p4_rev3_hello", info("esp32p4", 3, 0), "v3.1"),
         (
             "esp32s3_hello",
             info("esp32s3", 0, 2, security=SecurityState(False, False, secure_boot=True)),
@@ -114,14 +115,22 @@ def test_declared_size_differing_from_detected_warns(library: Library, context: 
     assert can_flash(items)
 
 
+@pytest.mark.parametrize(
+    ("sample", "event", "mentions"),
+    [
+        ("esp32s3_hello", info("esp32c3", 0, 4), "esp32c3"),
+        ("esp32p4_rev3_hello", info("esp32p4", 1, 0), "v1.0"),  # the other P4 line
+    ],
+    ids=["other-chip", "other-p4-line"],
+)
 def test_board_none_of_the_entries_are_for_is_refused(
-    library: Library, context: AppContext
+    library: Library, context: AppContext, sample: str, event: InfoEvent, mentions: str
 ) -> None:
-    firmware = fixed_firmware(library, HELLO)
-    items = preflight(context, firmware, BRIDGE, snapshot(BRIDGE, info("esp32c3", 0, 4)))
+    firmware = fixed_firmware(library, build_files(sample))
+    items = preflight(context, firmware, BRIDGE, snapshot(BRIDGE, event))
     refused = refusals(items)
     assert "No entries enabled" in [i.title for i in refused]
-    assert any("esp32c3" in f"{i.title} {i.detail}".lower() for i in refused)
+    assert any(mentions in f"{i.title} {i.detail}".lower() for i in refused)
 
 
 @pytest.mark.parametrize(
@@ -144,6 +153,18 @@ def test_multi_chip_firmware_is_checked_per_chip(
         assert states(items) == expected
     else:
         assert len(items) > 4 and set(states(items)) == {PASS}
+
+
+@pytest.mark.parametrize(
+    "event", [info("esp32p4", 1, 0), info("esp32p4", 3, 1)], ids=["v1.0", "v3.1"]
+)
+def test_p4_lines_firmware_is_checked_per_line(
+    context: AppContext, tmp_path: Path, event: InfoEvent
+) -> None:
+    # both builds use the same addresses: only the entries of the board's line are checked
+    firmware = p4_lines_firmware(context, tmp_path)
+    items = preflight(context, firmware, BRIDGE, snapshot(BRIDGE, event))
+    assert len(items) > 4 and set(states(items)) == {PASS}
 
 
 IDENTIFIED = snapshot(BRIDGE, info("esp32s3", 0, 2))

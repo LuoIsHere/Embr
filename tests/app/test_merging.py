@@ -88,10 +88,18 @@ def _mixed_mcu(library: Library, firmware_id: str, tmp_path: Path) -> MergeOptio
     return MergeOptions()
 
 
+def _mixed_p4_lines(library: Library, firmware_id: str, tmp_path: Path) -> MergeOptions:
+    rev1_app = build_files("esp32p4_rev1_hello")[2]
+    rev3_boot = build_files("esp32p4_rev3_hello")[0]  # at 0x2000, clear of the app
+    library.add_files(firmware_id, copy_files([rev1_app, rev3_boot], tmp_path / "mixed"))
+    return MergeOptions()
+
+
 # the reason is the one the dialog shows (app.chips.merge_problem(), §12 item 13)
 REFUSED: dict[str, tuple[Callable[[Library, str, Path], MergeOptions], str]] = {
     "no_chip": (_no_chip, "data.bin has no MCU"),
-    "mixed_mcu": (_mixed_mcu, "Checked entries are for esp32p4 and esp32s3"),
+    "mixed_mcu": (_mixed_mcu, "Checked entries are for esp32p4 v0-v1 and esp32s3"),
+    "mixed_p4_lines": (_mixed_p4_lines, "Checked entries are for esp32p4 v0-v1 and esp32p4 v3"),
     "pad_without_flash_size": (_pad_without_flash_size, "fw: flash size unknown"),
 }
 

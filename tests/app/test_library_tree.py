@@ -3,7 +3,14 @@
 from pathlib import Path
 
 import pytest
-from app_testkit import build_files, copy_files, find_row, fixed_firmware, multi_chip_firmware
+from app_testkit import (
+    build_files,
+    copy_files,
+    find_row,
+    fixed_firmware,
+    multi_chip_firmware,
+    p4_lines_firmware,
+)
 
 from embr.app.context import AppContext
 from embr.app.library import Library, Tree
@@ -92,3 +99,14 @@ def test_row_lists_every_chip(library: Library, context: AppContext, tmp_path: P
         ("esp32s3",),
         (),
     ]
+
+
+def test_row_lists_p4_lines_as_mcus(library: Library, context: AppContext, tmp_path: Path) -> None:
+    lines = p4_lines_firmware(context, tmp_path / "lines")
+    rev3 = fixed_firmware(library, copy_files(build_files("esp32p4_rev3_hello"), tmp_path / "v3"))
+    tree = library.tree()
+    assert [find_row(tree, f.id).mcus for f in (lines, rev3)] == [
+        ("ESP32-P4 v0\u2013v1", "ESP32-P4 v3"),  # one chip, two MCUs: shown as "multi"
+        ("ESP32-P4 v3",),
+    ]
+    assert find_row(tree, lines.id).chips == ("esp32p4",)

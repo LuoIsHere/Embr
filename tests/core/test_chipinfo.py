@@ -80,6 +80,45 @@ def test_header_code_names() -> None:
     assert chipinfo.flash_freq_name("esp32c2", 0xF) == "60m"
 
 
+# ---- revision lines (design doc §12 item 13, "P4 按芯片版本分档") --------------------------
+
+
+def test_only_esp32p4_has_revision_lines() -> None:
+    lines = chipinfo.revision_lines("esp32p4")
+    assert [(line.name, line.low, line.high) for line in lines] == [
+        ("v0-v1", 0, 299),
+        ("v3", 300, 0xFFFF),
+    ]
+    assert chipinfo.revision_lines("esp32s3") == ()
+
+
+@pytest.mark.parametrize(
+    ("chip", "revision", "line"),
+    [
+        ("esp32p4", 0, "v0-v1"),
+        ("esp32p4", 299, "v0-v1"),
+        ("esp32p4", 300, "v3"),
+        ("esp32s3", 2, ""),
+    ],
+)
+def test_line_for_revision(chip: str, revision: int, line: str) -> None:
+    assert chipinfo.line_for_revision(chip, revision) == line
+
+
+@pytest.mark.parametrize(
+    ("chip", "low", "high", "line"),
+    [
+        ("esp32p4", 0, 199, "v0-v1"),  # CONFIG_ESP32P4_SELECTS_REV_LESS_V3 build
+        ("esp32p4", 301, 399, "v3"),
+        ("esp32p4", 0, 0xFFFF, ""),  # no upper limit: spans both lines
+        ("esp32p4", 200, 300, ""),
+        ("esp32s3", 0, 99, ""),
+    ],
+)
+def test_line_for_range(chip: str, low: int, high: int, line: str) -> None:
+    assert chipinfo.line_for_range(chip, low, high) == line
+
+
 def _imports_esptool_targets(source: str) -> bool:
     for node in ast.walk(ast.parse(source)):
         names: list[str] = []

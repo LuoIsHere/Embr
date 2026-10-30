@@ -16,6 +16,7 @@ from app_testkit import (
     idf_project,
     info,
     multi_chip_firmware,
+    p4_lines_firmware,
     seed_user_entry,
     set_target,
     write_newer,
@@ -369,8 +370,13 @@ REV3 = build_files("esp32p4_rev3_hello")  # images require v3.1 - v3.99
 
 @pytest.mark.parametrize(
     ("chip", "major", "minor", "reason"),
-    [("esp32s3", 0, 2, ""), ("esp32p4", 1, 0, "v1.0"), ("esp32p4", 3, 1, None)],
-    ids=["other_chip", "revision_out_of_range", "fits"],
+    [
+        ("esp32s3", 0, 2, ""),
+        ("esp32p4", 1, 0, "v1.0"),
+        ("esp32p4", 3, 0, "v3.0"),
+        ("esp32p4", 3, 1, None),
+    ],
+    ids=["other_chip", "other_line", "revision_out_of_range", "fits"],
 )
 def test_mismatches_judge_chip_and_revision(
     library: Library, chip: str, major: int, minor: int, reason: str | None
@@ -383,11 +389,7 @@ def test_mismatches_judge_chip_and_revision(
         assert reason in found[firmware.id]
 
 
-def test_disabled_entries_and_chipless_firmware_fit(library: Library, tmp_path: Path) -> None:
-    rev3 = fixed_firmware(library, REV3, "rev3")
-    for entry in rev3.entries:
-        if entry.kind != EntryKind.PARTITION_TABLE:
-            library.set_entry_enabled(rev3.id, entry.id, False)
+def test_chipless_firmware_fits(library: Library, tmp_path: Path) -> None:
     data = tmp_path / "data.bin"
     data.write_bytes(b"" * 64)
     chipless = library.create_firmware("data")
@@ -436,10 +438,12 @@ def test_set_entry_chip_saves_and_clears(library: Library, context: AppContext) 
     firmware = fixed_firmware(library, build_files("esp32s3_hello"))
     table = next(e for e in firmware.entries if e.kind == EntryKind.PARTITION_TABLE)
 
-    library.set_entry_chip(firmware.id, table.id, "esp32p4")
-    assert _stored_entry(context, firmware.id, table.id).chip == "esp32p4"
+    library.set_entry_chip(firmware.id, table.id, "esp32p4", "v3")
+    stored = _stored_entry(context, firmware.id, table.id)
+    assert (stored.chip, stored.chip_line) == ("esp32p4", "v3")
     library.set_entry_chip(firmware.id, table.id, None)
-    assert _stored_entry(context, firmware.id, table.id).chip is None
+    stored = _stored_entry(context, firmware.id, table.id)
+    assert (stored.chip, stored.chip_line) == (None, "")
 
 
 def _table_of(library: Library) -> tuple[str, str]:
@@ -457,21 +461,25 @@ def _tracked_table(library: Library, tmp_path: Path) -> tuple[str, str]:
     return firmware.id, entry_key(EntryKind.PARTITION_TABLE, "partition-table.bin")
 
 
-CHIP_REFUSALS: dict[str, tuple[Callable[[Library, Path], tuple[str, str]], str]] = {
-    "unknown_chip": (lambda lib, _: _table_of(lib), "esp9999"),
-    "header_names_a_chip": (lambda lib, _: _app_of(lib), "esp32p4"),
-    "tracking": (_tracked_table, "esp32p4"),
+CHIP_REFUSALS: dict[str, tuple[Callable[[Library, Path], tuple[str, str]], str, str]] = {
+    "unknown_chip": (lambda lib, _: _table_of(lib), "esp9999", ""),
+    "header_names_a_chip": (lambda lib, _: _app_of(lib), "esp32p4", "v3"),
+    "tracking": (_tracked_table, "esp32p4", "v3"),
+    # a hand-chosen ESP32-P4 names one of its lines; other chips have none
+    "p4_without_line": (lambda lib, _: _table_of(lib), "esp32p4", ""),
+    "unknown_line": (lambda lib, _: _table_of(lib), "esp32p4", "v2"),
+    "line_of_a_chip_without_lines": (lambda lib, _: _table_of(lib), "esp32s3", "v3"),
 }
 
 
 @pytest.mark.parametrize("case", list(CHIP_REFUSALS))
 def test_set_entry_chip_refuses(context: AppContext, tmp_path: Path, case: str) -> None:
     library, _ = _tracked(context)
-    setup, chip = CHIP_REFUSALS[case]
+    setup, chip, line = CHIP_REFUSALS[case]
     firmware_id, entry_id = setup(library, tmp_path)
     before = context.firmware.get(firmware_id)
     with pytest.raises(ValueError):
-        library.set_entry_chip(firmware_id, entry_id, chip)
+        library.set_entry_chip(firmware_id, entry_id, chip, line)
     assert context.firmware.get(firmware_id) == before
 
 
@@ -506,6 +514,30 @@ def test_choosing_the_board_chip_makes_an_entry_eligible_again(
     stored = context.firmware.get(firmware.id)
     entry = next(e for e in stored.entries if e.id == data.id)
     assert entry.enabled and entry_chip(context, stored, entry) == "esp32s3"
+
+
+def test_fit_entries_unticks_the_other_p4_line(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    firmware = p4_lines_firmware(context, tmp_path)
+    before = context.firmware.get(firmware.id)
+    # secure download mode: the revision is unknown, every P4 entry fits
+    assert library.fit_entries(firmware.id, "esp32p4") == []
+    assert context.firmware.get(firmware.id) == before
+
+    unticked = library.fit_entries(firmware.id, "esp32p4", 100)
+    assert {e.id for e in unticked} == entry_ids_under(firmware, tmp_path / "rev3")
+    enabled = {e.id for e in context.firmware.get(firmware.id).entries if e.enabled}
+    assert enabled == entry_ids_under(firmware, tmp_path)
+
+
+@pytest.mark.parametrize(("major", "minor"), [(1, 0), (3, 1)])
+def test_mismatches_judge_only_the_entries_of_the_board_line(
+    library: Library, context: AppContext, tmp_path: Path, major: int, minor: int
+) -> None:
+    # each line's images exclude the other line's revisions
+    firmware = p4_lines_firmware(context, tmp_path)
+    assert firmware.id not in library.mismatches(info("esp32p4", major, minor))
 
 
 # ---- one folder per fixed firmware (§12 item 8) -------------------------------------------
