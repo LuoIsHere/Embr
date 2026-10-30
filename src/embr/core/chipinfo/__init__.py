@@ -6,9 +6,13 @@ asks here. ESP8266 is out of scope and never listed.
 
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
 
-from esp_pylib.constants import ESPRESSIF_VID, USB_JTAG_SERIAL_PID
+from esptool.loader import ESPLoader, StubFlasher
 from esptool.targets import CHIP_DEFS, CHIP_LIST
+
+ESPRESSIF_VID: int = ESPLoader.ESPRESSIF_VID
+USB_JTAG_SERIAL_PID: int = ESPLoader.USB_JTAG_SERIAL_PID
 
 
 class UnknownChipError(KeyError):
@@ -36,6 +40,14 @@ FLASH_MODES: tuple[str, ...] = ("qio", "qout", "dio", "dout")
 """Flash modes in header encoding order (0..3)."""
 
 _EXCLUDED = frozenset({"esp8266"})
+
+# esptool 5.3.1 has no per-chip USB flags; these are the USB_SERIAL_JTAG_SUPPORTED and
+# USB_OTG_SUPPORTED values of esptool 5.6.0 (design doc §12.1)
+_USB_SERIAL_JTAG = frozenset(
+    {"esp32c3", "esp32c5", "esp32c6", "esp32c61", "esp32h2", "esp32h21", "esp32h4"}
+    | {"esp32s3", "esp32p4", "esp32s31"}
+)
+_USB_OTG = frozenset({"esp32s2", "esp32s3", "esp32p4", "esp32s31", "esp32e22"})
 
 
 def espressif_vid() -> int:
@@ -66,8 +78,8 @@ def supported_chips() -> tuple[ChipInfo, ...]:
                 bootloader_offset=rom.BOOTLOADER_FLASH_OFFSET,
                 flash_sizes=tuple(rom.FLASH_SIZES),
                 flash_freqs=tuple(rom.FLASH_FREQUENCY),
-                usb_otg=bool(rom.USB_OTG_SUPPORTED),
-                usb_serial_jtag=bool(rom.USB_SERIAL_JTAG_SUPPORTED),
+                usb_otg=name in _USB_OTG,
+                usb_serial_jtag=name in _USB_SERIAL_JTAG,
             )
         )
     return tuple(chips)
@@ -106,8 +118,12 @@ def usb_otg_chip(vid: int, pid: int) -> ChipInfo | None:
 
 def has_stub(chip: str) -> bool:
     """Whether the bundled esptool ships a flasher stub for the chip (esptool 5.3.1 has
-    none for ESP32-H21). Raises UnknownChipError."""
-    raise NotImplementedError
+    none for ESP32-H21 and ESP32-E22). Raises UnknownChipError."""
+    name = get_chip(chip).name
+    root = Path(StubFlasher.STUB_DIR)
+    subdirs: list[str] = list(StubFlasher.STUB_SUBDIRS)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # class attribute assigned at runtime
+    # ESP32-P4 picks esp32p4-rev1.json below v3.0; esp32p4.json exists for both lines
+    return any((root / sub / f"{name}.json").is_file() for sub in subdirs)
 
 
 def flash_map_ranges(chip: str) -> tuple[tuple[int, int], ...]:

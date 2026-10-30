@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 
 from embr.app.context import AppContext
+from embr.core import chipinfo
 from embr.core.firmware.entries import enabled_partition_table, sorted_entries
 from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import ImageHeader, read_image_header
@@ -88,7 +89,7 @@ def assemble_plan(
         before=firmware.before,
         after=firmware.after,
         baud=baud,
-        stub=firmware.stub,
+        stub=firmware.stub and chipinfo.has_stub(firmware.chip),
         flash=FlashSettings(mode=flash.mode, freq=flash.freq, size=flash.size),
         erase_all=firmware.erase_all,
         declared_flash_size=declared_flash_size(context, firmware),

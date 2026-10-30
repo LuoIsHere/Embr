@@ -50,13 +50,11 @@ def run(stdin: TextIO, stdout: TextIO) -> int:
         send(ErrorEvent(f"invalid task: {exc}", ""))
         return 2
 
-    from esptool.logger import log
-
     from embr.core.flasher.worker import jobs
-    from embr.core.flasher.worker.logger import EntryCursor, EventLogger
+    from embr.core.flasher.worker.logger import EntryCursor, install
 
     cursor = EntryCursor()
-    log.set_logger(EventLogger(send, cursor))  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]  # proxy type hides set_logger
+    install(send, cursor)
     # stray prints must not corrupt the event stream
     sink = sys.stderr if sys.stderr is not None else io.StringIO()
     try:

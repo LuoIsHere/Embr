@@ -194,7 +194,7 @@ def _read_chip(
     )
     major, minor = int(esp.get_major_chip_version()), int(esp.get_minor_chip_version())
     mac = ":".join(f"{b:02x}" for b in esp.read_mac("BASE_MAC"))
-    if stub:
+    if stub and chipinfo.has_stub(chip.name):  # identify, erase and read run with --chip auto
         esp = run_stub(esp)
     attach_flash(esp)
     size = detect_flash_size(esp)

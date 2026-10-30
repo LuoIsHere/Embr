@@ -78,4 +78,8 @@ def install(send: Callable[[Event], None], cursor: EntryCursor) -> None:
     only swaps the class of the global `log` object and keeps its old instance attributes,
     so the EventLogger state must end up on that object too: afterwards every esptool
     message, note, warning, error, stage marker and progress callback becomes an event."""
-    raise NotImplementedError
+    from esptool.logger import log
+
+    logger = EventLogger(send, cursor)
+    log.set_logger(logger)  # pyright: ignore[reportUnknownMemberType]
+    vars(log).update(vars(logger))
