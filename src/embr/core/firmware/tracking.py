@@ -36,6 +36,7 @@ from embr.core.storage.documents import (
     doc_table,
     doc_tables,
 )
+from embr.i18n import N_
 
 
 class ResolveState(StrEnum):
@@ -218,12 +219,12 @@ def resolve(
         derived.append(_classify(file, cache, table, last_kinds))
     for d in derived:
         if d.data_missing:
-            incomplete.append(f"{d.name}: file missing")
+            incomplete.append(N_(f"{d.name}: file missing"))
             marks[d.key] = EntryMark.MISSING
         elif d.file.expected is not None and d.kind != d.file.expected:
-            incomplete.append(f"{d.name}: cannot be read as {d.file.expected.value}")
+            incomplete.append(N_(f"{d.name}: cannot be read as {d.file.expected.value}"))
     if not incomplete and not any(d.kind == EntryKind.APP for d in derived):
-        incomplete.append("the build output has no app image")
+        incomplete.append(N_("the build output has no app image"))
 
     images = [d for d in derived if d.kind in (EntryKind.BOOTLOADER, EntryKind.APP) and d.header]
     chip_sides = [(f"build output ({c})", c) for c in build.declared_chips]
@@ -514,27 +515,27 @@ def _changes(
     old_chip, new_chip = doc_str(last, "chip"), doc_str(snapshot, "chip")
     chip_changed = bool(old_chip and new_chip and old_chip != new_chip)
     if chip_changed:
-        add(ChangeKind.CHIP, "", old_chip, new_chip, f"Target chip: {old_chip} -> {new_chip}")
+        add(ChangeKind.CHIP, "", old_chip, new_chip, N_(f"Target chip: {old_chip} -> {new_chip}"))
         add(
             ChangeKind.GROUP_HINT,
             "",
             firmware.device,
             firmware.device,
-            "The device group may need adjusting",
+            N_("The device group may need adjusting"),
         )
     old_idf, new_idf = doc_str(last, "idf_version"), doc_str(snapshot, "idf_version")
     idf_changed = bool(old_idf and new_idf and old_idf != new_idf)
     if idf_changed:
-        add(ChangeKind.IDF_VERSION, "", old_idf, new_idf, f"ESP-IDF: {old_idf} -> {new_idf}")
+        add(ChangeKind.IDF_VERSION, "", old_idf, new_idf, N_(f"ESP-IDF: {old_idf} -> {new_idf}"))
     old_flash, new_flash = _flash_text(last), _flash_text(snapshot)
     if old_flash != new_flash:
-        add(ChangeKind.FLASH, "", old_flash, new_flash, f"Flash: {old_flash} -> {new_flash}")
+        add(ChangeKind.FLASH, "", old_flash, new_flash, N_(f"Flash: {old_flash} -> {new_flash}"))
     old_reset, new_reset = _reset_text(last), _reset_text(snapshot)
     if old_reset != new_reset:
-        add(ChangeKind.RESET, "", old_reset, new_reset, f"Reset: {old_reset} -> {new_reset}")
+        add(ChangeKind.RESET, "", old_reset, new_reset, N_(f"Reset: {old_reset} -> {new_reset}"))
     old_table, new_table = doc_str(last, "partition_table"), doc_str(snapshot, "partition_table")
     if old_table and new_table and old_table != new_table:
-        add(ChangeKind.PARTITION_TABLE, "", "", "", "Partition table content changed")
+        add(ChangeKind.PARTITION_TABLE, "", "", "", N_("Partition table content changed"))
 
     old = {doc_str(e, "key"): e for e in doc_tables(last, "entries")}
     new = {doc_str(e, "key"): e for e in doc_tables(snapshot, "entries")}
@@ -542,7 +543,7 @@ def _changes(
         name = doc_str(doc, "name")
         before = old.get(key)
         if before is None:
-            add(ChangeKind.ENTRY_ADDED, name, "", doc_str(doc, "address"), f"New file: {name}")
+            add(ChangeKind.ENTRY_ADDED, name, "", doc_str(doc, "address"), N_(f"New file: {name}"))
             marks.setdefault(key, EntryMark.NEW)
             continue
         old_rev, new_rev = _rev_text(before), _rev_text(doc)
@@ -552,30 +553,26 @@ def _changes(
                 name,
                 old_rev,
                 new_rev,
-                f"{name}: chip revision {old_rev} -> {new_rev}",
+                N_(f"{name}: chip revision {old_rev} -> {new_rev}"),
             )
         old_addr, new_addr = doc_str(before, "address"), doc_str(doc, "address")
         if old_addr != new_addr:
             override = firmware.entry_overrides.get(key)
-            kept = (
-                f" (manual address {override.address:#x} kept)"
-                if override and override.address is not None
-                else ""
-            )
-            add(
-                ChangeKind.ADDRESS,
-                name,
-                old_addr,
-                new_addr,
-                f"{name}: address {old_addr} -> {new_addr}{kept}",
-            )
+            if override and override.address is not None:
+                manual = f"{override.address:#x}"
+                text = N_(
+                    f"{name}: address {old_addr} -> {new_addr} (manual address {manual} kept)"
+                )
+            else:
+                text = N_(f"{name}: address {old_addr} -> {new_addr}")
+            add(ChangeKind.ADDRESS, name, old_addr, new_addr, text)
         if doc_str(before, "sha256") != doc_str(doc, "sha256") and doc_str(doc, "sha256"):
-            add(ChangeKind.CONTENT, name, "", "", f"{name}: content changed")
+            add(ChangeKind.CONTENT, name, "", "", N_(f"{name}: content changed"))
             marks.setdefault(key, EntryMark.CHANGED)
     for key, doc in old.items():
         if key not in new:
             name = doc_str(doc, "name")
-            add(ChangeKind.ENTRY_REMOVED, name, doc_str(doc, "address"), "", f"Removed: {name}")
+            add(ChangeKind.ENTRY_REMOVED, name, doc_str(doc, "address"), "", N_(f"Removed: {name}"))
     for key, override in firmware.entry_overrides.items():
         if key not in new:
             add(
@@ -583,18 +580,17 @@ def _changes(
                 key.split(":", 1)[-1],
                 "",
                 "",
-                f"{key.split(':', 1)[-1]}: your changes no longer match a file and are dropped",
+                N_(f"{key.split(':', 1)[-1]}: your changes no longer match a file and are dropped"),
             )
         elif override.address is not None and (chip_changed or idf_changed):
             name = doc_str(new[key], "name")
-            fate = "dropped on confirmation" if chip_changed else "kept; check it"
-            add(
-                ChangeKind.MANUAL_ADDRESS,
-                name,
-                f"{override.address:#x}",
-                "",
-                f"{name}: manual address {override.address:#x} {fate}",
+            manual = f"{override.address:#x}"
+            text = (
+                N_(f"{name}: manual address {manual} dropped on confirmation")
+                if chip_changed
+                else N_(f"{name}: manual address {manual} kept; check it")
             )
+            add(ChangeKind.MANUAL_ADDRESS, name, manual, "", text)
 
     return changes
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from esptool.cmds import merge_bin  # pyright: ignore[reportUnknownVariableType]  # untyped **kwargs
 
 from embr.core.flasher.plan import FlashSettings
+from embr.i18n import N_
 
 
 class MergeError(ValueError):
@@ -66,15 +67,17 @@ def merge_image(
     MergeError."""
     ordered = sorted(entries, key=lambda e: e.address)
     if not ordered:
-        raise MergeError("nothing to merge")
+        raise MergeError(N_("nothing to merge"))
     if ordered[0].address < target_offset:
         raise MergeError(
-            f"{ordered[0].path.name} at {ordered[0].address:#x} is below the start offset "
-            f"{target_offset:#x}"
+            N_(
+                f"{ordered[0].path.name} at {ordered[0].address:#x} is below the start offset "
+                f"{target_offset:#x}"
+            )
         )
     for a, b in itertools.pairwise(ordered):
         if a.address + a.path.stat().st_size > b.address:
-            raise MergeError(f"{a.path.name} and {b.path.name} overlap")
+            raise MergeError(N_(f"{a.path.name} and {b.path.name} overlap"))
     merged = merge_bin(
         [(e.address, str(e.path)) for e in ordered],
         chip,

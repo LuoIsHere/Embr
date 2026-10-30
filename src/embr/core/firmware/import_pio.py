@@ -27,6 +27,7 @@ from embr.core.firmware.image_sniff import (
 )
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams
+from embr.i18n import N_
 
 PLATFORMIO_INI = "platformio.ini"
 IDEDATA = "idedata.json"
@@ -175,14 +176,14 @@ def env_ref(path: Path) -> EnvRef:
     path = path.resolve()
     build = path.parent
     if build.name.lower() != "build" or build.parent.name.lower() != ".pio":
-        raise EnvDirError(f"{path} is not a .pio/build/<env> folder of a PlatformIO project")
+        raise EnvDirError(N_(f"{path} is not a .pio/build/<env> folder of a PlatformIO project"))
     root = build.parent.parent
     if not (root / PLATFORMIO_INI).is_file():
-        raise EnvDirError(f"{root} has no {PLATFORMIO_INI}")
+        raise EnvDirError(N_(f"{root} has no {PLATFORMIO_INI}"))
     declared = {e.lower(): e for e in ini_envs(root)}
     env = declared.get(path.name.lower())
     if env is None:
-        raise EnvDirError(f"{PLATFORMIO_INI} in {root} does not declare [env:{path.name}]")
+        raise EnvDirError(N_(f"{PLATFORMIO_INI} in {root} does not declare [env:{path.name}]"))
     return EnvRef(root, env)
 
 
@@ -223,30 +224,30 @@ def read_idedata(ref: EnvRef) -> tuple[PioImages | None, str]:
     try:
         stamp = file.stat().st_mtime_ns
     except OSError:
-        return None, f"{IDEDATA} not found"
+        return None, N_(f"{IDEDATA} not found")
     try:
         if stamp < (ref.project_root / PLATFORMIO_INI).stat().st_mtime_ns:
-            return None, f"{IDEDATA} is older than {PLATFORMIO_INI}"
+            return None, N_(f"{IDEDATA} is older than {PLATFORMIO_INI}")
         data: object = json.loads(file.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return None, f"{IDEDATA} cannot be read ({exc})"
+        return None, N_(f"{IDEDATA} cannot be read ({exc})")
     table = _table(data)
     if "extra" not in table:  # metadata-style {env: {...}}
         table = _table(table.get(ref.env))
     extra = _table(table.get("extra"))
     listed, offset = extra.get("flash_images"), _int(extra.get("application_offset"))
     if not isinstance(listed, list) or offset is None:
-        return None, f"{IDEDATA} lacks extra.flash_images or extra.application_offset"
+        return None, N_(f"{IDEDATA} lacks extra.flash_images or extra.application_offset")
     images: list[FlashImage] = []
     for item in cast(list[object], listed):
         image = _table(item)
         address, path = _int(image.get("offset")), image.get("path")
         if address is None or not isinstance(path, str) or not path:
-            return None, f"{IDEDATA} has a malformed flash_images entry"
+            return None, N_(f"{IDEDATA} has a malformed flash_images entry")
         images.append(FlashImage(address, Path(path)))
     missing = [i.path.name for i in images if not i.path.is_file()]
     if missing:
-        return None, f"{IDEDATA} lists missing files: {', '.join(missing)}"
+        return None, N_(f"{IDEDATA} lists missing files: {', '.join(missing)}")
     return PioImages(tuple(images), offset), ""
 
 
@@ -257,16 +258,16 @@ def parse_config(text: str) -> dict[str, EnvConfig]:
     try:
         data: object = json.loads(text)
     except ValueError as exc:
-        raise PioUnavailableError(f"pio project config printed no JSON ({exc})") from exc
+        raise PioUnavailableError(N_(f"pio project config printed no JSON ({exc})")) from exc
     if not isinstance(data, list):
-        raise PioUnavailableError("pio project config printed unexpected JSON")
+        raise PioUnavailableError(N_("pio project config printed unexpected JSON"))
     envs: dict[str, EnvConfig] = {}
     for section in cast(list[object], data):
         if not isinstance(section, list) or len(cast(list[object], section)) != 2:
-            raise PioUnavailableError("pio project config printed unexpected JSON")
+            raise PioUnavailableError(N_("pio project config printed unexpected JSON"))
         name, pairs = cast(list[object], section)
         if not isinstance(name, str) or not isinstance(pairs, list):
-            raise PioUnavailableError("pio project config printed unexpected JSON")
+            raise PioUnavailableError(N_("pio project config printed unexpected JSON"))
         if not name.startswith("env:"):
             continue
         options: dict[str, object] = {}
@@ -348,12 +349,12 @@ def run_pio(argv: Sequence[str], cwd: Path, timeout: float) -> str:
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise PioUnavailableError(f"pio did not answer within {timeout:.0f} s") from exc
+        raise PioUnavailableError(N_(f"pio did not answer within {timeout:.0f} s")) from exc
     except OSError as exc:
-        raise PioUnavailableError(f"pio could not be started: {exc}") from exc
+        raise PioUnavailableError(N_(f"pio could not be started: {exc}")) from exc
     if done.returncode != 0:
         last = (done.stderr.strip().splitlines() or ["no output"])[-1]
-        raise PioUnavailableError(f"pio exited with code {done.returncode}: {last}")
+        raise PioUnavailableError(N_(f"pio exited with code {done.returncode}: {last}"))
     return done.stdout
 
 
@@ -383,7 +384,9 @@ def locate_package(
         return PackageChoice(
             None,
             auto=False,
-            problem=f"framework package not found: {path} has no {BOOT_APP0_IN_PACKAGE.as_posix()}",
+            problem=N_(
+                f"framework package not found: {path} has no {BOOT_APP0_IN_PACKAGE.as_posix()}"
+            ),
         )
     if listed is not None and listed.is_file() and len(listed.parents) > 2:
         return PackageChoice(listed.parents[2], auto=True)
@@ -436,9 +439,9 @@ def read_env(
     Raises BuildMissingError, EnvDirError (env no longer declared), PioBuildError."""
     build_dir = ref.build_dir
     if not is_built(ref):
-        raise BuildMissingError(f"{build_dir}: no build output")
+        raise BuildMissingError(N_(f"{build_dir}: no build output"))
     if ref.env not in ini_envs(ref.project_root):
-        raise EnvDirError(f"{PLATFORMIO_INI} no longer declares [env:{ref.env}]")
+        raise EnvDirError(N_(f"{PLATFORMIO_INI} no longer declares [env:{ref.env}]"))
     framework = _framework(build_dir, config)
     notes: list[str] = []
     problems: list[str] = []
@@ -457,7 +460,7 @@ def read_env(
         raw.append((images.application_offset, app, EntryKind.APP, True))
     else:
         source = ImageSource.SCAN
-        notes.append(f"{why}; the build folder was scanned instead")
+        notes.append(N_(f"{why}; the build folder was scanned instead"))
         if framework == Framework.ESPIDF and (build_dir / FLASHER_ARGS).is_file():
             inputs.append(build_dir / FLASHER_ARGS)
             raw = _espidf_files(build_dir)
@@ -485,10 +488,10 @@ def read_env(
         found = sniff(data, path.name, table)
         if not listed:
             if found.kind == EntryKind.MERGED:
-                notes.append(f"{path.name}: a merged image; left out")
+                notes.append(N_(f"{path.name}: a merged image; left out"))
                 continue
             if found.kind == EntryKind.UNKNOWN or found.address is None:
-                notes.append(f"{path.name}: not recognised; left out")
+                notes.append(N_(f"{path.name}: not recognised; left out"))
                 continue
             files.append(PioFile(found.address, path, found.kind))
             continue
@@ -517,7 +520,9 @@ def read_env(
             pass  # the build has its own otadata image
         elif otadata is None:
             if table is not None:
-                notes.append(f"{BOOT_APP0} left out: the partition table has no otadata partition")
+                notes.append(
+                    N_(f"{BOOT_APP0} left out: the partition table has no otadata partition")
+                )
         elif boot is not None:
             note = ""
             if otadata.offset != BOOT_APP0_PIO_ADDRESS:
@@ -529,7 +534,7 @@ def read_env(
         elif package.problem is None:
             files.append(PioFile(otadata.offset, None, EntryKind.OTADATA, blank_size=otadata.size))
             notes.append(
-                f"{BOOT_APP0} was not found in any framework package; a blank otadata is used"
+                N_(f"{BOOT_APP0} was not found in any framework package; a blank otadata is used")
             )
     unique: dict[object, PioFile] = {}
     for f in files:
@@ -549,8 +554,10 @@ def read_env(
         app_flash = _flash(app_header)
         if app_flash != flash:
             notes.append(
-                f"flash settings differ: bootloader {_flash_text(flash)}, "
-                f"app {_flash_text(app_flash)} (the bootloader's are used)"
+                N_(
+                    f"flash settings differ: bootloader {_flash_text(flash)}, "
+                    f"app {_flash_text(app_flash)} (the bootloader's are used)"
+                )
             )
     inputs += [f.path for f in ordered if f.path is not None]
     return PioBuild(
@@ -648,7 +655,7 @@ def _espidf_files(build_dir: Path) -> list[tuple[int, Path, EntryKind | None, bo
     for offset, name in _table(args.get("flash_files")).items():
         address = _int(offset)
         if address is None or not isinstance(name, str):
-            raise PioBuildError(f"{FLASHER_ARGS}: bad flash_files entry {offset!r}")
+            raise PioBuildError(N_(f"{FLASHER_ARGS}: bad flash_files entry {offset!r}"))
         kind = kinds.get(name.replace("\\", "/"))
         mapped = _PIO_NAMES.get(kind) if kind is not None else None
         path = build_dir / (mapped or Path(name).name)
@@ -656,7 +663,7 @@ def _espidf_files(build_dir: Path) -> list[tuple[int, Path, EntryKind | None, bo
             path = build_dir / name
         files.append((address, path, kind, True))
     if not files:
-        raise PioBuildError(f"{FLASHER_ARGS} lists no flash files")
+        raise PioBuildError(N_(f"{FLASHER_ARGS} lists no flash files"))
     return files
 
 

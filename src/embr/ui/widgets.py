@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from embr.i18n import tr
+
 
 def restyle(widget: QWidget) -> None:
     """Re-apply the style sheet after a dynamic property changed."""
@@ -97,8 +99,9 @@ def elided(
 
 
 def tag(text: str, kind: str) -> QLabel:
-    """Small coloured status label; kind: ok, warn, bad, info, gray."""
-    widget = QLabel(text)
+    """Small coloured status label; kind: ok, warn, bad, info, gray. `text` goes through
+    tr(), so tag texts can come from N_() constants."""
+    widget = QLabel(tr(text))
     widget.setProperty("tag", kind)
     widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
     widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)

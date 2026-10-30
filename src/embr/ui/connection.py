@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from embr.app.checklist import CheckItem, CheckState
 from embr.app.identify import IdentifySnapshot
 from embr.core.serial import ConnectionType, PortInfo, baud_adjustable
+from embr.i18n import N_, tr
 from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
 from embr.ui.theme import Palette
@@ -26,10 +27,10 @@ from embr.ui.widgets import button, clear_layout, label, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
 CONNECTION_LABELS = {
-    ConnectionType.UART_BRIDGE: "UART bridge",
+    ConnectionType.UART_BRIDGE: N_("UART bridge"),
     ConnectionType.USB_SERIAL_JTAG: "USB-Serial/JTAG",
     ConnectionType.USB_OTG: "USB-OTG",
-    ConnectionType.UNKNOWN: "serial port",
+    ConnectionType.UNKNOWN: N_("serial port"),
 }
 CHECK_TEXT = {
     CheckState.PASS: "PASS",
@@ -40,7 +41,7 @@ CHECK_TEXT = {
 
 
 def port_text(port: PortInfo) -> str:
-    text = f"{port.device} · {CONNECTION_LABELS[port.connection]}"
+    text = f"{port.device} · {tr(CONNECTION_LABELS[port.connection])}"
     if port.vid is not None and port.pid is not None:
         text += f" · {port.vid:04X}:{port.pid:04X}"
     return text
@@ -55,7 +56,7 @@ class HintLabel(QLabel):
         super().__init__()
         self.setWordWrap(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Click to dismiss")
+        self.setToolTip(tr("Click to dismiss"))
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -90,26 +91,26 @@ class ConnectionPanel(QWidget):
         # ---- port, baud, identify ----
         self.port = QComboBox()
         self.baud = QComboBox()
-        self.identify = button("Connect && identify")
-        board_hint = "Available after Connect & identify on this port"
-        self.erase = button("Erase flash…")
+        self.identify = button(tr("Connect && identify"))
+        board_hint = tr("Available after Connect & identify on this port")
+        self.erase = button(tr("Erase flash…"))
         self.erase.setToolTip(board_hint)
-        self.read = button("Read flash…")
+        self.read = button(tr("Read flash…"))
         self.read.setToolTip(board_hint)
         board = QHBoxLayout()
         board.setSpacing(6)
         board.addWidget(self.erase, 1)
         board.addWidget(self.read, 1)
-        self.board_log = button("Board log")
+        self.board_log = button(tr("Board log"))
         self.board_log.setToolTip(
-            "Flash, erase and read operations on this board (logs/boards/<MAC>.log)"
+            tr("Flash, erase and read operations on this board (logs/boards/<MAC>.log)")
         )
         self.identity = QVBoxLayout()
         self.identity.setContentsMargins(0, 0, 0, 0)
         connect = QVBoxLayout()
         connect.setSpacing(6)
-        connect.addLayout(_row("Port", self.port))
-        connect.addLayout(_row("Baud", self.baud))
+        connect.addLayout(_row(tr("Port"), self.port))
+        connect.addLayout(_row(tr("Baud"), self.baud))
         connect.addWidget(self.identify)
         connect.addLayout(board)
         connect.addWidget(self.board_log)
@@ -119,7 +120,7 @@ class ConnectionPanel(QWidget):
         self.checks.setSpacing(5)
         checks = QVBoxLayout()
         checks.setSpacing(6)
-        title = QLabel("Checks")
+        title = QLabel(tr("Checks"))
         title.setStyleSheet("font-weight: 600;")
         checks.addWidget(title)
         checks.addLayout(self.checks)
@@ -137,9 +138,9 @@ class ConnectionPanel(QWidget):
         # ---- action: hint, erase option, flash ----
         self.hint = HintLabel()
         self.hint.hide()
-        self.erase_all = QCheckBox("Erase the whole flash first")
+        self.erase_all = QCheckBox(tr("Erase the whole flash first"))
         self.erase_all.setToolTip(
-            "Saved with the firmware. Clears NVS (Wi-Fi credentials and other stored data)"
+            tr("Saved with the firmware. Clears NVS (Wi-Fi credentials and other stored data)")
         )
         self.flash = button("", "primary")
         self._flash_text = QLabel()
@@ -158,7 +159,7 @@ class ConnectionPanel(QWidget):
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 100)
-        self.progress_text = label("Idle", tone="2")
+        self.progress_text = label(tr("Idle"), tone="2")
         self.progress_pct = label("", tone="2")
         action = QFrame()
         action.setObjectName("raction")
@@ -203,7 +204,7 @@ class ConnectionPanel(QWidget):
         self._ports = ports
         self.port.clear()
         if not ports:
-            self.port.addItem("No serial port found", None)
+            self.port.addItem(tr("No serial port found"), None)
             self.port.setEnabled(False)
             return
         self.port.setEnabled(not self._running)
@@ -225,9 +226,9 @@ class ConnectionPanel(QWidget):
         """default: remembered or default rate; None for native USB."""
         self.baud.clear()
         if port is not None and not baud_adjustable(port):
-            self.baud.addItem("not applicable", None)
+            self.baud.addItem(tr("not applicable"), None)
             self.baud.setEnabled(False)
-            self.baud.setToolTip("Native USB: baud rate not applicable")
+            self.baud.setToolTip(tr("Native USB: baud rate not applicable"))
             return
         rates = sorted({*BAUDS, *([default] if default else [])})
         for rate in rates:
@@ -247,8 +248,10 @@ class ConnectionPanel(QWidget):
         clear_layout(self.identity)
         if snapshot is None:
             note = label(
-                "Not identified yet. After identifying, firmware for other chips is dimmed in "
-                "the sidebar.",
+                tr(
+                    "Not identified yet. After identifying, firmware for other chips is dimmed in "
+                    "the sidebar."
+                ),
                 tone="3",
                 wrap=True,
             )
@@ -264,34 +267,38 @@ class ConnectionPanel(QWidget):
         enabled = [
             name
             for name, on in (
-                ("secure download mode", security.secure_download_mode),
-                ("flash encryption", security.flash_encryption),
-                ("secure boot", security.secure_boot),
+                (tr("secure download mode"), security.secure_download_mode),
+                (tr("flash encryption"), security.flash_encryption),
+                (tr("secure boot"), security.secure_boot),
             )
             if on
         ]
         state: QWidget = (
-            tag("in download mode", "ok") if info.in_download_mode else label("reset, running")
+            tag(tr("in download mode"), "ok")
+            if info.in_download_mode
+            else label(tr("reset, running"))
         )
         rows: list[tuple[str, QWidget]] = [
-            ("Chip", label(f"{chip_name(info.chip)} {info.revision}")),
+            (N_("Chip"), label(f"{chip_name(info.chip)} {info.revision}")),
             ("MAC", label(info.mac or "—", mono=True)),
-            ("Flash", label(f"{info.flash_size} (detected)" if info.flash_size else "—")),
+            (N_("Flash"), label(tr(f"{info.flash_size} (detected)") if info.flash_size else "—")),
             (
-                "Security",
+                N_("Security"),
                 label(
-                    ", ".join(enabled) if enabled else "none (SDM / encryption / secure boot off)"
+                    ", ".join(enabled)
+                    if enabled
+                    else tr("none (SDM / encryption / secure boot off)")
                 ),
             ),
-            ("Link", label(CONNECTION_LABELS[snapshot.port.connection])),
-            ("State", _left(state)),
+            (N_("Link"), label(tr(CONNECTION_LABELS[snapshot.port.connection]))),
+            (N_("State"), _left(state)),
             (
-                "Identified",
-                label(f"{snapshot.time.strftime('%H:%M:%S')} · port released", tone="3"),
+                N_("Identified"),
+                label(tr(f"{snapshot.time.strftime('%H:%M:%S')} · port released"), tone="3"),
             ),
         ]
         for row, (key, widget) in enumerate(rows):
-            caption = label(key, tone="3")
+            caption = label(tr(key), tone="3")
             grid.addWidget(caption, row, 0, Qt.AlignmentFlag.AlignTop)
             widget.setStyleSheet("font-size: 12px;")
             if isinstance(widget, QLabel):
@@ -316,7 +323,7 @@ class ConnectionPanel(QWidget):
                 _check(
                     CheckItem(
                         CheckState.LATER,
-                        "Select a firmware in the sidebar to run checks and flash.",
+                        N_("Select a firmware in the sidebar to run checks and flash."),
                     ),
                     "—",
                 )
@@ -327,7 +334,7 @@ class ConnectionPanel(QWidget):
 
     def set_hint(self, text: str, kind: str = "warn") -> None:
         """Shown above Flash until the user clicks it away (hint_dismissed)."""
-        self.hint.setText(text)
+        self.hint.setText(tr(text))
         self.hint.setProperty("hint", kind)
         _repolish(self.hint)
         self.hint.setVisible(bool(text))
@@ -354,12 +361,12 @@ class ConnectionPanel(QWidget):
     def set_running(self, running: bool) -> None:
         self._running = running
         if running:
-            self._flash_text.setText("Cancel")
+            self._flash_text.setText(tr("Cancel"))
             self._keys = ("Esc",)
             self.flash.setProperty("kind", "danger")
             self.flash.setEnabled(True)
         else:
-            self._flash_text.setText("Flash")
+            self._flash_text.setText(tr("Flash"))
             self._keys = ("Ctrl", "Enter")
             self.flash.setProperty("kind", "primary")
         self.flash.setAccessibleName(f"{self._flash_text.text()} ({'+'.join(self._keys)})")
@@ -389,7 +396,7 @@ class ConnectionPanel(QWidget):
 
     def show_progress(self, percent: int, text: str) -> None:
         self.progress.setValue(percent)
-        self.progress_text.setText(text)
+        self.progress_text.setText(tr(text))
         self.progress_pct.setText(f"{percent}%" if percent or self._running else "")
 
 
@@ -420,11 +427,11 @@ def _check(item: CheckItem, state_text: str) -> QHBoxLayout:
     row.addWidget(pill, 0, Qt.AlignmentFlag.AlignTop)
     text = QVBoxLayout()
     text.setSpacing(1)
-    title = label(item.title, tone="2", wrap=True)
+    title = label(tr(item.title), tone="2", wrap=True)
     title.setStyleSheet("font-size: 12px;")
     text.addWidget(title)
     if item.detail:
-        detail = label(item.detail, tone="3", wrap=True)
+        detail = label(tr(item.detail), tone="3", wrap=True)
         detail.setStyleSheet("font-size: 11px;")
         text.addWidget(detail)
     row.addLayout(text, 1)

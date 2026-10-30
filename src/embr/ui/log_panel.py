@@ -6,6 +6,7 @@ import html
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
+from embr.i18n import tr
 from embr.ui.theme import Palette, mono_font
 from embr.ui.widgets import button
 
@@ -21,8 +22,8 @@ class LogPanel(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._palette: Palette | None = None
-        self.expand = button("Expand", "ibtn")
-        self.log_folder = button("Log folder", "ibtn")
+        self.expand = button(tr("Expand"), "ibtn")
+        self.log_folder = button(tr("Log folder"), "ibtn")
         self.log = QPlainTextEdit()
         self.log.setObjectName("log")
         self.log.setReadOnly(True)
@@ -32,7 +33,7 @@ class LogPanel(QWidget):
         head.setObjectName("loghead")
         head_layout = QHBoxLayout(head)
         head_layout.setContentsMargins(12, 6, 12, 6)
-        caption = QLabel("Log")
+        caption = QLabel(tr("Log"))
         caption.setStyleSheet("font-weight: 600;")
         head_layout.addWidget(caption, 1)
         head_layout.addWidget(self.expand)
@@ -75,6 +76,6 @@ class LogPanel(QWidget):
         bar.setValue(bar.maximum())
 
     def _toggle_expand(self) -> None:
-        on = self.expand.text() == "Expand"
-        self.expand.setText("Restore" if on else "Expand")
+        on = self.expand.text() == tr("Expand")
+        self.expand.setText(tr("Restore") if on else tr("Expand"))
         self.expand_toggled.emit(on)

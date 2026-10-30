@@ -9,6 +9,7 @@ from pathlib import Path
 
 from embr.core.firmware.image_header import NO_MAX_REVISION
 from embr.core.flasher.plan import PlanEntry
+from embr.i18n import N_
 
 
 class CheckLevel(StrEnum):
@@ -67,7 +68,7 @@ def check_security(state: SecurityState) -> list[Check]:
         Check(
             SECURITY,
             CheckLevel.REFUSE,
-            f"{feature} is enabled; Embr does not flash such chips, use esptool / espsecure",
+            N_(f"{feature} is enabled; Embr does not flash such chips, use esptool / espsecure"),
         )
         for on, feature in enabled
         if on
@@ -76,7 +77,7 @@ def check_security(state: SecurityState) -> list[Check]:
         Check(
             SECURITY,
             CheckLevel.PASS,
-            "secure download mode, flash encryption and secure boot are off",
+            N_("secure download mode, flash encryption and secure boot are off"),
         )
     ]
 
@@ -91,8 +92,8 @@ def check_chip(detected: str, firmware_chip: str | None, entries: Sequence[PlanE
     mismatched = [(who, chip) for who, chip in parties if chip != detected]
     if mismatched:
         detail = ", ".join(f"{who}: {chip}" for who, chip in parties)
-        return Check(CHIP, CheckLevel.REFUSE, f"chip mismatch ({detail})")
-    return Check(CHIP, CheckLevel.PASS, f"{detected}: board, firmware and images agree")
+        return Check(CHIP, CheckLevel.REFUSE, N_(f"chip mismatch ({detail})"))
+    return Check(CHIP, CheckLevel.PASS, N_(f"{detected}: board, firmware and images agree"))
 
 
 def revision_incompatibility(state: ChipState, entry: PlanEntry) -> str | None:
@@ -133,7 +134,9 @@ def check_revisions(state: ChipState, entries: Sequence[PlanEntry]) -> Check:
         reason = revision_incompatibility(state, entry)
         if reason is not None:
             return Check(REVISION, CheckLevel.REFUSE, reason)
-    return Check(REVISION, CheckLevel.PASS, f"chip {_rev(state.rev_full)}, all entries in range")
+    return Check(
+        REVISION, CheckLevel.PASS, N_(f"chip {_rev(state.rev_full)}, all entries in range")
+    )
 
 
 def check_capacity(
@@ -148,25 +151,25 @@ def check_capacity(
     checks: list[Check] = []
     detected = _size_bytes(state.flash_size) if state.flash_size else None
     if detected is None:
-        checks.append(Check(FLASH_SIZE, CheckLevel.WARN, "flash size could not be detected"))
+        checks.append(Check(FLASH_SIZE, CheckLevel.WARN, N_("flash size could not be detected")))
         return checks
     if declared_size not in (None, "keep", "detect") and declared_size != state.flash_size:
         checks.append(
             Check(
                 FLASH_SIZE,
                 CheckLevel.WARN,
-                f"firmware declares {declared_size}, board has {state.flash_size}",
+                N_(f"firmware declares {declared_size}, board has {state.flash_size}"),
             )
         )
     else:
-        checks.append(Check(FLASH_SIZE, CheckLevel.PASS, f"board has {state.flash_size}"))
+        checks.append(Check(FLASH_SIZE, CheckLevel.PASS, N_(f"board has {state.flash_size}")))
     over = [e for e in entries if e.address + e.size > detected]
     if partitions_end is not None and partitions_end > detected:
         checks.append(
             Check(
                 CAPACITY,
                 CheckLevel.REFUSE,
-                f"partition table ends at {partitions_end:#x}, beyond {state.flash_size}",
+                N_(f"partition table ends at {partitions_end:#x}, beyond {state.flash_size}"),
             )
         )
     elif over:
@@ -175,11 +178,13 @@ def check_capacity(
             Check(
                 CAPACITY,
                 CheckLevel.REFUSE,
-                f"{e.name} ends at {e.address + e.size:#x}, beyond {state.flash_size}",
+                N_(f"{e.name} ends at {e.address + e.size:#x}, beyond {state.flash_size}"),
             )
         )
     else:
-        checks.append(Check(CAPACITY, CheckLevel.PASS, f"all entries fit in {state.flash_size}"))
+        checks.append(
+            Check(CAPACITY, CheckLevel.PASS, N_(f"all entries fit in {state.flash_size}"))
+        )
     return checks
 
 
@@ -189,13 +194,13 @@ def check_files(entries: Sequence[PlanEntry]) -> Check:
     for e in entries:
         path = Path(e.path)
         if not path.is_file():
-            return Check(FILES, CheckLevel.REFUSE, f"{e.name}: file missing ({e.path})")
+            return Check(FILES, CheckLevel.REFUSE, N_(f"{e.name}: file missing ({e.path})"))
         data = path.read_bytes()
         if len(data) != e.size or hashlib.sha256(data).hexdigest() != e.sha256:
             return Check(
-                FILES, CheckLevel.REFUSE, f"{e.name}: content changed since it was checked"
+                FILES, CheckLevel.REFUSE, N_(f"{e.name}: content changed since it was checked")
             )
-    return Check(FILES, CheckLevel.PASS, f"{len(entries)} files: name, path and hash match")
+    return Check(FILES, CheckLevel.PASS, N_(f"{len(entries)} files: name, path and hash match"))
 
 
 def flash_size_bytes(size: str) -> int | None:

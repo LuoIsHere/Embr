@@ -50,6 +50,7 @@ from embr.core.firmware.tracking import (
     missing,
     resolve,
 )
+from embr.i18n import N_
 
 SETTLE_SECONDS = 2.0
 """A source file modified less than this long ago means a build is still writing."""
@@ -240,14 +241,16 @@ class Tracker:
         status = self.check(firmware_id)
         if status.state == ResolveState.BUILDING:
             raise BuildChangedError(
-                "The build output is still being written; flash again in a moment.",
+                N_("The build output is still being written; flash again in a moment."),
                 status,
                 building=True,
             )
         if shown_digest is not None and status.digest != shown_digest:
             raise BuildChangedError(
-                f"{status.firmware.name} changed since it was shown "
-                f"({status.checked_at:%H:%M:%S}); review it and press Flash again.",
+                N_(
+                    f"{status.firmware.name} changed since it was shown "
+                    f"({status.checked_at:%H:%M:%S}); review it and press Flash again."
+                ),
                 status,
                 building=False,
             )
@@ -267,7 +270,7 @@ class Tracker:
         elif firmware.source == Source.PIO_BUILD:
             resolution, inputs = self._resolve_pio(firmware, now)
         elif firmware.source.tracking:
-            resolution = missing(firmware, "This firmware type cannot be resolved here")
+            resolution = missing(firmware, N_("This firmware type cannot be resolved here"))
             inputs = ()
         else:
             return (*self._check_fixed(firmware, now), None)
@@ -292,13 +295,13 @@ class Tracker:
         self, firmware: Firmware, now: datetime.datetime
     ) -> tuple[Resolution, tuple[Path, ...]]:
         if firmware.build_ref is None:
-            return missing(firmware, "No build directory"), ()
+            return missing(firmware, N_("No build directory")), ()
         build_dir = Path(firmware.build_ref.path)
         fallback = (build_dir / FLASHER_ARGS, build_dir / PROJECT_DESCRIPTION)
         try:
             build = read_build(build_dir)
         except BuildMissingError:
-            return missing(firmware, f"{build_dir}: build output not found"), fallback
+            return missing(firmware, N_(f"{build_dir}: build output not found")), fallback
         except IdfBuildError as exc:  # half-written flasher_args.json, or now encrypted
             found = missing(firmware, str(exc))
             return dataclasses.replace(found, state=ResolveState.INCOMPLETE), fallback
@@ -332,7 +335,7 @@ class Tracker:
         platformio.ini or an unreadable build -> INCOMPLETE. Inputs always include
         platformio.ini, so editing it re-resolves."""
         if firmware.build_ref is None or not firmware.build_ref.env:
-            return missing(firmware, "No PlatformIO project and env"), ()
+            return missing(firmware, N_("No PlatformIO project and env")), ()
         ref = EnvRef(Path(firmware.build_ref.path), firmware.build_ref.env)
         fallback = (ref.project_root / PLATFORMIO_INI, ref.build_dir)
         manual = (
@@ -343,7 +346,7 @@ class Tracker:
                 ref, core=self._pio.core_dir, manual_package=manual, config=self._pio.env(ref)
             )
         except PioBuildMissingError:
-            return missing(firmware, f"{ref.build_dir}: build output not found"), fallback
+            return missing(firmware, N_(f"{ref.build_dir}: build output not found")), fallback
         except (PioBuildError, OSError) as exc:  # env removed from platformio.ini, bad files
             found = missing(firmware, str(exc))
             return dataclasses.replace(found, state=ResolveState.INCOMPLETE), fallback

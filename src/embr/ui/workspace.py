@@ -52,32 +52,33 @@ from embr.core.firmware.model import AddressSource, Entry, Firmware, Source, edi
 from embr.core.firmware.tracking import ChangeKind, EntryMark, ResolveState
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.history import FlashRecord, RecordResult
+from embr.i18n import N_, tr
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS
 from embr.ui.widgets import ElidedLabel, button, clear_layout, elided, label, tag
 
 EN_DASH = f" {chr(0x2013)} "
 MARK_TAGS = {
-    EntryMark.CHANGED: ("content changed", "warn"),
-    EntryMark.NEW: ("new file", "warn"),
-    EntryMark.MISSING: ("file missing", "bad"),
+    EntryMark.CHANGED: (N_("content changed"), "warn"),
+    EntryMark.NEW: (N_("new file"), "warn"),
+    EntryMark.MISSING: (N_("file missing"), "bad"),
 }
 
 SOURCE_LABELS = {
-    Source.MANUAL: ("fixed", "gray"),
-    Source.ARCHIVED: ("archived", "gray"),
-    Source.IDF_BUILD: ("tracks IDF build", "info"),
-    Source.PIO_BUILD: ("tracks PIO build", "info"),
+    Source.MANUAL: (N_("fixed"), "gray"),
+    Source.ARCHIVED: (N_("archived"), "gray"),
+    Source.IDF_BUILD: (N_("tracks IDF build"), "info"),
+    Source.PIO_BUILD: (N_("tracks PIO build"), "info"),
 }
 CONNECTION_LABELS = {
-    "uart_bridge": "UART bridge",
+    "uart_bridge": N_("UART bridge"),
     "usb_serial_jtag": "USB-Serial/JTAG",
     "usb_otg": "USB-OTG",
-    "unknown": "serial port",
+    "unknown": N_("serial port"),
 }
 STATE_TAGS = {
-    ResolveState.TARGET_SWITCHED: "target switched",
-    ResolveState.INCOMPLETE: "build incomplete",
+    ResolveState.TARGET_SWITCHED: N_("target switched"),
+    ResolveState.INCOMPLETE: N_("build incomplete"),
 }
 RESULT_TAGS = {
     RecordResult.OK: "ok",
@@ -89,7 +90,7 @@ RESULT_TAGS = {
 
 def crumb(owner: Owner, firmware: Firmware) -> str:
     if firmware.project_id is None:
-        return "Standalone"
+        return tr("Standalone")
     try:
         project = owner.library.project(firmware.project_id).name
     except KeyError:
@@ -108,16 +109,16 @@ class Header(QWidget):
         self.row.setSpacing(8)
         self.notes = label("", tone="3")
         self.notes.setStyleSheet("font-size: 12px;")
-        self.menu_button = button("⋯", "ibtn", tooltip="Firmware actions")
+        self.menu_button = button("⋯", "ibtn", tooltip=tr("Firmware actions"))
         self.menu = QMenu(self)
-        self.menu.addAction("Rename…\tF2", lambda: owner.firmware_action("rename"))
-        self.menu.addAction("Duplicate", lambda: owner.firmware_action("duplicate"))
-        self.menu.addAction("Move to project…", lambda: owner.firmware_action("move"))
+        self.menu.addAction(tr("Rename…\tF2"), lambda: owner.firmware_action("rename"))
+        self.menu.addAction(tr("Duplicate"), lambda: owner.firmware_action("duplicate"))
+        self.menu.addAction(tr("Move to project…"), lambda: owner.firmware_action("move"))
         self.archive_action = self.menu.addAction(
-            "Archive this version…", lambda: owner.firmware_action("archive")
+            tr("Archive this version…"), lambda: owner.firmware_action("archive")
         )
         self.menu.addSeparator()
-        self.menu.addAction("Delete…", lambda: owner.firmware_action("delete"))
+        self.menu.addAction(tr("Delete…"), lambda: owner.firmware_action("delete"))
         self.menu_button.clicked.connect(
             lambda: self.menu.popup(
                 self.menu_button.mapToGlobal(QPoint(0, self.menu_button.height() + 4))
@@ -146,21 +147,21 @@ class Header(QWidget):
             self.row.addWidget(tag(mcu.label, "gray"))
         self.row.addWidget(tag(*SOURCE_LABELS[firmware.source]))
         if flag == FirmwareFlag.NEEDS_CONFIRMATION:
-            self.row.addWidget(tag("needs confirmation", "warn"))
+            self.row.addWidget(tag(tr("needs confirmation"), "warn"))
         elif flag == FirmwareFlag.MISSING:
-            missing = "build output missing" if firmware.source.tracking else "file missing"
+            missing = N_("build output missing") if firmware.source.tracking else N_("file missing")
             self.row.addWidget(tag(missing, "bad"))
         elif flag == FirmwareFlag.BLOCKED:
             self.row.addWidget(tag(STATE_TAGS.get(status.state, "build incomplete"), "bad"))
         if status.updated_at is not None:
-            self.row.addWidget(tag(f"Build updated {status.updated_at:%H:%M:%S}", "info"))
+            self.row.addWidget(tag(tr(f"Build updated {status.updated_at:%H:%M:%S}"), "info"))
         if firmware.read_only:
-            self.row.addWidget(tag("created by a newer Embr", "warn"))
-        text = firmware.notes or "no note — edit on the Parameters tab"
+            self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
+        text = firmware.notes or tr("no note — edit on the Parameters tab")
         self.notes.setText(
             self.notes.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, 900)
         )
-        self.notes.setToolTip(firmware.notes or "No note yet. Edit it on the Parameters tab.")
+        self.notes.setToolTip(firmware.notes or tr("No note yet. Edit it on the Parameters tab."))
         self.archive_action.setEnabled(
             status.state.flashable and any(e.file.startswith("path:") for e in firmware.entries)
         )
@@ -169,15 +170,15 @@ class Header(QWidget):
         clear_layout(self.row)
         project = owner.library.project(project_id)
         count = len(owner.library.project_firmware(project_id))
-        self.row.addWidget(label("Project", tone="3"))
+        self.row.addWidget(label(tr("Project"), tone="3"))
         name = QLabel(project.name)
         name.setProperty("heading", "1")
         self.row.addWidget(name)
-        self.row.addWidget(tag(f"{count} firmware", "gray"))
-        self.row.addWidget(tag(f"{len(project.devices)} groups", "gray"))
+        self.row.addWidget(tag(tr(f"{count} firmware"), "gray"))
+        self.row.addWidget(tag(tr(f"{len(project.devices)} groups"), "gray"))
         self.menu_button.hide()
-        self.notes.setText(project.notes or "no note — edit below")
-        self.notes.setToolTip(project.notes or "No note yet.")
+        self.notes.setText(project.notes or tr("no note — edit below"))
+        self.notes.setToolTip(project.notes or tr("No note yet."))
 
 
 class Banner(QFrame):
@@ -216,7 +217,16 @@ window is too narrow for all of them (0: the column is hidden)."""
 
 
 class EntriesTab(QWidget):
-    COLUMNS = ("", "Address", "MCU", "Name", "Kind", "Address source", "Image requires", "Note")
+    COLUMNS = (
+        "",
+        N_("Address"),
+        N_("MCU"),
+        N_("Name"),
+        N_("Kind"),
+        N_("Address source"),
+        N_("Image requires"),
+        N_("Note"),
+    )
     archive_requested = Signal(str)
     """entry id"""
     merge_requested = Signal()
@@ -230,7 +240,7 @@ class EntriesTab(QWidget):
         """The shown firmware's MCUs (app.chips.firmware_mcus())."""
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setObjectName("entries")
-        self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels([tr(c) for c in self.COLUMNS])
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -246,10 +256,10 @@ class EntriesTab(QWidget):
         self.table.setColumnWidth(0, 28)
         self.table.setColumnWidth(1, 104)
         self.table.itemChanged.connect(self._toggled)
-        self.add_button = button(f"{PLUS} Add entry (or drop bin files here)", "addrow")
+        self.add_button = button(tr(f"{PLUS} Add entry (or drop bin files here)"), "addrow")
         self.add_menu = QMenu(self)
-        self.add_menu.addAction("Files…", self._add_files)
-        self.add_menu.addAction("Attachment…", self._add_attachment)
+        self.add_menu.addAction(tr("Files…"), self._add_files)
+        self.add_menu.addAction(tr("Attachment…"), self._add_attachment)
         self.add_button.clicked.connect(
             lambda: self.add_menu.popup(
                 self.add_button.mapToGlobal(QPoint(0, self.add_button.height()))
@@ -261,12 +271,12 @@ class EntriesTab(QWidget):
         row_layout = QHBoxLayout(add_row)
         row_layout.setContentsMargins(6, 0, 6, 0)
         row_layout.addWidget(self.add_button, 1)
-        self.from_build = label("Entries come from the build directory", tone="3")
+        self.from_build = label(tr("Entries come from the build directory"), tone="3")
         self.from_build.setToolTip(
-            "To add files, archive this version (⋯ menu) or create a fixed firmware"
+            tr("To add files, archive this version (⋯ menu) or create a fixed firmware")
         )
         row_layout.addWidget(self.from_build, 1)
-        self.merge_button = button("Merge to .bin…", "ibtn")
+        self.merge_button = button(tr("Merge to .bin…"), "ibtn")
         self.merge_button.setFixedWidth(130)
         self.merge_button.clicked.connect(self.merge_requested.emit)
         row_layout.addWidget(self.merge_button)
@@ -404,15 +414,15 @@ class EntriesTab(QWidget):
             flags |= Qt.ItemFlag.ItemIsUserCheckable
         check.setFlags(flags)
         if unfit:
-            check.setToolTip(f"For {mcu.label if mcu else 'no MCU'}; the board is {board}")
+            check.setToolTip(tr(f"For {mcu.label if mcu else 'no MCU'}; the board is {board}"))
         check.setCheckState(Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         self.table.setItem(row, 0, check)
         address = QLineEdit("" if entry.address is None else f"0x{entry.address:X}")
         address.setProperty("kind", "cell")
         address.setProperty("mono", "1")
-        address.setPlaceholderText("address")
+        address.setPlaceholderText(tr("address"))
         address.setReadOnly(locked)
-        hint = "Hex address. Clear the field and confirm to restore the detected address"
+        hint = tr("Hex address. Clear the field and confirm to restore the detected address")
         if entry.auto_address is not None and entry.auto_address != entry.address:
             hint += f" (0x{entry.auto_address:X})"
         address.setToolTip(hint)
@@ -432,7 +442,7 @@ class EntriesTab(QWidget):
             self.table.setItem(row, column, item)
         note = QLineEdit(entry.note)
         note.setProperty("kind", "cell")
-        note.setPlaceholderText("add note")
+        note.setPlaceholderText(tr("add note"))
         note.setReadOnly(locked)
         note.editingFinished.connect(lambda e=entry, w=note: self._note(e, w))
         self.table.setCellWidget(row, 7, _cell(note))
@@ -447,7 +457,7 @@ class EntriesTab(QWidget):
         combo = QComboBox()
         combo.setProperty("kind", "cell")
         auto = self._mcus[0] if len(self._mcus) == 1 and not entry.chip else None
-        combo.addItem(f"auto ({auto.label})" if auto else "—", "")
+        combo.addItem(tr(f"auto ({auto.label})") if auto else "—", "")
         for chip in chipinfo.supported_chips():
             for choice in [
                 Mcu(chip.name, ln.name) for ln in chipinfo.revision_lines(chip.name)
@@ -456,8 +466,10 @@ class EntriesTab(QWidget):
         current = f"{entry.chip}|{entry.chip_line}" if entry.chip else ""
         combo.setCurrentIndex(max(combo.findData(current), 0))
         combo.setToolTip(
-            "This file names no chip: choose the MCU it is for. Left empty, it follows the "
-            "firmware's only chip; with several chips it is not flashed."
+            tr(
+                "This file names no chip: choose the MCU it is for. Left empty, it follows the "
+                "firmware's only chip; with several chips it is not flashed."
+            )
         )
 
         def chosen(_index: int, e: Entry = entry, w: QComboBox = combo) -> None:
@@ -476,16 +488,16 @@ class EntriesTab(QWidget):
         name = elided(entry.name, tone=dim)
         layout.addWidget(name, 1)
         if entry.file.startswith("archive:"):
-            layout.addWidget(tag("archived", "gray"))
+            layout.addWidget(tag(tr("archived"), "gray"))
         if mark is not None:
             layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
-            layout.addWidget(tag("added automatically", "gray"))
+            layout.addWidget(tag(tr("added automatically"), "gray"))
         if note:  # PIO: boot_app0 placed by the table, or a listed address the image disputes
             moved = entry.kind == EntryKind.OTADATA
             layout.addWidget(
                 tag(
-                    "placed by partition table" if moved else "address differs",
+                    tr("placed by partition table") if moved else tr("address differs"),
                     "info" if moved else "warn",
                 )
             )
@@ -493,11 +505,11 @@ class EntriesTab(QWidget):
         where = (
             rest
             if scheme == "path"
-            else f"data/archive/{rest}.bin, original name {entry.name}"
+            else tr(f"data/archive/{rest}.bin, original name {entry.name}")
             if scheme == "archive"
-            else "0xFF bytes, generated when flashing"
+            else tr("0xFF bytes, generated when flashing")
         )
-        widget.setToolTip(f"{where}\n{note}" if note else where)
+        widget.setToolTip(f"{where}\n{tr(note)}" if note else where)
         name.setToolTip(widget.toolTip())
         return widget
 
@@ -506,7 +518,7 @@ class EntriesTab(QWidget):
         if header is None or header.chip is None:
             return "—"
         low, high = format_revision(header.min_rev_full), format_revision(header.max_rev_full)
-        return f"chip {low}{EN_DASH}{high}"
+        return tr(f"chip {low}{EN_DASH}{high}")
 
     # ---- edits ------------------------------------------------------------------------
 
@@ -558,7 +570,7 @@ class EntriesTab(QWidget):
         except ValueError as exc:
             self._owner.note("error", f"[entry] {exc}")
             return
-        shown = Mcu(chip, line).label if chip else "not set"
+        shown = Mcu(chip, line).label if chip else tr("not set")
         self._owner.note("dim", f"[entry] {entry.name}: MCU -> {shown}")
         self._owner.changed()
 
@@ -566,7 +578,7 @@ class EntriesTab(QWidget):
         if self._firmware is None:
             return
         names, _ = QFileDialog.getOpenFileNames(
-            self, "Add entries", "", "Binary files (*.bin);;All files (*)"
+            self, tr("Add entries"), "", tr("Binary files (*.bin);;All files (*)")
         )
         if names:
             self._add_paths([Path(n) for n in names])
@@ -580,7 +592,7 @@ class EntriesTab(QWidget):
             self._owner.note("error", f"[entry] {exc}")
             return
         for entry in added:
-            where = "no address" if entry.address is None else f"0x{entry.address:X}"
+            where = tr("no address") if entry.address is None else f"0x{entry.address:X}"
             self._owner.note("dim", f"[entry] added {entry.name} as {entry.kind.value} at {where}")
         self._owner.changed()
 
@@ -588,12 +600,14 @@ class EntriesTab(QWidget):
         firmware = self._firmware
         if firmware is None:
             return
-        name, _ = QFileDialog.getOpenFileName(self, "Add attachment", "", "All files (*)")
+        name, _ = QFileDialog.getOpenFileName(self, tr("Add attachment"), "", tr("All files (*)"))
         if not name:
             return
         partitions = self._partitions(firmware)
-        choices = [f"Partition: {p}" for p in partitions] + ["At an address…"]
-        choice, ok = QInputDialog.getItem(self, "Place attachment", "Placement", choices, 0, False)
+        choices = [tr(f"Partition: {p}") for p in partitions] + [tr("At an address…")]
+        choice, ok = QInputDialog.getItem(
+            self, tr("Place attachment"), tr("Placement"), choices, 0, False
+        )
         if not ok:
             return
         try:
@@ -601,7 +615,7 @@ class EntriesTab(QWidget):
                 partition = choice.removeprefix("Partition: ")
                 self._owner.library.add_attachment(firmware.id, Path(name), partition=partition)
             else:
-                text, ok = QInputDialog.getText(self, "Place attachment", "Hex address")
+                text, ok = QInputDialog.getText(self, tr("Place attachment"), tr("Hex address"))
                 if not ok:
                     return
                 address = int(text.strip(), 16)
@@ -635,20 +649,20 @@ class EntriesTab(QWidget):
             return
         derived = firmware.source.tracking
         menu = QMenu(self)
-        relocate = menu.addAction("Re-locate…")
+        relocate = menu.addAction(tr("Re-locate…"))
         relocate.setEnabled(entry.file.startswith("path:") and not derived)
-        archive = menu.addAction("Archive this file")
+        archive = menu.addAction(tr("Archive this file"))
         archive.setEnabled(entry.file.startswith("path:") and not derived)
-        copy_to = menu.addAction("Copy to firmware…")
+        copy_to = menu.addAction(tr("Copy to firmware…"))
         menu.addSeparator()
-        remove = menu.addAction("Remove entry")
+        remove = menu.addAction(tr("Remove entry"))
         remove.setEnabled(not derived)
         if derived:
-            remove.setToolTip("Comes from the build output; untick it to leave it out")
+            remove.setToolTip(tr("Comes from the build output; untick it to leave it out"))
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is relocate:
             name, _ = QFileDialog.getOpenFileName(
-                self, f"Re-locate {entry.name}", "", "All files (*)"
+                self, tr(f"Re-locate {entry.name}"), "", tr("All files (*)")
             )
             if name:
                 self._owner.library.relocate_entry(firmware.id, entry.id, Path(name))
@@ -676,7 +690,7 @@ class EntriesTab(QWidget):
             return
         names = [f"{f.name}  ({crumb(self._owner, f)})" for f in targets]
         choice, ok = QInputDialog.getItem(
-            self, "Copy entry", f"Copy {entry.name} to", names, 0, False
+            self, tr("Copy entry"), tr(f"Copy {entry.name} to"), names, 0, False
         )
         if ok:
             target = targets[names.index(choice)]
@@ -731,56 +745,68 @@ class ParamsTab(QWidget):
         name.setMaximumWidth(420)
         name.setReadOnly(locked)
         name.editingFinished.connect(lambda: self._rename(name))
-        self._add("Name", name, "unique within the project, or among standalone firmware")
-        self._add("Chip", self._chip(firmware), "from the entries: MCU column on the Entries tab")
+        self._add(tr("Name"), name, tr("unique within the project, or among standalone firmware"))
+        self._add(
+            tr("Chip"), self._chip(firmware), tr("from the entries: MCU column on the Entries tab")
+        )
         self._add(*self._origin(firmware))
         if firmware.source == Source.PIO_BUILD:
             self._add(
-                "Framework package",
+                tr("Framework package"),
                 self._package(firmware, locked),
-                "Arduino: boot_app0.bin comes from this package; empty uses the Settings path, "
-                "else auto-detection",
+                tr(
+                    "Arduino: boot_app0.bin comes from this package; empty uses the Settings path, "
+                    "else auto-detection"
+                ),
             )
-        self._add("Flash mode / freq / size", self._flash(firmware, "flash_mode" in editable))
+        self._add(tr("Flash mode / freq / size"), self._flash(firmware, "flash_mode" in editable))
         self._add(
-            "Reset before",
+            tr("Reset before"),
             self._combo(firmware, "before", BEFORE_MODES, firmware.before, "before" in editable),
-            "saved setting; may be adjusted to the connection type, see Checks",
+            tr("saved setting; may be adjusted to the connection type, see Checks"),
         )
         self._add(
-            "Reset after",
+            tr("Reset after"),
             self._combo(firmware, "after", AFTER_MODES, firmware.after, "after" in editable),
         )
         group = (
-            (firmware.device or "(ungrouped)") if firmware.project_id else "— (standalone firmware)"
+            (firmware.device or tr("(ungrouped)"))
+            if firmware.project_id
+            else tr("— (standalone firmware)")
         )
         self._add(
-            "Group", label(group, tone="2"), "change via the ⋯ menu → Move, or drag in the sidebar"
+            tr("Group"),
+            label(group, tone="2"),
+            tr("change via the ⋯ menu → Move, or drag in the sidebar"),
         )
         notes = NotesEdit(
-            firmware.notes, "What this firmware is, which board revision, why it exists…"
+            firmware.notes, tr("What this firmware is, which board revision, why it exists…")
         )
         notes.setReadOnly("notes" not in editable)
         notes.committed.connect(self._set_notes)
         self._add(
-            "Notes", notes, "shown in grey next to the name; saved when the field loses focus"
+            tr("Notes"),
+            notes,
+            tr("shown in grey next to the name; saved when the field loses focus"),
         )
         tags = QLineEdit(", ".join(firmware.tags))
-        tags.setPlaceholderText("comma-separated, e.g. release, s3")
+        tags.setPlaceholderText(tr("comma-separated, e.g. release, s3"))
         tags.setMaximumWidth(420)
         tags.setReadOnly("tags" not in editable)
         tags.editingFinished.connect(
             lambda: self._set("tags", [t.strip() for t in tags.text().split(",") if t.strip()])
         )
-        self._add("Tags", tags)
+        self._add(tr("Tags"), tags)
         if firmware.source == Source.ARCHIVED:
             self.extra.addWidget(
                 _box(
-                    "Archive",
+                    tr("Archive"),
                     [
-                        "Fixed snapshot: files are referenced by content hash (archive:<sha256>), "
-                        "the original path is no longer needed.",
-                        "Entry names are the recorded original file names; notes are editable.",
+                        tr(
+                            "Fixed snapshot: files are referenced by content hash "
+                            "(archive:<sha256>), the original path is no longer needed."
+                        ),
+                        tr("Entry names are the recorded original file names; notes are editable."),
                     ],
                 )
             )
@@ -805,9 +831,9 @@ class ParamsTab(QWidget):
 
     def _origin(self, firmware: Firmware) -> tuple[str, QWidget]:
         if firmware.source == Source.ARCHIVED:
-            return "Archived from", label(firmware.archived_from or "—", tone="2")
+            return tr("Archived from"), label(firmware.archived_from or "—", tone="2")
         if firmware.build_ref is not None:
-            return "Build directory", self._build_dir(firmware)
+            return tr("Build directory"), self._build_dir(firmware)
         text = firmware.folder or "—"
         box = QWidget()
         column = QVBoxLayout(box)
@@ -816,24 +842,26 @@ class ParamsTab(QWidget):
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(elided(text, mono=True, middle=True), 1)
-        move = button("Re-locate folder…", "ibtn")
+        move = button(tr("Re-locate folder…"), "ibtn")
         move.setEnabled(bool(firmware.folder) and not self._owner.is_locked(firmware.id))
-        move.setToolTip("Point every file at the same place in another folder")
+        move.setToolTip(tr("Point every file at the same place in another folder"))
         move.clicked.connect(lambda: self._relocate_folder(firmware))
         row.addWidget(move)
         column.addLayout(row)
         small = label(
-            "fixed firmware: files must be in this folder or below it; entries are recorded "
-            "by name, path and hash",
+            tr(
+                "fixed firmware: files must be in this folder or below it; entries are recorded "
+                "by name, path and hash"
+            ),
             tone="3",
         )
         small.setStyleSheet("font-size: 12px;")
         small.setWordWrap(True)
         column.addWidget(small)
-        return "Files folder", box
+        return tr("Files folder"), box
 
     def _relocate_folder(self, firmware: Firmware) -> None:
-        chosen = QFileDialog.getExistingDirectory(self, "Re-locate folder", firmware.folder)
+        chosen = QFileDialog.getExistingDirectory(self, tr("Re-locate folder"), firmware.folder)
         if not chosen:
             return
         try:
@@ -860,17 +888,17 @@ class ParamsTab(QWidget):
         env = firmware.build_ref.env
         shown = f"{firmware.build_ref.path}  ·  env {env}" if env else firmware.build_ref.path
         row.addWidget(elided(shown, mono=True, middle=True), 1)
-        change = button("Change…", "ibtn")
+        change = button(tr("Change…"), "ibtn")
         change.setEnabled(not self._owner.is_locked(firmware.id))
         change.clicked.connect(lambda: self._owner.firmware_action("directory"))
         row.addWidget(change)
         column.addLayout(row)
         resolved = (firmware.last_resolved or {}).get("resolved_at")
         facts = [
-            "exists" if Path(firmware.build_ref.path).is_dir() else "not found",
-            f"last resolved {str(resolved).replace('T', ' ')}" if resolved else "",
+            tr("exists") if Path(firmware.build_ref.path).is_dir() else tr("not found"),
+            tr(f"last resolved {str(resolved).replace('T', ' ')}") if resolved else "",
             f"ESP-IDF {status.idf_version}" if status and status.idf_version else "",
-            f"{'board' if env else 'sdkconfig'} target {status.configured_target}"
+            tr(f"{'board' if env else 'sdkconfig'} target {status.configured_target}")
             if status and status.configured_target
             else "",
         ]
@@ -878,7 +906,7 @@ class ParamsTab(QWidget):
         small.setStyleSheet("font-size: 12px;")
         column.addWidget(small)
         for line in status.build_notes if status else ():
-            note = label(line, tone="3", wrap=True)
+            note = label(tr(line), tone="3", wrap=True)
             note.setStyleSheet("font-size: 12px;")
             column.addWidget(note)
         return box
@@ -894,20 +922,20 @@ class ParamsTab(QWidget):
         default = self._owner.library.framework_pkg_default()
         path = QLineEdit(firmware.framework_pkg)
         path.setPlaceholderText(
-            f"Settings path: {default}"
+            tr(f"Settings path: {default}")
             if default
-            else f"auto-detected: {auto}"
+            else tr(f"auto-detected: {auto}")
             if auto
-            else "auto-detect (nothing found)"
+            else tr("auto-detect (nothing found)")
         )
         path.setReadOnly(locked)
         path.editingFinished.connect(lambda: self._set_package(firmware, path.text()))
-        browse = button("Browse…", "ibtn")
+        browse = button(tr("Browse…"), "ibtn")
         browse.setEnabled(not locked)
 
         def pick() -> None:
             chosen = QFileDialog.getExistingDirectory(
-                self, "Framework package", path.text() or auto
+                self, tr("Framework package"), path.text() or auto
             )
             if chosen:
                 path.setText(chosen)
@@ -926,7 +954,7 @@ class ParamsTab(QWidget):
         if text.strip() == firmware.framework_pkg:
             return
         self._owner.library.set_framework_pkg(firmware.id, text)
-        shown = text.strip() or "the Settings path / auto-detection"
+        shown = text.strip() or tr("the Settings path / auto-detection")
         self._owner.note("dim", f"[firmware] {firmware.name}: framework package {shown}")
         self._owner.changed()
 
@@ -961,7 +989,7 @@ class ParamsTab(QWidget):
         row.addWidget(
             self._combo(firmware, "flash_size", ("keep", "detect", *sizes), flash.size, True)
         )
-        row.addWidget(label("keep = leave the bootloader header as built", tone="3"))
+        row.addWidget(label(tr("keep = leave the bootloader header as built"), tone="3"))
         row.addStretch(1)
         return widget
 
@@ -1017,7 +1045,8 @@ class RecordsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         hint = label(
-            "Click a record to show its section of that day's log (logs/YYYY-MM-DD.log).", tone="3"
+            tr("Click a record to show its section of that day's log (logs/YYYY-MM-DD.log)."),
+            tone="3",
         )
         hint.setStyleSheet("font-size: 12px;")
         layout.addWidget(hint)
@@ -1028,7 +1057,7 @@ class RecordsTab(QWidget):
         clear_layout(self.list)
         records = self._owner.context.history.query(firmware_id=firmware.id)
         if not records:
-            self.list.addWidget(label("No flash records yet.", tone="3"))
+            self.list.addWidget(label(tr("No flash records yet."), tone="3"))
             return
         for record in records:
             self.list.addWidget(self._row(record))
@@ -1045,7 +1074,7 @@ class RecordsTab(QWidget):
         grid.addWidget(time)
         middle = QVBoxLayout()
         middle.setSpacing(2)
-        link = CONNECTION_LABELS.get(record.connection_type, record.connection_type)
+        link = tr(CONNECTION_LABELS.get(record.connection_type, record.connection_type))
         port = f"{record.port} · {link}" + (f" · {record.baud}" if record.baud else "")
         if record.mac:
             port += f" · MAC {record.mac}"
@@ -1108,9 +1137,13 @@ class FirmwareView(QWidget):
         self.params = ParamsTab(owner)
         self.records = RecordsTab(owner)
         for index, (name, page) in enumerate(
-            (("Entries", self.entries), ("Parameters", self.params), ("Records", self.records))
+            (
+                (N_("Entries"), self.entries),
+                (N_("Parameters"), self.params),
+                (N_("Records"), self.records),
+            )
         ):
-            tab_button = button(name, "tab")
+            tab_button = button(tr(name), "tab")
             tab_button.setCheckable(True)
             tab_button.setChecked(index == 0)
             self.tab_group.addButton(tab_button, index)
@@ -1154,14 +1187,18 @@ class FirmwareView(QWidget):
         ]
         if missing:
             self.banner.show_text(
-                f"Files missing: {', '.join(missing)}. Re-locate them (right-click an entry) "
-                "or remove the entries; flashing is blocked until then."
+                tr(
+                    f"Files missing: {', '.join(missing)}. Re-locate them (right-click an entry) "
+                    "or remove the entries; flashing is blocked until then."
+                )
             )
         elif changed:
             self.banner.show_text(
-                f"Files changed on disk since the last check: {', '.join(changed)} (content). "
-                "Flashing is blocked until you confirm the list below.",
-                "Confirm entries",
+                tr(
+                    f"Files changed on disk since the last check: {', '.join(changed)} (content). "
+                    "Flashing is blocked until you confirm the list below."
+                ),
+                tr("Confirm entries"),
                 "confirm",
             )
         else:
@@ -1169,48 +1206,56 @@ class FirmwareView(QWidget):
 
     def _tracking_banner(self, status: TrackStatus) -> None:
         firmware = status.firmware
-        problems = html.escape("; ".join(status.problems))
+        problems = html.escape("; ".join(tr(p) for p in status.problems))
         rebuild = (
-            "Rebuild the env in PlatformIO"
+            tr("Rebuild the env in PlatformIO")
             if firmware.source == Source.PIO_BUILD
-            else "Run <code>idf.py build</code>"
+            else tr("Run <code>idf.py build</code>")
         )
         if status.state == ResolveState.TARGET_SWITCHED:
             self.banner.show_text(
-                f"Target switched, rebuild needed: the configuration targets "
-                f"<b>{status.configured_target}</b>, the build output is still "
-                f"<b>{firmware.chip}</b>. {rebuild}; flashing, archiving and merging are "
-                "blocked until then."
+                tr(
+                    f"Target switched, rebuild needed: the configuration targets "
+                    f"<b>{status.configured_target}</b>, the build output is still "
+                    f"<b>{firmware.chip}</b>. {rebuild}; flashing, archiving and merging are "
+                    "blocked until then."
+                )
             )
         elif status.state == ResolveState.INCOMPLETE:
             self.banner.show_text(
-                f"Build incomplete: {problems}. Wait for the build to finish or rebuild; "
-                "flashing is blocked."
+                tr(
+                    f"Build incomplete: {problems}. Wait for the build to finish or rebuild; "
+                    "flashing is blocked."
+                )
             )
         elif status.state == ResolveState.BUILDING:
-            self.banner.show_text("The build output is being written; checking again shortly.")
+            self.banner.show_text(tr("The build output is being written; checking again shortly."))
         elif status.state == ResolveState.MISSING:
             resolved = (firmware.last_resolved or {}).get("resolved_at")
             when = str(resolved).replace("T", " ") if resolved else "never"
             self.banner.show_text(
-                f"{problems}. Last resolved {when}; the entries below are that snapshot and "
-                "cannot be flashed until the directory exists again.",
-                "Change directory…",
+                tr(
+                    f"{problems}. Last resolved {when}; the entries below are that snapshot and "
+                    "cannot be flashed until the directory exists again."
+                ),
+                tr("Change directory…"),
                 "directory",
             )
         elif status.state == ResolveState.NEEDS_CONFIRMATION:
             first = [c for c in status.changes if c.kind != ChangeKind.GROUP_HINT]
-            lines = "".join(f"<br>•&nbsp;{html.escape(c.message)}" for c in first[:8])
-            more = f"<br>…and {len(first) - 8} more" if len(first) > 8 else ""
+            lines = "".join(f"<br>•&nbsp;{html.escape(tr(c.message))}" for c in first[:8])
+            more = tr(f"<br>…and {len(first) - 8} more") if len(first) > 8 else ""
             hint = (
-                "<br>The device group may need adjusting."
+                tr("<br>The device group may need adjusting.")
                 if any(c.kind == ChangeKind.GROUP_HINT for c in status.changes)
                 else ""
             )
             self.banner.show_text(
-                f"The build output changed since it was last confirmed:{lines}{more}{hint}"
-                "<br>Flashing is blocked until you confirm.",
-                "Confirm entries",
+                tr(
+                    f"The build output changed since it was last confirmed:{lines}{more}{hint}"
+                    "<br>Flashing is blocked until you confirm."
+                ),
+                tr("Confirm entries"),
                 "confirm",
             )
         else:
@@ -1238,17 +1283,17 @@ def _summary(record: FlashRecord) -> str:
     seconds = record.duration_ms / 1000
     written = sum(1 for e in record.entries if not e.skipped)
     skipped = len(record.entries) - written
-    text = f"{len(record.entries)} entries, {seconds:.1f} s"
+    text = tr(f"{len(record.entries)} entries, {seconds:.1f} s")
     if skipped:
-        text += f" · {skipped} already in flash"
+        text += tr(f" · {skipped} already in flash")
     if record.reset_after:
-        text += f" · after={record.reset_after}"
+        text += tr(f" · after={record.reset_after}")
     return text
 
 
 def _address_source(entry: Entry) -> str:
     if entry.address_source == AddressSource.PARTITION:
-        return f"partition {entry.partition}"
+        return tr(f"partition {entry.partition}")
     return entry.address_source.value
 
 
@@ -1258,7 +1303,7 @@ def _derived(text: str) -> QWidget:
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(6)
     row.addWidget(label(text, tone="2"))
-    row.addWidget(tag("derived", "gray"))
+    row.addWidget(tag(tr("derived"), "gray"))
     row.addStretch(1)
     return widget
 

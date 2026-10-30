@@ -19,6 +19,7 @@ from embr.core.firmware.model import AddressSource, Entry, Firmware, FlashParams
 from embr.core.flasher.merge import MergeInput, merge_args, merge_image
 from embr.core.flasher.plan import FlashSettings
 from embr.core.storage.ids import new_id
+from embr.i18n import N_
 
 
 @dataclass(frozen=True)
@@ -117,7 +118,7 @@ class Merger:
             raise PlanError(f"{firmware.name} cannot be merged now: " + "; ".join(reasons))
         enabled = sorted_entries([e for e in firmware.entries if e.enabled])
         if not enabled:
-            raise PlanError(f"{firmware.name} has no enabled entries")
+            raise PlanError(N_(f"{firmware.name} has no enabled entries"))
         problem = merge_problem(self._ctx, firmware)
         if problem is not None:
             raise PlanError(problem)
@@ -126,7 +127,7 @@ class Merger:
         inputs: list[MergeInput] = []
         for entry in enabled:
             if entry.address is None:
-                raise PlanError(f"{entry.name} has no address")
+                raise PlanError(N_(f"{entry.name} has no address"))
             path = entry_path(self._ctx, entry)
             if write_files and entry.file.startswith("blank:"):
                 path.write_bytes(b"\xff" * entry.size)
@@ -135,7 +136,7 @@ class Merger:
         if options.pad_to_flash_size:
             pad = declared_flash_size(self._ctx, firmware)
             if pad is None:
-                raise PlanError(f"{firmware.name}: flash size unknown; set it to pad the image")
+                raise PlanError(N_(f"{firmware.name}: flash size unknown; set it to pad the image"))
         return firmware, chip, inputs, pad
 
 

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from embr.app.library import FirmwareFlag, FirmwareRow, Tree
 from embr.core import chipinfo
 from embr.core.firmware.model import Source
+from embr.i18n import tr
 from embr.ui import icons
 from embr.ui.theme import Palette
 from embr.ui.widgets import button, elided, label, set_prop, tag
@@ -233,24 +234,24 @@ class Sidebar(QWidget):
         self.setObjectName("sidebar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search projects and firmware")
+        self.search.setPlaceholderText(tr("Search projects and firmware"))
         self.search.setProperty("kind", "search")
         self.search.setClearButtonEnabled(True)
         self._search_icon = QAction(self.search)
         self.search.addAction(self._search_icon, QLineEdit.ActionPosition.LeadingPosition)
-        self.new_button = button(f"{PLUS} New   firmware · project", "newbtn")
+        self.new_button = button(tr(f"{PLUS} New   firmware · project"), "newbtn")
         self.new_menu = QMenu(self)
-        self.new_menu.addAction("New firmware", self.new_firmware.emit).setToolTip(
-            "fixed, add entries by hand"
+        self.new_menu.addAction(tr("New firmware"), self.new_firmware.emit).setToolTip(
+            tr("fixed, add entries by hand")
         )
-        self.new_menu.addAction("Import ESP-IDF build…", self.import_idf.emit).setToolTip(
-            "follows a build directory"
+        self.new_menu.addAction(tr("Import ESP-IDF build…"), self.import_idf.emit).setToolTip(
+            tr("follows a build directory")
         )
-        self.new_menu.addAction("Import PlatformIO build…", self.import_pio.emit).setToolTip(
-            "follows the build folders of PlatformIO envs"
+        self.new_menu.addAction(tr("Import PlatformIO build…"), self.import_pio.emit).setToolTip(
+            tr("follows the build folders of PlatformIO envs")
         )
         self.new_menu.addSeparator()
-        self.new_menu.addAction("New project", self.new_project.emit)
+        self.new_menu.addAction(tr("New project"), self.new_project.emit)
         self.new_button.clicked.connect(self._open_new_menu)
         self.tree = FirmwareTree()
         layout = QVBoxLayout(self)
@@ -294,7 +295,7 @@ class Sidebar(QWidget):
         )
         scroll = self.tree.verticalScrollBar().value()
         self.tree.clear()
-        self._header("PROJECTS")
+        self._header(tr("PROJECTS"))
         for project in data.projects:
             key = f"p:{project.id}"
             folded = key in self._folded
@@ -310,25 +311,25 @@ class Sidebar(QWidget):
             if folded:
                 continue
             if not project.groups:
-                self._placeholder("(no groups, no firmware)", INDENT)
+                self._placeholder(tr("(no groups, no firmware)"), INDENT)
             for group in project.groups:
                 gkey = f"g:{project.id}:{group.name}"
                 gfolded = gkey in self._folded
                 grow = Row(INDENT, "▸" if gfolded else "▾")
-                gname = label(group.name or "Ungrouped", tone="2" if group.name else "3")
+                gname = label(group.name or tr("Ungrouped"), tone="2" if group.name else "3")
                 grow.text.addWidget(gname)
                 if not group.firmware:
-                    grow.meta.addWidget(label("empty", tone="3"))
+                    grow.meta.addWidget(label(tr("empty"), tone="3"))
                 elif gfolded:
                     grow.meta.addWidget(label(str(len(group.firmware)), tone="3"))
                 self._add(grow, Node("group", project.id, group.name, drop="group"), 24)
                 if not gfolded:
                     for fw in group.firmware:
                         self._firmware(fw, INDENT)  # name aligned with the group name
-        self._header("STANDALONE FIRMWARE", Node("header", drop="standalone"))
+        self._header(tr("STANDALONE FIRMWARE"), Node("header", drop="standalone"))
         if not data.standalone:
             self._placeholder(
-                "(none — drop firmware here to detach it from its project)",
+                tr("(none — drop firmware here to detach it from its project)"),
                 INDENT,
                 Node("placeholder", drop="standalone"),
             )
@@ -377,11 +378,13 @@ class Sidebar(QWidget):
         elif fw.flag in (FirmwareFlag.MISSING, FirmwareFlag.BLOCKED):
             row.meta.addWidget(tag(TIMES, "bad"))
         if fw.id == self._busy_id:
-            row.meta.addWidget(tag("flashing", "info"))
+            row.meta.addWidget(tag(tr("flashing"), "info"))
         row.meta.addWidget(label(chips_text(fw.mcus), tone="3"))
         reason = self._dimmed.get(fw.id)
         tip = fw.origin or fw.name
-        row.setToolTip(tip if reason is None else f"{tip}\nNot for the identified board: {reason}")
+        row.setToolTip(
+            tip if reason is None else tr(f"{tip}\nNot for the identified board: {tr(reason)}")
+        )
         dimmed = reason is not None
         if fw.flag == FirmwareFlag.MISSING or dimmed:
             effect = QGraphicsOpacityEffect(row)

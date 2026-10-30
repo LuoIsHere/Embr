@@ -21,6 +21,7 @@ from embr.core.firmware.import_pio import (
     Runner,
     run_pio,
 )
+from embr.i18n import N_
 
 PIO_SECTION = "pio"
 FRAMEWORK_PKG_KEY = "framework_pkg"
@@ -73,7 +74,7 @@ class PioConfigs:
         an error, without running pio."""
         stamp = _stamp(project_root)
         if stamp is None:
-            return ProjectConfig({}, f"{project_root / PLATFORMIO_INI} not found")
+            return ProjectConfig({}, N_(f"{project_root / PLATFORMIO_INI} not found"))
         key = _key(project_root)
         with self._lock:
             hit = self._cache.get(key)
@@ -102,7 +103,7 @@ class PioConfigs:
         is cached as cached() would. Never raises for pio problems (see error)."""
         stamp = _stamp(project_root)
         if stamp is None:
-            return ProjectConfig({}, f"{project_root / PLATFORMIO_INI} not found")
+            return ProjectConfig({}, N_(f"{project_root / PLATFORMIO_INI} not found"))
         result = self._query(project_root)
         with self._lock:
             self._cache[_key(project_root)] = (stamp, result)
@@ -123,7 +124,7 @@ class PioConfigs:
     def _query(self, project_root: Path) -> ProjectConfig:
         pio = import_pio.find_pio(self._environ, self._which)
         if pio is None:
-            return ProjectConfig({}, "pio was not found (install PlatformIO or add it to PATH)")
+            return ProjectConfig({}, N_("pio was not found (install PlatformIO or add it to PATH)"))
         try:
             return ProjectConfig(import_pio.query_config(pio, project_root, self._run))
         except PioUnavailableError as exc:

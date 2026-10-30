@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from embr.core.firmware.kinds import EntryKind
+from embr.i18n import N_
 
 FLASHER_ARGS = "flasher_args.json"
 PROJECT_DESCRIPTION = "project_description.json"
@@ -88,12 +89,12 @@ def read_build(build_dir: Path) -> IdfBuild:
     then None). Raises BuildMissingError, EncryptedBuildError, IdfBuildError."""
     args_file = build_dir / FLASHER_ARGS
     if not args_file.is_file():
-        raise BuildMissingError(f"{args_file} not found")
+        raise BuildMissingError(N_(f"{args_file} not found"))
     args = _load(args_file)
     for name, section in args.items():
         if isinstance(section, dict) and _true(cast(dict[str, object], section).get("encrypted")):
             raise EncryptedBuildError(
-                f"{name}: flash encryption is enabled in this project; Embr does not support it"
+                N_(f"{name}: flash encryption is enabled in this project; Embr does not support it")
             )
     build_dir = build_dir.resolve()
     files = _flash_files(build_dir, args.get("flash_files"), _section_kinds(build_dir, args))
@@ -155,7 +156,7 @@ def _load(path: Path) -> dict[str, object]:
     except (OSError, ValueError) as exc:
         raise IdfBuildError(f"{path.name}: {exc}") from exc
     if not isinstance(value, dict):
-        raise IdfBuildError(f"{path.name}: expected a JSON object")
+        raise IdfBuildError(N_(f"{path.name}: expected a JSON object"))
     return cast(dict[str, object], value)
 
 
@@ -194,15 +195,15 @@ def _flash_files(
     files: list[BuildFile] = []
     for offset, name in _table(value).items():
         if not isinstance(name, str):
-            raise IdfBuildError(f"flash_files: bad entry for {offset}")
+            raise IdfBuildError(N_(f"flash_files: bad entry for {offset}"))
         try:
             address = int(offset, 16)
         except ValueError:
-            raise IdfBuildError(f"flash_files: {offset!r} is not an address") from None
+            raise IdfBuildError(N_(f"flash_files: {offset!r} is not an address")) from None
         path = (build_dir / name).resolve()
         files.append(BuildFile(address, path, kinds.get(path)))
     if not files:
-        raise IdfBuildError(f"{FLASHER_ARGS} lists no flash files")
+        raise IdfBuildError(N_(f"{FLASHER_ARGS} lists no flash files"))
     return tuple(sorted(files, key=lambda f: f.address))
 
 

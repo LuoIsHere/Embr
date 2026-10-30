@@ -18,6 +18,7 @@ from embr.app.chips import firmware_mcus
 from embr.core.firmware.model import Firmware
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.project import DuplicateGroupError, Project, ProjectDefaults
+from embr.i18n import tr
 from embr.ui import dialogs
 from embr.ui.owner import Owner
 from embr.ui.sidebar import chips_text
@@ -74,15 +75,15 @@ class ProjectView(QScrollArea):
         name = QLineEdit(project.name)
         name.setMaximumWidth(420)
         name.editingFinished.connect(lambda: self._rename(name))
-        self._add("Name", self._with_note(name, "unique across all projects"))
-        notes = NotesEdit(project.notes, "hardware revision, purpose…")
+        self._add(tr("Name"), self._with_note(name, tr("unique across all projects")))
+        notes = NotesEdit(project.notes, tr("hardware revision, purpose…"))
         notes.committed.connect(self._set_notes)
-        self._add("Notes", notes)
-        self._add("Defaults for new firmware", self._defaults(project))
-        self._add("Groups", self._groups(project))
+        self._add(tr("Notes"), notes)
+        self._add(tr("Defaults for new firmware"), self._defaults(project))
+        self._add(tr("Groups"), self._groups(project))
         self.content.addLayout(grid)
         self.content.addWidget(self._firmware_box(project))
-        delete = button("Delete project…")
+        delete = button(tr("Delete project…"))
         delete.clicked.connect(self._delete)
         row = QHBoxLayout()
         row.addWidget(delete)
@@ -119,7 +120,7 @@ class ProjectView(QScrollArea):
         after = QComboBox()
         after.addItems(list(AFTER_MODES))
         after.setCurrentText(project.defaults.after)
-        erase = QCheckBox("erase all before flashing")
+        erase = QCheckBox(tr("erase all before flashing"))
         erase.setChecked(project.defaults.erase_all)
 
         def save() -> None:
@@ -136,8 +137,10 @@ class ProjectView(QScrollArea):
         row.addStretch(1)
         column.addLayout(row)
         note = label(
-            "copied once when a firmware is created here; changing them later does not touch "
-            "existing firmware",
+            tr(
+                "copied once when a firmware is created here; changing them later does not touch "
+                "existing firmware"
+            ),
             tone="3",
         )
         note.setStyleSheet("font-size: 12px;")
@@ -151,26 +154,30 @@ class ProjectView(QScrollArea):
         column.setSpacing(4)
         members = self._owner.library.project_firmware(project.id)
         if not project.devices:
-            column.addWidget(label("no groups yet", tone="3"))
+            column.addWidget(label(tr("no groups yet"), tone="3"))
         for group in project.devices:
             count = sum(1 for f in members if f.device == group)
             name = QLineEdit(group)
             name.editingFinished.connect(lambda g=group, w=name: self._rename_group(g, w))
             remove = button(
-                "Remove", "ibtn", tooltip="Remove group (its firmware becomes ungrouped)"
+                tr("Remove"), "ibtn", tooltip=tr("Remove group (its firmware becomes ungrouped)")
             )
             remove.clicked.connect(lambda _c=False, g=group, n=count: self._remove_group(g, n))
-            column.addLayout(self._group_row(name, remove, label(f"{count} firmware", tone="3")))
+            column.addLayout(
+                self._group_row(name, remove, label(tr(f"{count} firmware"), tone="3"))
+            )
         new = QLineEdit()
-        new.setPlaceholderText("new group, e.g. Main board")
-        add = button("Add", "ibtn")
+        new.setPlaceholderText(tr("new group, e.g. Main board"))
+        add = button(tr("Add"), "ibtn")
         add.clicked.connect(lambda: self._add_group(new))
         new.returnPressed.connect(lambda: self._add_group(new))
         column.addSpacing(2)
         column.addLayout(self._group_row(new, add, QLabel("")))
         note = label(
-            "Groups are display folders inside this project. Drag a firmware onto a group in the "
-            "sidebar to move it there; drop it on the project name to make it ungrouped.",
+            tr(
+                "Groups are display folders inside this project. Drag a firmware onto a group in "
+                "the sidebar to move it there; drop it on the project name to make it ungrouped."
+            ),
             tone="3",
             wrap=True,
         )
@@ -198,7 +205,7 @@ class ProjectView(QScrollArea):
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 8)
         layout.setSpacing(0)
-        head = QLabel(f"Firmware in this project ({len(members)})")
+        head = QLabel(tr(f"Firmware in this project ({len(members)})"))
         head.setObjectName("boxhead")
         layout.addWidget(head)
         inner = QVBoxLayout()
@@ -213,18 +220,18 @@ class ProjectView(QScrollArea):
             ]
             if not group and not listed:
                 continue
-            caption = label(group or "Ungrouped", tone="2" if group else "3")
+            caption = label(group or tr("Ungrouped"), tone="2" if group else "3")
             caption.setStyleSheet("font-size: 12px; font-weight: 600; margin-top: 8px;")
             inner.addWidget(caption)
             if not listed:
-                inner.addWidget(label("(empty)", tone="3"))
+                inner.addWidget(label(tr("(empty)"), tone="3"))
             for firmware in listed:
                 mcus = firmware_mcus(self._owner.context, firmware)
                 link = FirmwareLink(firmware, tuple(m.label for m in mcus))
                 link.clicked.connect(self._owner.select_firmware)
                 inner.addWidget(link)
         if not members and not project.devices:
-            inner.addWidget(label("(none)", tone="3"))
+            inner.addWidget(label(tr("(none)"), tone="3"))
         layout.addLayout(inner)
         return frame
 
@@ -280,16 +287,18 @@ class ProjectView(QScrollArea):
         if project is None:
             return
         effect = (
-            f"{count} firmware in it will stay in the project as <b>Ungrouped</b>. "
-            "Nothing is deleted."
+            tr(
+                f"{count} firmware in it will stay in the project as <b>Ungrouped</b>. "
+                "Nothing is deleted."
+            )
             if count
-            else "The group is empty."
+            else tr("The group is empty.")
         )
         accepted, _ = dialogs.confirm(
             self,
-            "Remove group",
-            [f"Remove the group <b>{_esc(group)}</b> from {_esc(project.name)}?", effect],
-            "Remove group",
+            tr("Remove group"),
+            [tr(f"Remove the group <b>{_esc(group)}</b> from {_esc(project.name)}?"), effect],
+            tr("Remove group"),
         )
         if accepted:
             self._owner.library.remove_group(project.id, group)
@@ -305,14 +314,16 @@ class ProjectView(QScrollArea):
         count = len(self._owner.library.project_firmware(project.id))
         accepted, delete_all = dialogs.confirm(
             self,
-            "Delete project",
+            tr("Delete project"),
             [
-                f"Delete <b>{_esc(project.name)}</b>? By default its {count} firmware become "
-                "standalone.",
-                "Archived files are kept (use Clean archive); flash records are not affected.",
+                tr(
+                    f"Delete <b>{_esc(project.name)}</b>? By default its {count} firmware become "
+                    "standalone."
+                ),
+                tr("Archived files are kept (use Clean archive); flash records are not affected."),
             ],
-            "Delete project",
-            checkbox="Also delete all firmware in this project",
+            tr("Delete project"),
+            checkbox=tr("Also delete all firmware in this project"),
         )
         if not accepted:
             return

@@ -39,6 +39,7 @@ from embr.core.flasher.checks import (
 )
 from embr.core.flasher.plan import adjust_reset
 from embr.core.serial import ConnectionType, PortInfo
+from embr.i18n import N_
 
 
 class CheckState(StrEnum):
@@ -101,7 +102,9 @@ def preflight(
     if identified is None:
         items.append(
             CheckItem(
-                CheckState.LATER, "Chip / revision / size / security", "checked after connecting"
+                CheckState.LATER,
+                N_("Chip / revision / size / security"),
+                N_("checked after connecting"),
             )
         )
         return items
@@ -122,7 +125,7 @@ def preflight(
             CheckItem(
                 CheckState.REFUSE,
                 "Chip",
-                f"the firmware is for {names}, the board is {info.chip} {info.revision}",
+                N_(f"the firmware is for {names}, the board is {info.chip} {info.revision}"),
             )
         )
     else:
@@ -158,11 +161,11 @@ def flash_ready(
 
 
 _TITLES = {
-    CHIP: "Chip",
-    REVISION: "Chip revision",
-    FLASH_SIZE: "Header flash size",
-    CAPACITY: "Flash capacity",
-    SECURITY: "Security",
+    CHIP: N_("Chip"),
+    REVISION: N_("Chip revision"),
+    FLASH_SIZE: N_("Header flash size"),
+    CAPACITY: N_("Flash capacity"),
+    SECURITY: N_("Security"),
 }
 
 
@@ -193,37 +196,42 @@ def _layout(
         found += check_layout(probe, _size_bytes(size) if size else None)
         problems += [p for p in found if p not in problems]
     if not problems:
-        return [CheckItem(CheckState.PASS, "No address overlap")]
-    return [CheckItem(CheckState(p.level.value), "Entry layout", p.message) for p in problems]
+        return [CheckItem(CheckState.PASS, N_("No address overlap"))]
+    return [CheckItem(CheckState(p.level.value), N_("Entry layout"), p.message) for p in problems]
 
 
 def _files(context: AppContext, firmware: Firmware, chip: str | None) -> CheckItem:
     enabled = [e for e in firmware.entries if e.enabled]
     if not enabled:
-        which = f" for {chip}" if chip else ""
-        return CheckItem(
-            CheckState.REFUSE, "No entries enabled", f"enable at least one entry{which}"
+        detail = (
+            N_(f"enable at least one entry for {chip}") if chip else N_("enable at least one entry")
         )
+        return CheckItem(CheckState.REFUSE, N_("No entries enabled"), detail)
     states = {e.name: entry_state(e, context.paths.archive) for e in enabled}
     missing = [n for n, s in states.items() if s == FileState.MISSING]
     changed = [n for n, s in states.items() if s == FileState.CHANGED]
     if missing:
         return CheckItem(
             CheckState.REFUSE,
-            "File missing",
-            f"{', '.join(missing)}: not found at the recorded path. Re-locate or remove the entry.",
+            N_("File missing"),
+            N_(
+                f"{', '.join(missing)}: not found at the recorded path. Re-locate or remove "
+                "the entry."
+            ),
         )
     if changed:
         return CheckItem(
             CheckState.REFUSE,
-            "Needs confirmation",
-            f"{', '.join(changed)}: content on disk differs from the recorded hash. "
-            "Review the entries, then confirm.",
+            N_("Needs confirmation"),
+            N_(
+                f"{', '.join(changed)}: content on disk differs from the recorded hash. "
+                "Review the entries, then confirm."
+            ),
         )
     return CheckItem(
         CheckState.PASS,
-        "Files match",
-        f"{len(enabled)} files checked: name, path and hash agree with the recorded values",
+        N_("Files match"),
+        N_(f"{len(enabled)} files checked: name, path and hash agree with the recorded values"),
     )
 
 
@@ -236,7 +244,7 @@ def _build(status: TrackStatus) -> CheckItem:
         ]
         if status.updated_at is not None:
             parts.append(f"updated {status.updated_at:%H:%M:%S}")
-        return CheckItem(CheckState.PASS, "Build resolved", " · ".join(parts))
+        return CheckItem(CheckState.PASS, N_("Build resolved"), " · ".join(parts))
     reasons = status.problems or tuple(c.message for c in status.changes[:3])
     return CheckItem(CheckState.REFUSE, _BUILD_TITLES[status.state], "; ".join(reasons))
 
@@ -256,8 +264,8 @@ def _reset(firmware: Firmware, port: PortInfo | None) -> CheckItem:
     used = f"before={before} · after={after}"
     if reasons:
         detail = f"{used} ({'; '.join(reasons)})"
-        return CheckItem(CheckState.WARN, "Reset policy adjusted to connection", detail)
-    return CheckItem(CheckState.PASS, "Reset policy", used)
+        return CheckItem(CheckState.WARN, N_("Reset policy adjusted to connection"), detail)
+    return CheckItem(CheckState.PASS, N_("Reset policy"), used)
 
 
 def _size_bytes(size: str) -> int | None:

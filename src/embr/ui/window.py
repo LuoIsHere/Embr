@@ -68,6 +68,7 @@ from embr.core.flasher.protocol import (
 from embr.core.history import RecordResult
 from embr.core.logs import HEADER_PREFIX
 from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
+from embr.i18n import N_, tr
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
 from embr.ui.adapters.jobs import JobSignals, MainThreadDispatcher
@@ -91,30 +92,30 @@ LOG_LEVELS = {
 }
 CHECK_LEVELS = {CheckLevel.PASS: "ok", CheckLevel.WARN: "warning", CheckLevel.REFUSE: "error"}
 RESULT_TEXT = {
-    RecordResult.OK: "Done",
-    RecordResult.REFUSED: "Refused",
-    RecordResult.FAILED: "Failed",
-    RecordResult.CANCELLED: "Cancelled",
+    RecordResult.OK: N_("Done"),
+    RecordResult.REFUSED: N_("Refused"),
+    RecordResult.FAILED: N_("Failed"),
+    RecordResult.CANCELLED: N_("Cancelled"),
 }
-COMMAND_UNKNOWN = "(identify the board, or add entries with addresses, to see the command)"
+COMMAND_UNKNOWN = N_("(identify the board, or add entries with addresses, to see the command)")
 READ_FOLDER = "read_folder"
 """settings.ini [ui]: the folder the last read flash was saved to."""
-HINT_MANUAL_RESET = (
+HINT_MANUAL_RESET = N_(
     "Flashed and verified. If the device did not restart on its own (usually when download "
     "mode was entered by hand), reset it manually."
 )
-HINT_DOWNLOAD_MODE = (
+HINT_DOWNLOAD_MODE = N_(
     "Identified. The chip stays in download mode so the next flash can start right away; "
     "reset the board to return to its application."
 )
-HINT_IDENTIFY = (
+HINT_IDENTIFY = N_(
     "Connect & identify this board first; Flash becomes available when no check refuses."
 )
-HINT_OTG = (
+HINT_OTG = N_(
     "Connect & identify this board first. USB-OTG: put the board into download mode as "
     "described by its vendor before connecting; Cancel is available while waiting."
 )
-HINT_JTAG = (
+HINT_JTAG = N_(
     "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried; if the "
     "running firmware does not keep this peripheral, the connect step times out, then enter "
     "download mode as described by the board's vendor."
@@ -191,7 +192,7 @@ class EmbrWindow(FrameWindow):
         empty.setContentsMargins(14, 14, 14, 14)
         empty.addWidget(
             label(
-                f"Create a firmware or a project with {PLUS} New in the sidebar.",
+                tr(f"Create a firmware or a project with {PLUS} New in the sidebar."),
                 tone="3",
             )
         )
@@ -349,15 +350,17 @@ class EmbrWindow(FrameWindow):
             return
         firmware = self._library.firmware(firmware_id)
         if name == "rename":
-            scope = "the project" if firmware.project_id else "standalone firmware"
+            scope = tr("the project") if firmware.project_id else tr("standalone firmware")
             text = dialogs.ask_text(
                 self,
-                "Rename firmware",
-                "Name",
+                tr("Rename firmware"),
+                tr("Name"),
                 firmware.name,
-                f"Unique within {scope}; a duplicate gets a numeric suffix. Flash records keep "
-                "the name used at the time.",
-                "Rename",
+                tr(
+                    f"Unique within {scope}; a duplicate gets a numeric suffix. Flash records keep "
+                    "the name used at the time."
+                ),
+                tr("Rename"),
             )
             if text:
                 renamed = self._library.rename_firmware(firmware_id, text)
@@ -382,12 +385,14 @@ class EmbrWindow(FrameWindow):
         elif name == "delete":
             accepted, _ = dialogs.confirm(
                 self,
-                "Delete firmware",
+                tr("Delete firmware"),
                 [
-                    f"Delete <b>{firmware.name}</b>? Archived files are kept (use Clean archive to "
-                    "remove unreferenced ones) and flash records are not affected."
+                    tr(
+                        f"Delete <b>{firmware.name}</b>? Archived files are kept (use Clean "
+                        "archive to remove unreferenced ones) and flash records are not affected."
+                    )
                 ],
-                "Delete",
+                tr("Delete"),
             )
             if not accepted:
                 return
@@ -461,7 +466,7 @@ class EmbrWindow(FrameWindow):
         if firmware_id is None:
             self.connection.show_checks(None)
             self.connection.set_flash_enabled(False)
-            self.cmdbar.set_command("(select a firmware to see its command)")
+            self.cmdbar.set_command(tr("(select a firmware to see its command)"))
         else:
             tracker = self._library.tracker
             status = tracker.cached(firmware_id) or tracker.check(firmware_id)
@@ -478,7 +483,7 @@ class EmbrWindow(FrameWindow):
                 self.identified_chip(),
                 self.identified_revision(),
             )
-            self.cmdbar.set_command(command or COMMAND_UNKNOWN)
+            self.cmdbar.set_command(command or tr(COMMAND_UNKNOWN))
         self.connection.identify.setEnabled(port is not None and not busy)
         self.connection.set_board_actions(
             port is not None
@@ -644,7 +649,7 @@ class EmbrWindow(FrameWindow):
         self._job_firmware = None
         self._job_kind = JobKind.IDENTIFY
         self.connection.set_running(True)
-        self.connection.show_progress(0, "Connecting…")
+        self.connection.show_progress(0, N_("Connecting…"))
 
     def _flash_or_cancel(self) -> None:
         if self._ops.busy:
@@ -684,7 +689,7 @@ class EmbrWindow(FrameWindow):
         self._job_kind = JobKind.FLASH
         self._schedule.touch(firmware_id)
         self.connection.set_running(True)
-        self.connection.show_progress(0, "Connecting…")
+        self.connection.show_progress(0, N_("Connecting…"))
         self._refresh_tree()
         self._refresh_workspace()
 
@@ -720,7 +725,7 @@ class EmbrWindow(FrameWindow):
             if event.status == EntryStatus.SKIPPED:
                 self.note("note", f"0x{event.address:X}: already in flash, skipped")
                 self.connection.progress_text.setText(
-                    f"0x{event.address:X} already in flash, skipped"
+                    tr(f"0x{event.address:X} already in flash, skipped")
                 )
         elif isinstance(event, ResultEvent):
             self.note(
@@ -733,9 +738,9 @@ class EmbrWindow(FrameWindow):
     def _job_progress(self, progress: object) -> None:
         if isinstance(progress, JobProgress):
             if self._job_kind == JobKind.READ_FLASH:
-                text = f"Reading from 0x{progress.address:X}"
+                text = N_(f"Reading from 0x{progress.address:X}")
             else:
-                text = (
+                text = N_(
                     f"Writing 0x{progress.address:X} {progress.name} "
                     f"({progress.entry_index + 1}/{progress.entry_count})"
                 )
@@ -772,7 +777,9 @@ class EmbrWindow(FrameWindow):
                 return
         elif outcome.kind == JobKind.IDENTIFY:
             done = outcome.result == RecordResult.OK
-            self.connection.show_progress(0, "Identified" if done else RESULT_TEXT[outcome.result])
+            self.connection.show_progress(
+                0, N_("Identified") if done else RESULT_TEXT[outcome.result]
+            )
             self.note("dim", "Port released.")
         else:
             percent = 100 if outcome.result == RecordResult.OK else self.connection.progress.value()
@@ -956,9 +963,9 @@ class EmbrWindow(FrameWindow):
         firmware = self._library.firmware(firmware_id)
         start = firmware.build_ref.path if firmware.build_ref else ""
         title = (
-            "Env build folder (.pio\\build\\<env>)"
+            tr("Env build folder (.pio\\build\\<env>)")
             if firmware.build_ref and firmware.build_ref.env
-            else "Build directory"
+            else tr("Build directory")
         )
         chosen = QFileDialog.getExistingDirectory(self, title, start)
         if not chosen:
@@ -1044,7 +1051,7 @@ class EmbrWindow(FrameWindow):
         self._job_firmware = None
         self._job_kind = kind
         self.connection.set_running(True)
-        self.connection.show_progress(0, "Connecting…")
+        self.connection.show_progress(0, N_("Connecting…"))
 
     def _files_dropped(self, names: list[str], node: object) -> None:
         """Files or a folder dragged from Explorer onto the sidebar (design doc §12 item 19):
@@ -1054,7 +1061,7 @@ class EmbrWindow(FrameWindow):
         if not isinstance(node, Node):
             return
         if node.firmware_id is not None and self.is_locked(node.firmware_id):
-            dialogs.notice(self, "Nothing added", ["This firmware is being flashed."])
+            dialogs.notice(self, tr("Nothing added"), [tr("This firmware is being flashed.")])
             return
         files, build, problems = sort_drop([Path(n) for n in names])
         if node.firmware_id is not None:
@@ -1064,22 +1071,22 @@ class EmbrWindow(FrameWindow):
             self._import_idf(build, (node.project_id, node.device))
             return
         if problems or not files:
-            dialogs.notice(self, "Nothing added", problems or ["No files were dropped."])
+            dialogs.notice(self, tr("Nothing added"), problems or [tr("No files were dropped.")])
             return
         name = dialogs.ask_text(
             self,
-            "New firmware",
-            "Name shown in the sidebar",
+            tr("New firmware"),
+            tr("Name shown in the sidebar"),
             files[0].stem,
-            f"{len(files)} file(s) from {files[0].parent}",
-            "Create",
+            tr(f"{len(files)} file(s) from {files[0].parent}"),
+            tr("Create"),
         )
         if name is None:
             return
         try:
             firmware = self._library.create_from_files(files, node.project_id, node.device, name)
         except (FolderError, OSError, ValueError) as exc:
-            dialogs.notice(self, "Nothing added", [_text(exc)])
+            dialogs.notice(self, tr("Nothing added"), [_text(exc)])
             return
         self.note("dim", f"[new] fixed firmware '{firmware.name}' from {len(files)} file(s)")
         self.select_firmware(firmware.id)
@@ -1088,14 +1095,14 @@ class EmbrWindow(FrameWindow):
         self, firmware_id: str, files: list[Path], build: Path | None, problems: list[str]
     ) -> None:
         if build is not None:
-            problems = [*problems, f"{build.name}: drop a build folder on a project or group"]
+            problems = [*problems, tr(f"{build.name}: drop a build folder on a project or group")]
         if problems or not files:
-            dialogs.notice(self, "Nothing added", problems or ["No files were dropped."])
+            dialogs.notice(self, tr("Nothing added"), problems or [tr("No files were dropped.")])
             return
         try:
             added = self._library.add_files(firmware_id, files)
         except (TrackingEntriesError, FolderError, OSError, ValueError) as exc:
-            dialogs.notice(self, "Nothing added", [_text(exc)])
+            dialogs.notice(self, tr("Nothing added"), [_text(exc)])
             return
         name = self._library.firmware(firmware_id).name
         self.note("dim", f"[entry] {len(added)} entries added to '{name}'")
@@ -1122,10 +1129,10 @@ class EmbrWindow(FrameWindow):
     def _window_menu(self) -> None:
         menu = QMenu(self)
         menu.addAction(
-            "Settings…", lambda: dialogs.settings(self, self._context.paths, self._library)
+            tr("Settings…"), lambda: dialogs.settings(self, self._context.paths, self._library)
         )
-        menu.addAction("Clean archive…", self._clean_archive)
-        themes = menu.addMenu("Theme")
+        menu.addAction(tr("Clean archive…"), self._clean_archive)
+        themes = menu.addMenu(tr("Theme"))
         group = QActionGroup(themes)
         for mode in THEMES:
             action = themes.addAction(mode.capitalize(), lambda m=mode: self._set_theme(m))
@@ -1133,7 +1140,7 @@ class EmbrWindow(FrameWindow):
             action.setChecked(mode == self._theme)
             group.addAction(action)
         menu.addSeparator()
-        menu.addAction("About Embr", lambda: dialogs.about(self, esptool.__version__))
+        menu.addAction(tr("About Embr"), lambda: dialogs.about(self, esptool.__version__))
         button = self.topbar.menu_button
         menu.exec(button.mapToGlobal(QPoint(0, button.height() + 4)))
 
@@ -1231,31 +1238,33 @@ def sort_drop(paths: list[Path]) -> tuple[list[Path], Path | None, list[str]]:
         if path.is_dir():
             build = path if (path / "flasher_args.json").is_file() else build_dir_below(path)
             if build is None:
-                problems.append(f"<b>{name}</b>: a folder without an ESP-IDF build in it")
+                problems.append(tr(f"<b>{name}</b>: a folder without an ESP-IDF build in it"))
             else:
                 builds.append(build)
         elif not path.exists():
-            problems.append(f"<b>{name}</b>: not found")
+            problems.append(tr(f"<b>{name}</b>: not found"))
         elif path.suffix.lower() == ".lnk":
-            problems.append(f"<b>{name}</b>: a shortcut; drop the file it points to")
+            problems.append(tr(f"<b>{name}</b>: a shortcut; drop the file it points to"))
         elif path.suffix.lower() != ".bin":
             problems.append(
-                f"<b>{name}</b>: not a .bin file. To flash another kind of file, open a "
-                "firmware and use Add entry, then Attachment, on its Entries tab."
+                tr(
+                    f"<b>{name}</b>: not a .bin file. To flash another kind of file, open a "
+                    "firmware and use Add entry, then Attachment, on its Entries tab."
+                )
             )
         else:
             try:
                 with path.open("rb") as handle:
                     empty = not handle.read(1)
             except OSError as exc:
-                problems.append(f"<b>{name}</b>: cannot be read ({html.escape(_text(exc))})")
+                problems.append(tr(f"<b>{name}</b>: cannot be read ({html.escape(_text(exc))})"))
                 continue
             if empty:
-                problems.append(f"<b>{name}</b>: empty file (0 bytes)")
+                problems.append(tr(f"<b>{name}</b>: empty file (0 bytes)"))
             else:
                 files.append(path)
     if builds and (files or len(builds) > 1 or problems):
-        problems.append("Drop an ESP-IDF build folder on its own.")
+        problems.append(tr("Drop an ESP-IDF build folder on its own."))
     build = builds[0] if len(builds) == 1 else None
     return files, build, problems
 

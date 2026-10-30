@@ -14,6 +14,7 @@ from embr.core.firmware.image_sniff import PartitionTable, parse_partition_table
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, Firmware
 from embr.core.storage.ids import new_id
+from embr.i18n import N_
 
 ReadFile = Callable[[Entry], bytes]
 """Returns an entry's bytes, e.g. files.read_entry with the archive folder bound."""
@@ -153,14 +154,18 @@ def enabled_partition_table(
     tables = [e for e in firmware.entries if e.enabled and e.kind == EntryKind.PARTITION_TABLE]
     if len(tables) > 1:
         ids = tuple(e.id for e in tables)
-        return None, [Problem(ProblemLevel.REFUSE, "more than one partition table is enabled", ids)]
+        return None, [
+            Problem(ProblemLevel.REFUSE, N_("more than one partition table is enabled"), ids)
+        ]
     if not tables:
         return None, []
     table = parse_partition_table(read(tables[0]))
     if table is None:
         return None, [
             Problem(
-                ProblemLevel.REFUSE, f"{tables[0].name} is not a partition table", (tables[0].id,)
+                ProblemLevel.REFUSE,
+                N_(f"{tables[0].name} is not a partition table"),
+                (tables[0].id,),
             )
         ]
     return table, []
@@ -179,7 +184,7 @@ def resolve_partitions(firmware: Firmware, table: PartitionTable | None) -> list
             problems.append(
                 Problem(
                     ProblemLevel.REFUSE,
-                    f"{entry.name}: partition '{entry.partition}' not found",
+                    N_(f"{entry.name}: partition '{entry.partition}' not found"),
                     (entry.id,),
                 )
             )
@@ -189,8 +194,10 @@ def resolve_partitions(firmware: Firmware, table: PartitionTable | None) -> list
             problems.append(
                 Problem(
                     ProblemLevel.REFUSE,
-                    f"{entry.name} ({entry.size:#x} bytes) does not fit "
-                    f"partition '{part.name}' ({part.size:#x})",
+                    N_(
+                        f"{entry.name} ({entry.size:#x} bytes) does not fit "
+                        f"partition '{part.name}' ({part.size:#x})"
+                    ),
                     (entry.id,),
                 )
             )
@@ -203,7 +210,7 @@ def check_layout(firmware: Firmware, flash_size: int | None) -> list[Problem]:
     (REFUSE)."""
     enabled = [e for e in firmware.entries if e.enabled]
     problems = [
-        Problem(ProblemLevel.REFUSE, f"{e.name} has no address", (e.id,))
+        Problem(ProblemLevel.REFUSE, N_(f"{e.name} has no address"), (e.id,))
         for e in enabled
         if e.address is None
     ]
@@ -214,13 +221,13 @@ def check_layout(firmware: Firmware, flash_size: int | None) -> list[Problem]:
             if (b.address or 0) >= a_end:
                 break
             problems.append(
-                Problem(ProblemLevel.REFUSE, f"{a.name} and {b.name} overlap", (a.id, b.id))
+                Problem(ProblemLevel.REFUSE, N_(f"{a.name} and {b.name} overlap"), (a.id, b.id))
             )
         if flash_size is not None and a_end > flash_size:
             problems.append(
                 Problem(
                     ProblemLevel.REFUSE,
-                    f"{a.name} ends at {a_end:#x}, beyond the flash size",
+                    N_(f"{a.name} ends at {a_end:#x}, beyond the flash size"),
                     (a.id,),
                 )
             )

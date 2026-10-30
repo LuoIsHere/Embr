@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from embr.i18n import tr
 from embr.ui import icons
 from embr.ui.theme import Palette
 from embr.ui.widgets import button, label, set_prop, tag
@@ -63,13 +64,13 @@ class TopBar(QWidget):
         self.setObjectName("topbar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self._window = window
-        self.menu_button = button("", "ibtn", tooltip="Menu")
-        self.sidebar_button = button("", "ibtn", tooltip="Hide sidebar (Ctrl+B)")
+        self.menu_button = button("", "ibtn", tooltip=tr("Menu"))
+        self.sidebar_button = button("", "ibtn", tooltip=tr("Hide sidebar (Ctrl+B)"))
         self.brand = QLabel("Embr")
         self.brand.setObjectName("brand")
-        self.min_button = self._wc("Minimize")
-        self.max_button = self._wc("Maximize")
-        self.close_button = self._wc("Close", close=True)
+        self.min_button = self._wc(tr("Minimize"))
+        self.max_button = self._wc(tr("Maximize"))
+        self.close_button = self._wc(tr("Close"), close=True)
         self.logo = QLabel()
         self.logo.setPixmap(icons.logo_pixmap(LOGO_SIZE))
         self.logo.setFixedSize(LOGO_SIZE, LOGO_SIZE)
@@ -111,7 +112,7 @@ class TopBar(QWidget):
         maximized = self._window.isMaximized()
         name = "restore" if maximized else "maximize"
         self.max_button.setIcon(icons.icon(name, self._palette.fg_2, 10))
-        self.max_button.setToolTip("Restore" if maximized else "Maximize")
+        self.max_button.setToolTip(tr("Restore") if maximized else tr("Maximize"))
 
     def toggle_maximized(self) -> None:
         if self._window.isMaximized():
@@ -137,12 +138,12 @@ class CommandBar(QWidget):
         self.text = label("", mono=True)
         self.text.setObjectName("cmdtext")
         self.text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.copy_button = button("Copy", "ibtn")
+        self.copy_button = button(tr("Copy"), "ibtn")
         self.copy_button.setFixedWidth(72)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 5, 12, 5)
         layout.setSpacing(8)
-        layout.addWidget(label("Equivalent command", tone="3"))
+        layout.addWidget(label(tr("Equivalent command"), tone="3"))
         layout.addWidget(self.text, 1)
         layout.addWidget(self.copy_button)
         self.copy_button.clicked.connect(self._copy)
@@ -168,12 +169,12 @@ class CommandBar(QWidget):
     def _copy(self) -> None:
         clipboard = QGuiApplication.clipboard()
         clipboard.setText(self._full)
-        self.copy_button.setText("Copied")
+        self.copy_button.setText(tr("Copied"))
         set_prop(self.copy_button, "copied", "1")
         self._reset.start()
 
     def _copied_done(self) -> None:
-        self.copy_button.setText("Copy")
+        self.copy_button.setText(tr("Copy"))
         set_prop(self.copy_button, "copied", "0")
 
 
@@ -273,7 +274,7 @@ class FrameWindow(QMainWindow):
     def _set_sidebar(self, show: bool) -> None:
         self.sidebar.setVisible(show)
         self.topbar.sidebar_button.setToolTip(
-            "Hide sidebar (Ctrl+B)" if show else "Show sidebar (Ctrl+B)"
+            tr("Hide sidebar (Ctrl+B)") if show else tr("Show sidebar (Ctrl+B)")
         )
         self.sidebar_toggled.emit(show)
 

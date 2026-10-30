@@ -38,10 +38,11 @@ from embr.core.firmware.import_pio import PioBuild, PioBuildError, built_envs_be
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.storage.paths import AppPaths
+from embr.i18n import N_, tr
 from embr.ui.adapters.jobs import MainThreadDispatcher
 from embr.ui.widgets import button, label
 
-IMPORT_LABEL = "Import into Embr as a firmware"
+IMPORT_LABEL = N_("Import into Embr as a firmware")
 """Read flash and merge: keep the result in the firmware list too (checked by default)."""
 REPOSITORY = "https://github.com/LuoIsHere/Embr"
 RELEASES = "https://github.com/LuoIsHere/Embr/releases"
@@ -64,7 +65,7 @@ class Dialog(QDialog):
         heading = QLabel(title)
         heading.setStyleSheet("font-size: 14px; font-weight: 600;")
         self.ok = button(ok, "danger-small" if danger else "accent-small")
-        self.cancel = button("Cancel")
+        self.cancel = button(tr("Cancel"))
         self.ok.setDefault(True)
         self.ok.clicked.connect(self._accept)
         self.cancel.clicked.connect(self.reject)
@@ -153,7 +154,7 @@ def confirm(
 
 def notice(parent: QWidget, title: str, lines: list[str]) -> None:
     """A message with a Close button only. Lines are rich text."""
-    dialog = Dialog(parent, title, "Close", danger=False)
+    dialog = Dialog(parent, title, tr("Close"), danger=False)
     dialog.cancel.hide()
     for line in lines:
         dialog.text(line)
@@ -191,11 +192,11 @@ class PlacementFields:
         self.project = QComboBox()
         for project in library.tree().projects:
             self.project.addItem(project.name, project.id)
-        self.project.addItem("Standalone (no project)", None)
+        self.project.addItem(tr("Standalone (no project)"), None)
         index = self.project.findData(project_id)
         self.project.setCurrentIndex(index if index >= 0 else self.project.count() - 1)
         self.group = QComboBox()
-        dialog.row(("Place in", self.project), ("Group", self.group))
+        dialog.row((tr("Place in"), self.project), (tr("Group"), self.group))
         self.project.currentIndexChanged.connect(self._sync)
         self._sync()
         if device:
@@ -205,7 +206,7 @@ class PlacementFields:
 
     def _sync(self) -> None:
         self.group.clear()
-        self.group.addItem("(ungrouped)", "")
+        self.group.addItem(tr("(ungrouped)"), "")
         project_id = self.project.currentData()
         if isinstance(project_id, str):
             for name in self._library.project(project_id).devices:
@@ -223,14 +224,16 @@ class PlacementFields:
 def new_firmware(
     parent: QWidget, library: Library, project_id: str | None, device: str
 ) -> tuple[str, Placement] | None:
-    dialog = Dialog(parent, "New firmware", "Create", danger=False)
+    dialog = Dialog(parent, tr("New firmware"), tr("Create"), danger=False)
     name = QLineEdit()
-    name.setPlaceholderText("e.g. S3-main-v1.3 (default: the first file added)")
-    dialog.field("Name", name)
+    name.setPlaceholderText(tr("e.g. S3-main-v1.3 (default: the first file added)"))
+    dialog.field(tr("Name"), name)
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
-        "Fixed firmware: add entries by hand afterwards. Reset policy and erase_all are copied "
-        "from the project defaults."
+        tr(
+            "Fixed firmware: add entries by hand afterwards. Reset policy and erase_all are copied "
+            "from the project defaults."
+        )
     )
     name.setFocus()
     if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -239,15 +242,15 @@ def new_firmware(
 
 
 def new_project(parent: QWidget) -> tuple[str, str] | None:
-    dialog = Dialog(parent, "New project", "Create", danger=False)
+    dialog = Dialog(parent, tr("New project"), tr("Create"), danger=False)
     name = QLineEdit()
-    name.setPlaceholderText("e.g. 500_roller_hmi")
+    name.setPlaceholderText(tr("e.g. 500_roller_hmi"))
     notes = QLineEdit()
-    notes.setPlaceholderText("hardware revision, purpose…")
-    dialog.field("Name (unique)", name)
-    dialog.field("Notes", notes)
+    notes.setPlaceholderText(tr("hardware revision, purpose…"))
+    dialog.field(tr("Name (unique)"), name)
+    dialog.field(tr("Notes"), notes)
     dialog.text(
-        "Defaults for new firmware: before=default-reset · after=hard-reset · erase_all=off"
+        tr("Defaults for new firmware: before=default-reset · after=hard-reset · erase_all=off")
     )
     name.setFocus()
     if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -258,11 +261,13 @@ def new_project(parent: QWidget) -> tuple[str, str] | None:
 def move_firmware(
     parent: QWidget, library: Library, project_id: str | None, device: str
 ) -> Placement | None:
-    dialog = Dialog(parent, "Move firmware", "Move", danger=False)
+    dialog = Dialog(parent, tr("Move firmware"), tr("Move"), danger=False)
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
-        "Only the project and the group change; entries, files and records stay as they are. "
-        "Or drag the firmware in the sidebar."
+        tr(
+            "Only the project and the group change; entries, files and records stay as they are. "
+            "Or drag the firmware in the sidebar."
+        )
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
@@ -272,30 +277,32 @@ def move_firmware(
 def settings(parent: QWidget, paths: AppPaths, library: Library) -> None:
     """Program folder (read-only) and the global framework package path for PlatformIO
     Arduino firmware (saved on Close; empty means auto-detect)."""
-    dialog = Dialog(parent, "Settings", "Close", danger=False)
+    dialog = Dialog(parent, tr("Settings"), tr("Close"), danger=False)
     dialog.cancel.hide()
     package = QLineEdit(library.framework_pkg_default())
     detected = library.detected_framework_pkg()
     package.setPlaceholderText(
-        f"auto-detect (now: {detected})" if detected else "auto-detect (nothing found)"
+        tr(f"auto-detect (now: {detected})") if detected else tr("auto-detect (nothing found)")
     )
-    browse = button("Browse…")
+    browse = button(tr("Browse…"))
     row = QHBoxLayout()
     row.setSpacing(6)
     row.addWidget(package, 1)
     row.addWidget(browse)
 
     def pick() -> None:
-        chosen = QFileDialog.getExistingDirectory(dialog, "Framework package", package.text())
+        chosen = QFileDialog.getExistingDirectory(dialog, tr("Framework package"), package.text())
         if chosen:
             package.setText(chosen)
 
     browse.clicked.connect(pick)
     dialog.body.addWidget(
         label(
-            "PlatformIO framework package (the framework-arduinoespressif32 folder that "
-            "boot_app0.bin of Arduino firmware comes from). Empty: auto-detect. A firmware "
-            "can override it on its Parameters tab.",
+            tr(
+                "PlatformIO framework package (the framework-arduinoespressif32 folder that "
+                "boot_app0.bin of Arduino firmware comes from). Empty: auto-detect. A firmware "
+                "can override it on its Parameters tab."
+            ),
             tone="3",
             wrap=True,
         )
@@ -303,9 +310,9 @@ def settings(parent: QWidget, paths: AppPaths, library: Library) -> None:
     dialog.body.addLayout(row)
     folder = label(str(paths.root), mono=True, wrap=True)
     folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    dialog.field("Program folder", folder)
+    dialog.field(tr("Program folder"), folder)
     dialog.field(
-        "Data and log folders (portable, inside the program folder; fixed, not configurable)",
+        tr("Data and log folders (portable, inside the program folder; fixed, not configurable)"),
         label("data\\ · logs\\ · temp\\ · settings.ini", mono=True),
     )
     dialog.exec()
@@ -314,16 +321,16 @@ def settings(parent: QWidget, paths: AppPaths, library: Library) -> None:
 
 
 def about(parent: QWidget, esptool_version: str) -> None:
-    dialog = Dialog(parent, "About Embr", "Close", danger=False)
+    dialog = Dialog(parent, tr("About Embr"), tr("Close"), danger=False)
     dialog.cancel.hide()
-    dialog.text(f"Embr {__version__} · built-in esptool {esptool_version} · GPL-3.0-or-later")
-    for caption, url in (("Repository", REPOSITORY), ("Releases", RELEASES)):
-        link = QLabel(f'{caption}: <a href="{url}">{url.removeprefix("https://")}</a>')
+    dialog.text(tr(f"Embr {__version__} · built-in esptool {esptool_version} · GPL-3.0-or-later"))
+    for caption, url in ((N_("Repository"), REPOSITORY), (N_("Releases"), RELEASES)):
+        link = QLabel(f'{tr(caption)}: <a href="{url}">{url.removeprefix("https://")}</a>')
         link.setTextFormat(Qt.TextFormat.RichText)
         link.setOpenExternalLinks(False)
         link.linkActivated.connect(_open_url)
         dialog.body.addWidget(link)
-    dialog.text("Third-party notices: THIRD_PARTY_NOTICES in the program folder.")
+    dialog.text(tr("Third-party notices: THIRD_PARTY_NOTICES in the program folder."))
     dialog.exec()
 
 
@@ -353,21 +360,21 @@ def import_idf(
     flasher_args.json is accepted. A project folder gets a button to
     use its build folder (never replaced silently); a build folder another firmware already
     follows gets a button that closes the dialog and shows that firmware."""
-    dialog = Dialog(parent, "Import ESP-IDF build", "Import", danger=False)
+    dialog = Dialog(parent, tr("Import ESP-IDF build"), tr("Import"), danger=False)
     folder = QLineEdit()
-    folder.setPlaceholderText(r"e.g. D:\work\my_project\build")
-    browse = button("Browse…")
+    folder.setPlaceholderText(tr(r"e.g. D:\work\my_project\build"))
+    browse = button(tr("Browse…"))
     row = QHBoxLayout()
     row.setSpacing(6)
     row.addWidget(folder, 1)
     row.addWidget(browse)
-    dialog.body.addWidget(label("Build directory (contains flasher_args.json)", tone="3"))
+    dialog.body.addWidget(label(tr("Build directory (contains flasher_args.json)"), tone="3"))
     dialog.body.addLayout(row)
     preview = label("", tone="2", wrap=True)
     preview.setTextFormat(Qt.TextFormat.RichText)
     dialog.body.addWidget(preview)
-    use_build = button("Use the build folder")
-    show_existing = button("Show that firmware")
+    use_build = button(tr("Use the build folder"))
+    show_existing = button(tr("Show that firmware"))
     redirect = QHBoxLayout()
     redirect.addWidget(use_build)
     redirect.addWidget(show_existing)
@@ -377,12 +384,14 @@ def import_idf(
     existing: list[str] = []
     chosen: list[str] = []
     name = QLineEdit()
-    dialog.field("Name", name)
+    dialog.field(tr("Name"), name)
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
-        "The firmware follows the build: entries, chip, flash settings and reset modes are read "
-        "from it each time. Rebuilds that only change file contents are followed automatically; "
-        "other changes need confirming."
+        tr(
+            "The firmware follows the build: entries, chip, flash settings and reset modes are "
+            "read from it each time. Rebuilds that only change file contents are followed "
+            "automatically; other changes need confirming."
+        )
     )
     found: list[IdfBuild] = []
 
@@ -402,12 +411,14 @@ def import_idf(
         except (IdfBuildError, OSError) as exc:
             child = build_dir_below(Path(text))
             if child is None:
-                preview.setText(f"<b>{html.escape(str(exc))}</b>")
+                preview.setText(f"<b>{html.escape(tr(str(exc)))}</b>")
             else:
                 below.append(child)
                 preview.setText(
-                    "<b>This is the project folder.</b> Pick its build folder, which contains "
-                    f"flasher_args.json: {html.escape(str(child))}"
+                    tr(
+                        "<b>This is the project folder.</b> Pick its build folder, which contains "
+                        f"flasher_args.json: {html.escape(str(child))}"
+                    )
                 )
                 use_build.show()
             dialog.fit()
@@ -416,8 +427,10 @@ def import_idf(
         if tracked is not None:
             existing.append(tracked.id)
             preview.setText(
-                f"<b>'{html.escape(tracked.name)}' already follows this build folder.</b> "
-                "A build folder is followed by one firmware only."
+                tr(
+                    f"<b>'{html.escape(tracked.name)}' already follows this build folder.</b> "
+                    "A build folder is followed by one firmware only."
+                )
             )
             show_existing.show()
             dialog.fit()
@@ -425,9 +438,11 @@ def import_idf(
         found.append(build)
         files = ", ".join(f"{f.name} @ 0x{f.address:X}" for f in build.files)
         preview.setText(
-            f"{html.escape(build.project_name or '?')} · {build.chip or '?'} · ESP-IDF "
-            f"{html.escape(build.idf_version or '?')} · {build.flash_mode} {build.flash_freq} "
-            f"{build.flash_size}<br>{html.escape(files)}"
+            tr(
+                f"{html.escape(build.project_name or '?')} · {build.chip or '?'} · ESP-IDF "
+                f"{html.escape(build.idf_version or '?')} · {build.flash_mode} {build.flash_freq} "
+                f"{build.flash_size}<br>{html.escape(files)}"
+            )
         )
         name.setPlaceholderText(default_firmware_name(build))
         dialog.fit()
@@ -448,7 +463,7 @@ def import_idf(
     show_existing.hide()
 
     def pick() -> None:
-        chosen = QFileDialog.getExistingDirectory(dialog, "Build directory", folder.text())
+        chosen = QFileDialog.getExistingDirectory(dialog, tr("Build directory"), folder.text())
         if chosen:
             folder.setText(chosen)
             refresh()
@@ -486,21 +501,21 @@ def import_pio(
     seconds for `pio project config`). Every env of platformio.ini is listed: built ones can
     be checked (the picked one is), unbuilt and already followed ones are greyed. All
     checked envs go to the same project and group (design doc §12.5)."""
-    dialog = Dialog(parent, "Import PlatformIO build", "Import", danger=False)
+    dialog = Dialog(parent, tr("Import PlatformIO build"), tr("Import"), danger=False)
     folder = QLineEdit()
-    folder.setPlaceholderText(r"e.g. D:\work\my_project\.pio\build\esp32dev")
-    browse = button("Browse…")
+    folder.setPlaceholderText(tr(r"e.g. D:\work\my_project\.pio\build\esp32dev"))
+    browse = button(tr("Browse…"))
     row = QHBoxLayout()
     row.setSpacing(6)
     row.addWidget(folder, 1)
     row.addWidget(browse)
-    dialog.body.addWidget(label(r"Env build folder (.pio\build\<env>)", tone="3"))
+    dialog.body.addWidget(label(tr(r"Env build folder (.pio\build\<env>)"), tone="3"))
     dialog.body.addLayout(row)
     status = label("", tone="2", wrap=True)
     status.setTextFormat(Qt.TextFormat.RichText)
     dialog.body.addWidget(status)
-    use_env = button("Use this env")
-    show_existing = button("Show that firmware")
+    use_env = button(tr("Use this env"))
+    show_existing = button(tr("Show that firmware"))
     redirect = QHBoxLayout()
     redirect.addWidget(use_env)
     redirect.addWidget(show_existing)
@@ -510,13 +525,15 @@ def import_pio(
     envs_layout = QVBoxLayout(envs_box)
     envs_layout.setContentsMargins(0, 0, 0, 0)
     envs_layout.setSpacing(2)
-    dialog.field("Envs (each checked env becomes a firmware named after it)", envs_box)
+    dialog.field(tr("Envs (each checked env becomes a firmware named after it)"), envs_box)
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
-        "Each firmware follows its env's build output: entries and flash settings are read "
-        "from the files PlatformIO wrote. Embr never builds; when the board or the files "
-        "change, it tells you. Rebuilds that only change file contents are followed "
-        "automatically; other changes need confirming."
+        tr(
+            "Each firmware follows its env's build output: entries and flash settings are read "
+            "from the files PlatformIO wrote. Embr never builds; when the board or the files "
+            "change, it tells you. Rebuilds that only change file contents are followed "
+            "automatically; other changes need confirming."
+        )
     )
     dispatcher = MainThreadDispatcher(dialog)
     found: list[PioPreview] = []
@@ -558,15 +575,17 @@ def import_pio(
             below.append(built[0].build_dir)
             names = ", ".join(html.escape(r.env) for r in built)
             status.setText(
-                "<b>This is the project folder.</b> Pick an env build folder under "
-                rf".pio\build: {names}"
+                tr(
+                    "<b>This is the project folder.</b> Pick an env build folder under "
+                    rf".pio\build: {names}"
+                )
             )
-            use_env.setText(f"Use {built[0].env}")
+            use_env.setText(tr(f"Use {built[0].env}"))
             use_env.show()
             sync_ok()
             dialog.fit()
             return
-        status.setText("Reading the PlatformIO project…")
+        status.setText(tr("Reading the PlatformIO project…"))
         sync_ok()
         dialog.fit()
 
@@ -574,7 +593,7 @@ def import_pio(
             try:
                 result: PioPreview | str = library.preview_pio(path)
             except (PioBuildError, OSError) as exc:
-                result = str(exc)
+                result = tr(str(exc))
             with contextlib.suppress(RuntimeError):  # the dialog is gone
                 dispatcher.dispatch(lambda: shown(ticket, result))
 
@@ -584,15 +603,17 @@ def import_pio(
         if ticket != generation[0]:  # the folder changed or the dialog closed meanwhile
             return
         if isinstance(result, str):
-            status.setText(f"<b>{html.escape(result)}</b>")
+            status.setText(f"<b>{html.escape(tr(result))}</b>")
             dialog.fit()
             return
         found.append(result)
-        lines = [f"Project {html.escape(str(result.picked.project_root))}"]
+        lines = [tr(f"Project {html.escape(str(result.picked.project_root))}")]
         if result.config_error:
             lines.append(
-                f"pio project config gave nothing ({html.escape(result.config_error)}); boards "
-                "are unknown and the board check is skipped until it works."
+                tr(
+                    f"pio project config gave nothing ({html.escape(tr(result.config_error))}); "
+                    "boards are unknown and the board check is skipped until it works."
+                )
             )
         for choice in result.envs:
             box = QCheckBox(_env_text(choice.name, choice.board, choice.build))
@@ -601,15 +622,15 @@ def import_pio(
             box.setEnabled(usable)
             box.setChecked(usable and picked)
             if not choice.built:
-                box.setText(f"{choice.name} · not built")
+                box.setText(tr(f"{choice.name} · not built"))
             elif choice.tracked_by is not None:
                 follower = library.firmware(choice.tracked_by).name
-                box.setText(f"{choice.name} · already followed by '{follower}'")
+                box.setText(tr(f"{choice.name} · already followed by '{follower}'"))
                 if picked:
                     existing.append(choice.tracked_by)
                     show_existing.show()
             elif choice.problem:
-                box.setText(f"{choice.name} · {choice.problem}")
+                box.setText(f"{choice.name} · {tr(choice.problem)}")
             if choice.build is not None:
                 box.setToolTip(_build_text(choice.build))
             box.toggled.connect(sync_ok)
@@ -631,7 +652,7 @@ def import_pio(
             dialog.reject()
 
     def pick() -> None:
-        picked = QFileDialog.getExistingDirectory(dialog, "Env build folder", folder.text())
+        picked = QFileDialog.getExistingDirectory(dialog, tr("Env build folder"), folder.text())
         if picked:
             folder.setText(picked)
             refresh()
@@ -658,9 +679,9 @@ def import_pio(
 
 
 def _env_text(name: str, board: str | None, build: PioBuild | None) -> str:
-    parts = [name, board or "board unknown"]
+    parts = [name, board or tr("board unknown")]
     if build is not None:
-        parts.append(build.chip or "chip unknown")
+        parts.append(build.chip or tr("chip unknown"))
         flash = build.flash
         parts.append(f"{flash.mode} {flash.freq} {flash.size}")
     return " · ".join(parts)
@@ -668,26 +689,28 @@ def _env_text(name: str, board: str | None, build: PioBuild | None) -> str:
 
 def _build_text(build: PioBuild) -> str:
     lines = [
-        f"0x{f.address:X}  {f.name}" + (f"  ({f.note})" if f.note else "") for f in build.files
+        f"0x{f.address:X}  {f.name}" + (f"  ({tr(f.note)})" if f.note else "") for f in build.files
     ]
-    lines += build.notes
+    lines += [tr(n) for n in build.notes]
     return "\n".join(lines)
 
 
 def archive_version(
     parent: QWidget, source_name: str, default_name: str, entries: list[Entry]
 ) -> tuple[str, str] | None:
-    dialog = Dialog(parent, "Archive this version", "Archive", danger=False)
+    dialog = Dialog(parent, tr("Archive this version"), tr("Archive"), danger=False)
     name = QLineEdit(default_name)
-    dialog.field("Name", name)
+    dialog.field(tr("Name"), name)
     notes = QLineEdit()
-    notes.setPlaceholderText("why this version is kept")
-    dialog.field("Notes", notes)
+    notes.setPlaceholderText(tr("why this version is kept"))
+    dialog.field(tr("Notes"), notes)
     copied = [e for e in entries if e.file.startswith("path:")]
     lines = "".join(f"<br>•&nbsp;{html.escape(e.name)} ({e.size:,} bytes)" for e in copied)
     dialog.text(
-        f"A new archived firmware is created next to <b>{html.escape(source_name)}</b>, which "
-        f"stays as it is. Files copied into data/archive/:{lines}"
+        tr(
+            f"A new archived firmware is created next to <b>{html.escape(source_name)}</b>, which "
+            f"stays as it is. Files copied into data/archive/:{lines}"
+        )
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
@@ -706,12 +729,15 @@ def clean_archive(
     unused = [u.file for u in usage if not u.firmware_ids]
     kept = [u for u in usage if u.firmware_ids]
     dialog = Dialog(
-        parent, "Clean archive", "Delete files" if unused else "Close", danger=bool(unused)
+        parent,
+        tr("Clean archive"),
+        tr("Delete files") if unused else tr("Close"),
+        danger=bool(unused),
     )
     if not unused:
         dialog.cancel.hide()
     total = sum(u.file.size for u in usage)
-    dialog.text(f"The archive holds {len(usage)} files ({total:,} bytes).")
+    dialog.text(tr(f"The archive holds {len(usage)} files ({total:,} bytes)."))
     if kept:
         users: dict[str, int] = {}
         for u in kept:
@@ -722,8 +748,10 @@ def clean_archive(
             for fid, count in sorted(users.items(), key=lambda item: names.get(item[0], ""))
         )
         kept_text = dialog.text(
-            f"{len(kept)} files are kept because firmware refers to them: {links}. Archived "
-            "versions are firmware too; delete one of them first to free its files."
+            tr(
+                f"{len(kept)} files are kept because firmware refers to them: {links}. Archived "
+                "versions are firmware too; delete one of them first to free its files."
+            )
         )
         chosen: list[str] = []
 
@@ -741,13 +769,15 @@ def clean_archive(
             f"<br>•&nbsp;{f.sha256[:12]}… {f.size:,} bytes, archived {f.first_archived[:10]}"
             for f in unused[:12]
         )
-        more = f"<br>…and {len(unused) - 12} more" if len(unused) > 12 else ""
+        more = tr(f"<br>…and {len(unused) - 12} more") if len(unused) > 12 else ""
         dialog.text(
-            f"<b>Delete {len(unused)} files ({size:,} bytes) that no firmware refers to?</b> "
-            f"This cannot be undone.{lines}{more}"
+            tr(
+                f"<b>Delete {len(unused)} files ({size:,} bytes) that no firmware refers to?</b> "
+                f"This cannot be undone.{lines}{more}"
+            )
         )
     else:
-        dialog.text("<b>Nothing to clean:</b> every archived file is in use.")
+        dialog.text(tr("<b>Nothing to clean:</b> every archived file is in use."))
     accepted = dialog.exec() == QDialog.DialogCode.Accepted
     if chosen:
         show_firmware(chosen[0])
@@ -757,26 +787,28 @@ def clean_archive(
 def merge(
     parent: QWidget, merger: Merger, firmware: Firmware, default_output: Path
 ) -> tuple[Path, MergeOptions] | None:
-    dialog = Dialog(parent, "Merge to .bin", "Merge", danger=False)
+    dialog = Dialog(parent, tr("Merge to .bin"), tr("Merge"), danger=False)
     offset = QLineEdit("0x0")
-    dialog.field("Start offset (hex)", offset)
-    pad = QCheckBox("pad to the whole flash size")
+    dialog.field(tr("Start offset (hex)"), offset)
+    pad = QCheckBox(tr("pad to the whole flash size"))
     dialog.body.addWidget(pad)
     output = QLineEdit(str(default_output))
-    browse = button("Browse…")
+    browse = button(tr("Browse…"))
     row = QHBoxLayout()
     row.setSpacing(6)
     row.addWidget(output, 1)
     row.addWidget(browse)
-    dialog.body.addWidget(label("Save as", tone="3"))
+    dialog.body.addWidget(label(tr("Save as"), tone="3"))
     dialog.body.addLayout(row)
-    add = QCheckBox(IMPORT_LABEL)
+    add = QCheckBox(tr(IMPORT_LABEL))
     add.setChecked(True)
     dialog.body.addWidget(add)
     dialog.text(
-        "Gaps are filled with 0xFF, so every partition inside the written range is overwritten "
-        "(the NVS between the partition table and otadata is cleared). A padded image overwrites "
-        "the whole flash."
+        tr(
+            "Gaps are filled with 0xFF, so every partition inside the written range is overwritten "
+            "(the NVS between the partition table and otadata is cleared). A padded image "
+            "overwrites the whole flash."
+        )
     )
     command = label("", tone="3", wrap=True, mono=True)
     dialog.body.addWidget(command)
@@ -792,18 +824,18 @@ def merge(
         chosen = options()
         dialog.ok.setEnabled(False)
         if chosen is None:
-            command.setText("The start offset is not a hex number.")
+            command.setText(tr("The start offset is not a hex number."))
             return
         try:
             command.setText(merger.command(firmware.id, Path(output.text()), chosen))
         except (PlanError, ValueError) as exc:  # e.g. checked entries for two chips
-            command.setText(str(exc))
+            command.setText(tr(str(exc)))
             return
         dialog.ok.setEnabled(True)
 
     def pick() -> None:
         chosen, _ = QFileDialog.getSaveFileName(
-            dialog, "Save merged image", output.text(), "Binary files (*.bin)"
+            dialog, tr("Save merged image"), output.text(), tr("Binary files (*.bin)")
         )
         if chosen:
             output.setText(chosen)
@@ -825,14 +857,18 @@ def merge(
 def erase_flash(parent: QWidget, port: str, info: InfoEvent) -> bool:
     accepted, _ = confirm(
         parent,
-        "Erase flash",
+        tr("Erase flash"),
         [
-            f"Erase the whole flash of the {html.escape(info.chip)} on <b>{html.escape(port)}"
-            f"</b> (MAC {html.escape(info.mac or '?')})?",
-            "Everything is cleared, including NVS (Wi-Fi credentials and other stored data); "
-            "the firmware on the device will no longer start. A record is kept.",
+            tr(
+                f"Erase the whole flash of the {html.escape(info.chip)} on <b>{html.escape(port)}"
+                f"</b> (MAC {html.escape(info.mac or '?')})?"
+            ),
+            tr(
+                "Everything is cleared, including NVS (Wi-Fi credentials and other stored data); "
+                "the firmware on the device will no longer start. A record is kept."
+            ),
         ],
-        "Erase flash",
+        tr("Erase flash"),
     )
     return accepted
 
@@ -856,29 +892,31 @@ def read_flash(
     folder: Path,
 ) -> ReadRequest | None:
     """`folder`: where the file goes by default (the last one used)."""
-    dialog = Dialog(parent, "Read flash", "Read", danger=False)
-    whole = QCheckBox(f"whole flash ({info.flash_size or 'detected size'})")
+    dialog = Dialog(parent, tr("Read flash"), tr("Read"), danger=False)
+    whole = QCheckBox(tr(f"whole flash ({info.flash_size or 'detected size'})"))
     whole.setChecked(True)
     dialog.body.addWidget(whole)
     start = QLineEdit("0x0")
     size = QLineEdit("0x100000")
-    range_row = dialog.row(("Start address (hex)", start), ("Size (hex)", size))
+    range_row = dialog.row((tr("Start address (hex)"), start), (tr("Size (hex)"), size))
     mac = (info.mac or "unknown").replace(":", "")
     output = QLineEdit(str(folder / f"{info.chip}_{mac}_{datetime.now():%Y%m%d-%H%M%S}.bin"))
-    browse = button("Browse…")
+    browse = button(tr("Browse…"))
     row = QHBoxLayout()
     row.setSpacing(6)
     row.addWidget(output, 1)
     row.addWidget(browse)
-    dialog.body.addWidget(label("Save to", tone="3"))
+    dialog.body.addWidget(label(tr("Save to"), tone="3"))
     dialog.body.addLayout(row)
-    add = QCheckBox(IMPORT_LABEL)
+    add = QCheckBox(tr(IMPORT_LABEL))
     add.setChecked(True)
     dialog.body.addWidget(add)
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
-        "Imported, the content is also kept in the archive as a new fixed firmware with one "
-        "merged entry. A dump includes NVS and may contain Wi-Fi credentials and other secrets."
+        tr(
+            "Imported, the content is also kept in the archive as a new fixed firmware with one "
+            "merged entry. A dump includes NVS and may contain Wi-Fi credentials and other secrets."
+        )
     )
 
     def sync() -> None:
@@ -890,7 +928,7 @@ def read_flash(
 
     def pick() -> None:
         chosen, _ = QFileDialog.getSaveFileName(
-            dialog, "Save flash content", output.text(), "Binary files (*.bin)"
+            dialog, tr("Save flash content"), output.text(), tr("Binary files (*.bin)")
         )
         if chosen:
             output.setText(chosen)
@@ -917,12 +955,14 @@ def read_flash(
             return True
         accepted, _ = confirm(
             dialog,
-            "Replace file",
+            tr("Replace file"),
             [
-                f"<b>{html.escape(path.name)}</b> already exists in "
-                f"{html.escape(str(path.parent))}. Replace it?"
+                tr(
+                    f"<b>{html.escape(path.name)}</b> already exists in "
+                    f"{html.escape(str(path.parent))}. Replace it?"
+                )
             ],
-            "Replace",
+            tr("Replace"),
         )
         return accepted
 
