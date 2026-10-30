@@ -253,6 +253,7 @@ QTableView {{ background: {p.panel}; border: none; gridline-color: transparent;
 QTableView::item {{ border-bottom: 1px solid {p.line_2}; padding: 0px 6px; }}
 QHeaderView::section {{ background: {p.panel}; color: {p.fg_3}; border: none;
   border-bottom: 1px solid {p.line}; padding: 4px 8px; font-size: 11px; }}
+#entries QHeaderView::section:middle {{ border-right: 1px solid {p.line}; }}
 #records QPushButton[kind="record"] {{ text-align: left; background: transparent; border: none;
   border-bottom: 1px solid {p.line_2}; border-radius: 0px; padding: 6px 4px; }}
 #box {{ border: 1px solid {p.line}; border-radius: 6px; }}

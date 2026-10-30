@@ -6,14 +6,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
     QFont,
     QFontMetrics,
-    QResizeEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -53,6 +52,7 @@ from embr.core.firmware.tracking import ChangeKind, EntryMark, ResolveState
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.history import FlashRecord, RecordResult
 from embr.i18n import N_, tr
+from embr.ui.adapters import settings as ui_settings
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS
 from embr.ui.widgets import (
@@ -216,10 +216,16 @@ class Banner(QFrame):
 
 
 NOTE_MIN_WIDTH = 120
+_DRAGGABLE = (1, 2, 3, 4, 5, 6)
+"""Address to Image requires; Note takes what is left."""
+_MIN_COLUMN = 40
+COLUMN_WIDTHS = "entry_columns"
+"""settings.ini [ui]: widths the user dragged the entries columns to, 0 = fit."""
 """Entry table: the Note column never gets narrower than this."""
 MCU_WIDEST = f"auto (ESP32-P4 v0{chr(0x2013)}v1)"
 """Entry table: the longest MCU choice; the MCU column is sized to show it whole."""
-_GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80))
+_GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80), (2, 110), (1, 84))
+"""(column, narrowest width) in the order columns give way; 0 hides the column."""
 """Entry table columns that shrink, in this order and down to these widths, when the
 window is too narrow for all of them (0: the column is hidden)."""
 
@@ -251,6 +257,7 @@ class EntriesTab(QWidget):
         self.table.setHorizontalHeaderLabels([tr(c) for c in self.COLUMNS])
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
+        self.table.viewport().installEventFilter(self)  # refit columns, see eventFilter()
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -260,9 +267,20 @@ class EntriesTab(QWidget):
         header = self.table.horizontalHeader()
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # sized by _fit_columns()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)  # Note takes the rest
+        self._sizing = False
+        """True while _fit_columns() sets widths (not a drag by the user)."""
+        self._chosen = self._load_widths()
+        self._header_hints: dict[int, int] = {}
+        """Column -> header size hint, kept from when the column was last visible."""
+        self._auto: dict[int, int] = {}
+        """Column -> width _fit_columns() last gave it while the user had not dragged it."""
+        """Column -> width the user dragged it to (Address to Image requires)."""
         self.table.setColumnWidth(0, 28)
         self.table.setColumnWidth(1, 104)
+        header.sectionResized.connect(self._column_dragged)  # after the initial widths
         self.table.itemChanged.connect(self._toggled)
         self.add_button = button(tr(f"{PLUS} Add entry (or drop bin files here)"), "addrow")
         self.add_menu = QMenu(self)
@@ -329,9 +347,13 @@ class EntriesTab(QWidget):
         if typing is not None:
             self._restore_typing(*typing)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self._fit_columns()
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Refit on the table viewport's own resize: by then it has its final width (this
+        tab's resizeEvent comes before the table lays out, so the old width would be used and
+        the columns would jump and miss newly gained space)."""
+        if watched is self.table.viewport() and event.type() == QEvent.Type.Resize:
+            self._fit_columns()
+        return super().eventFilter(watched, event)
 
     def _fit_columns(self) -> None:
         """Fit every column into the visible width, so the table never scrolls sideways
@@ -346,10 +368,17 @@ class EntriesTab(QWidget):
         mcu = self.table.fontMetrics().horizontalAdvance(MCU_WIDEST) + 34  # frame, arrow
         widths = {0: 28, 1: 104, 2: mcu, 3: self._name_width()}
         for column in (4, 5, 6):
+            # a hidden section's size hint is 0, which would show the column again on the
+            # next fit and hide it after that (columns jumping while the window is resized)
+            if not header.isSectionHidden(column):
+                self._header_hints[column] = header.sectionSizeHint(column)
             content = self.table.sizeHintForColumn(column)
-            widths[column] = max(header.sectionSizeHint(column), content)
+            widths[column] = max(self._header_hints.get(column, 0), content)
+        widths.update(self._chosen)  # dragged by the user
         spare = self.table.viewport().width() - sum(widths.values()) - NOTE_MIN_WIDTH
-        for column, floor in _GIVE_WAY:
+        # columns the user did not drag give way first, so a dragged width is kept if possible
+        order = sorted(_GIVE_WAY, key=lambda item: item[0] in self._chosen)
+        for column, floor in order:
             if spare >= 0:
                 break
             give = min(widths[column] - floor, -spare) if floor else widths[column]  # 0: hide
@@ -357,9 +386,47 @@ class EntriesTab(QWidget):
                 widths[column] -= give
                 spare += give
         widths[7] = NOTE_MIN_WIDTH + max(spare, 0)
-        self.table.setColumnHidden(5, widths[5] == 0)
-        for column, width in widths.items():
-            self.table.setColumnWidth(column, width)
+        for column in _DRAGGABLE:
+            if column not in self._chosen:
+                self._auto[column] = widths[column]
+        self._sizing = True
+        try:
+            self.table.setColumnHidden(5, widths[5] == 0)
+            for column, width in widths.items():
+                self.table.setColumnWidth(column, width)
+        finally:
+            self._sizing = False
+
+    def _column_dragged(self, column: int, old: int, new: int) -> None:
+        """The user dragged a column edge (Address to Image requires): keep the width, taking
+        the space from Note, which never gets narrower than NOTE_MIN_WIDTH, so the table still
+        never scrolls sideways (design doc §12 item 7). Saved in settings.ini [ui]."""
+        if self._sizing or column not in _DRAGGABLE:
+            return
+        header = self.table.horizontalHeader()
+        floors = dict(_GIVE_WAY)
+        # other columns that can give way count at their floor: dragging one column wider
+        # first takes Note's spare width, then what the others can give (_fit_columns())
+        others = sum(
+            floors.get(c, header.sectionSize(c))
+            for c in range(7)
+            if c != column and not header.isSectionHidden(c)
+        )
+        widest = self.table.viewport().width() - others - NOTE_MIN_WIDTH
+        # no room left: a column can still be made narrower, and dragged back to the width
+        # it had before the user first changed it
+        limit = max(widest, old, self._auto.get(column, 0))
+        self._chosen[column] = max(_MIN_COLUMN, min(new, limit))
+        self._save_widths()
+        self._fit_columns()
+
+    def _load_widths(self) -> dict[int, int]:
+        saved = ui_settings.load_ints(self._owner.context.settings, COLUMN_WIDTHS) or []
+        return {c: w for c, w in zip(_DRAGGABLE, saved, strict=False) if w > 0}
+
+    def _save_widths(self) -> None:
+        values = [self._chosen.get(c, 0) for c in _DRAGGABLE]  # 0: fit to the content
+        ui_settings.save_ints(self._owner.context.settings, COLUMN_WIDTHS, values)
 
     def _name_width(self) -> int:
         """What the name column would like: cell widgets do not take part in content

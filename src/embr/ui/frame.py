@@ -29,6 +29,8 @@ MIN_WIDTH, MIN_HEIGHT = 1100, 700
 SIDEBAR = (160, 236, 420)
 """min, default, max width."""
 RIGHT = (280, 330, 560)
+CENTER_MIN = 620
+"""The entries table needs about this much (its columns at their narrowest, Note included)."""
 AUTO_HIDE_WIDTH = 1180
 """Below this window width the sidebar folds away on its own."""
 EDGE = 6
@@ -244,6 +246,7 @@ class FrameWindow(QMainWindow):
         sidebar.setMaximumWidth(SIDEBAR[2])
         right.setMinimumWidth(RIGHT[0])
         right.setMaximumWidth(RIGHT[2])
+        center.setMinimumWidth(CENTER_MIN)  # the side panels cannot squeeze the table
         self.columns.setStretchFactor(1, 1)
         self.reset_columns()
 
