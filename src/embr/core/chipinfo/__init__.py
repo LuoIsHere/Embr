@@ -125,19 +125,19 @@ def chip_for_image_id(chip_id: int) -> ChipInfo | None:
 
 def revision_lines(chip: str) -> tuple[RevisionLine, ...]:
     """The chip's revision lines; () for chips that have none."""
-    raise NotImplementedError
+    return REVISION_LINES.get(chip, ())
 
 
 def line_for_revision(chip: str, revision: int) -> str:
     """Name of the line holding `revision` (major * 100 + minor), "" for chips without
     lines."""
-    raise NotImplementedError
+    return next((ln.name for ln in revision_lines(chip) if ln.low <= revision <= ln.high), "")
 
 
 def line_for_range(chip: str, low: int, high: int) -> str:
     """Name of the line holding every revision from `low` to `high` (an image header's
     range), "" when the range spans lines or the chip has none."""
-    raise NotImplementedError
+    return next((ln.name for ln in revision_lines(chip) if ln.low <= low and high <= ln.high), "")
 
 
 def chip_for_display_name(display_name: str) -> ChipInfo | None:

@@ -4,7 +4,7 @@
 
 from pathlib import Path
 
-from embr.app.chips import entry_chip, firmware_chips, for_chip, image_header
+from embr.app.chips import Mcu, entry_mcu, firmware_mcus, fits, for_chip, image_header
 from embr.app.context import AppContext
 from embr.core import chipinfo
 from embr.core.firmware.entries import enabled_partition_table, sorted_entries
@@ -47,7 +47,7 @@ def plan_entries(
     planned: list[PlanEntry] = []
     enabled = [e for e in firmware.entries if e.enabled]
     if chip is not None:
-        enabled = [e for e in enabled if entry_chip(context, firmware, e) == chip]
+        enabled = [e for e in enabled if fits(entry_mcu(context, firmware, e), chip, revision)]
     for entry in sorted_entries(enabled):
         if entry.address is None:
             raise PlanError(f"{entry.name} has no address")
@@ -88,11 +88,13 @@ def assemble_plan(
     firmware, declared flash size from the firmware ("keep"/"detect": the bootloader image
     header of that chip), partitions_end from that chip's enabled partition table. PlanError
     when there is no chip to plan for (several chips, or none, and nothing identified)."""
+    if chip is None and (only := plan_mcu(context, firmware)) is not None:
+        chip, revision = only.chip, line_low(only)
     chip = plan_chip(context, firmware, chip)
     if chip is None:
         raise PlanError(f"{firmware.name}: identify the board to choose which entries to flash")
-    entries = plan_entries(context, firmware, write_files=write_files, chip=chip)
-    view = for_chip(context, firmware, chip)
+    entries = plan_entries(context, firmware, write_files=write_files, chip=chip, revision=revision)
+    view = for_chip(context, firmware, chip, revision)
     try:
         table, _ = enabled_partition_table(view, lambda e: read_entry(e, context.paths.archive))
     except OSError:  # the files check reports the missing table
@@ -129,18 +131,32 @@ def preview_command(
     if port is None:
         port = PortInfo(PREVIEW_PORT, None, None, None, "", ConnectionType.UART_BRIDGE, None)
     try:
-        plan = assemble_plan(context, firmware, port, baud, chip=chip, write_files=False)
+        plan = assemble_plan(
+            context, firmware, port, baud, chip=chip, revision=revision, write_files=False
+        )
         return command_line(plan)
     except (PlanError, ValueError):
         return ""
 
 
 def plan_chip(context: AppContext, firmware: Firmware, identified: str | None) -> str | None:
-    """The chip a plan is made for: the identified chip, else the firmware's only chip."""
+    """The chip a plan is made for: the identified chip, else the chip of the firmware's
+    only MCU (several MCUs, ESP32-P4 lines included, need a board first)."""
     if identified is not None:
         return identified
-    chips = firmware_chips(context, firmware)
-    return chips[0] if len(chips) == 1 else None
+    only = plan_mcu(context, firmware)
+    return only.chip if only is not None else None
+
+
+def plan_mcu(context: AppContext, firmware: Firmware) -> Mcu | None:
+    """The firmware's only MCU, else None."""
+    mcus = firmware_mcus(context, firmware)
+    return mcus[0] if len(mcus) == 1 else None
+
+
+def line_low(mcu: Mcu) -> int | None:
+    """A revision inside the MCU's line (its lowest), None for no line."""
+    return next((ln.low for ln in chipinfo.revision_lines(mcu.chip) if ln.name == mcu.line), None)
 
 
 def entry_path(context: AppContext, entry: Entry) -> Path:

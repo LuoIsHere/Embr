@@ -21,7 +21,7 @@ from typing import Protocol
 
 import esptool
 
-from embr.app.chips import for_chip
+from embr.app.chips import board_revision, for_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, assemble_plan, plan_chip
 from embr.app.identify import IdentifyMemory
@@ -212,17 +212,16 @@ class Operations:
         self._ensure_idle()
         firmware = self._tracker.verify_for_flash(firmware_id, shown_digest)
         snapshot = self._memory.snapshot
-        identified = (
-            snapshot.info.chip if snapshot and snapshot.port.device == port.device else None
-        )
-        chip = plan_chip(self._ctx, firmware, identified)
+        info = snapshot.info if snapshot and snapshot.port.device == port.device else None
+        revision = board_revision(info.major, info.minor) if info else None
+        chip = plan_chip(self._ctx, firmware, info.chip if info else None)
         if chip is None:
             raise PlanError(f"{firmware.name}: identify the board to choose which entries to flash")
-        enabled = [e for e in for_chip(self._ctx, firmware, chip).entries if e.enabled]
+        enabled = [e for e in for_chip(self._ctx, firmware, chip, revision).entries if e.enabled]
         bad = [e.name for e in enabled if entry_state(e, self._ctx.paths.archive) != FileState.OK]
         if bad:
             raise PlanError(f"{', '.join(bad)}: file missing or changed since it was recorded")
-        plan = assemble_plan(self._ctx, firmware, port, baud, chip=chip)
+        plan = assemble_plan(self._ctx, firmware, port, baud, chip=chip, revision=revision)
         record_id = new_id()
         start = self._clock()
         segment = self._ctx.logs.open_segment(

@@ -16,6 +16,7 @@ import hashlib
 from dataclasses import dataclass
 
 from embr.app.context import AppContext
+from embr.core import chipinfo
 from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import ImageHeader, read_image_header
 from embr.core.firmware.image_sniff import sniff
@@ -32,41 +33,62 @@ class Mcu:
     @property
     def key(self) -> str:
         """For messages: "esp32s3", "esp32p4 v3"."""
-        raise NotImplementedError
+        return f"{self.chip} {self.line}" if self.line else self.chip
 
     @property
     def label(self) -> str:
         """For the UI: "ESP32-S3", "ESP32-P4 v3" (the line label, with an en dash)."""
-        raise NotImplementedError
+        try:
+            name = chipinfo.get_chip(self.chip).display_name
+        except chipinfo.UnknownChipError:
+            name = self.chip
+        line = next((ln for ln in chipinfo.revision_lines(self.chip) if ln.name == self.line), None)
+        return f"{name} {line.label}" if line else name
 
 
 def board_revision(major: int, minor: int) -> int | None:
     """major * 100 + minor of an identified chip; None when it could not be read
     (secure download mode reports a negative major)."""
-    raise NotImplementedError
+    return major * 100 + minor if major >= 0 else None
 
 
 def image_mcu(context: AppContext, entry: Entry) -> Mcu | None:
     """The MCU named by the entry's image header (line from its revision range)."""
-    raise NotImplementedError
+    header = image_header(context, entry)
+    if header is None or header.chip is None:
+        return None
+    if header.max_rev_full == 0:  # made before the *_full fields: legacy minimum, no maximum
+        low, high = header.legacy_min_rev * 100, 0xFFFF
+    else:
+        low, high = header.min_rev_full, header.max_rev_full
+    return Mcu(header.chip, chipinfo.line_for_range(header.chip, low, high))
 
 
 def entry_mcu(context: AppContext, firmware: Firmware, entry: Entry) -> Mcu | None:
     """The MCU the entry is flashed to (see the module docstring), or None."""
-    raise NotImplementedError
+    return _entry_mcu(context, firmware, entry, firmware_mcus(context, firmware))
 
 
 def firmware_mcus(context: AppContext, firmware: Firmware) -> tuple[Mcu, ...]:
     """The distinct MCUs of the entries, sorted (as firmware_chips(), with lines); more
     than one shows as "multi"."""
-    raise NotImplementedError
+    found = {m for e in firmware.entries if (m := image_mcu(context, e)) is not None}
+    if not firmware.source.tracking:
+        found |= {Mcu(e.chip, e.chip_line) for e in firmware.entries if e.chip}
+    elif not found and firmware.chip:
+        found = {Mcu(firmware.chip)}
+    return tuple(sorted(found))
 
 
 def fits(mcu: Mcu | None, chip: str, revision: int | None) -> bool:
     """An entry with this MCU may be flashed to a board with `chip` and `revision`: same
     chip, and the line (if any) holds the revision. Without a revision only the chip
     counts. An entry without an MCU fits no board."""
-    raise NotImplementedError
+    if mcu is None or mcu.chip != chip:
+        return False
+    return (
+        not mcu.line or revision is None or chipinfo.line_for_revision(chip, revision) == mcu.line
+    )
 
 
 def image_header(context: AppContext, entry: Entry) -> ImageHeader | None:
@@ -103,13 +125,13 @@ def firmware_chips(context: AppContext, firmware: Firmware) -> tuple[str, ...]:
     the image chips and hand-chosen chips of all entries (enabled or not)."""
     if firmware.source.tracking:
         return (firmware.chip,) if firmware.chip else ()
-    found = {image_chip(context, e) or e.chip for e in firmware.entries}
-    return tuple(sorted(c for c in found if c))
+    return tuple(sorted({m.chip for m in firmware_mcus(context, firmware)}))
 
 
 def entry_chip(context: AppContext, firmware: Firmware, entry: Entry) -> str | None:
     """The chip of entry_mcu(), or None."""
-    return _entry_chip(context, firmware, entry, firmware_chips(context, firmware))
+    mcu = entry_mcu(context, firmware, entry)
+    return mcu.chip if mcu is not None else None
 
 
 def chip_choosable(context: AppContext, firmware: Firmware, entry: Entry) -> bool:
@@ -124,8 +146,10 @@ def for_chip(
     and `revision` (fits(); the Entry objects are shared). Plans, checks and partition
     placement work on this view, so the entries of other chips and lines never meet: no
     overlap, no second partition table."""
-    chips = firmware_chips(context, firmware)
-    entries = [e for e in firmware.entries if _entry_chip(context, firmware, e, chips) == chip]
+    mcus = firmware_mcus(context, firmware)
+    entries = [
+        e for e in firmware.entries if fits(_entry_mcu(context, firmware, e, mcus), chip, revision)
+    ]
     return dataclasses.replace(firmware, entries=entries)
 
 
@@ -133,27 +157,27 @@ def merge_problem(context: AppContext, firmware: Firmware) -> str | None:
     """Why the enabled entries cannot be merged into one image, or None: they are for more
     than one MCU ("Checked entries are for esp32p4 and esp32s3", "... for esp32p4 v0-v1 and
     esp32p4 v3": Mcu.key), or an enabled entry has no MCU ("storage.bin has no MCU")."""
-    chips = firmware_chips(context, firmware)
+    mcus = firmware_mcus(context, firmware)
     found: set[str] = set()
     for entry in firmware.entries:
         if not entry.enabled:
             continue
-        chip = _entry_chip(context, firmware, entry, chips)
-        if chip is None:
+        mcu = _entry_mcu(context, firmware, entry, mcus)
+        if mcu is None:
             return f"{entry.name} has no MCU"
-        found.add(chip)
+        found.add(mcu.key)
     if len(found) > 1:
         return f"Checked entries are for {' and '.join(sorted(found))}"
     return None
 
 
-def _entry_chip(
-    context: AppContext, firmware: Firmware, entry: Entry, chips: tuple[str, ...]
-) -> str | None:
-    if found := image_chip(context, entry):
+def _entry_mcu(
+    context: AppContext, firmware: Firmware, entry: Entry, mcus: tuple[Mcu, ...]
+) -> Mcu | None:
+    if found := image_mcu(context, entry):
         return found
-    if firmware.source.tracking:
-        return firmware.chip
-    if entry.chip:
-        return entry.chip
-    return chips[0] if len(chips) == 1 else None
+    if not firmware.source.tracking and entry.chip:
+        return Mcu(entry.chip, entry.chip_line)
+    if len(mcus) == 1:
+        return mcus[0]
+    return Mcu(firmware.chip) if firmware.source.tracking and firmware.chip else None

@@ -34,6 +34,10 @@ class Owner(Protocol):
         """Chip of the last identification on the selected port, else None."""
         ...
 
+    def identified_revision(self) -> int | None:
+        """Its revision, major * 100 + minor (app.chips.board_revision()), else None."""
+        ...
+
     def is_locked(self, firmware_id: str) -> bool:
         """True while the firmware is being flashed (editing is locked)."""
         ...

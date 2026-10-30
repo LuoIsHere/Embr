@@ -18,10 +18,12 @@ from enum import StrEnum
 from pathlib import Path
 
 from embr.app.chips import (
+    board_revision,
     chip_choosable,
-    entry_chip,
+    entry_mcu,
     firmware_chips,
     firmware_mcus,
+    fits,
     for_chip,
     image_header,
 )
@@ -529,7 +531,11 @@ class Library:
                 chipinfo.get_chip(chip)
             except chipinfo.UnknownChipError:
                 raise ValueError(f"unknown chip {chip!r}") from None
+            lines = [ln.name for ln in chipinfo.revision_lines(chip)]
+            if (line or lines) and line not in lines:
+                raise ValueError(f"{chip}: choose one of the revision lines {lines}")
         entry.chip = chip
+        entry.chip_line = line if chip is not None else ""
         self._save_entries(firmware)
         return entry
 
@@ -544,7 +550,9 @@ class Library:
         if firmware.source.tracking or chip not in firmware_chips(self._ctx, firmware):
             return []
         unticked = [
-            e for e in firmware.entries if e.enabled and entry_chip(self._ctx, firmware, e) != chip
+            e
+            for e in firmware.entries
+            if e.enabled and not fits(entry_mcu(self._ctx, firmware, e), chip, revision)
         ]
         for entry in unticked:
             entry.enabled = False
@@ -689,14 +697,17 @@ class Library:
         return dataclasses.replace(_entry(resolved, entry_id))
 
     def _mismatch(self, firmware: Firmware, state: ChipState) -> str | None:
-        chips = firmware_chips(self._ctx, firmware)
-        if chips and state.chip not in chips:
-            return f"firmware is for {', '.join(chips)}, the board is {state.chip}"
-        if state.major < 0:  # secure download mode: the revision was not read
+        mcus = firmware_mcus(self._ctx, firmware)
+        revision = board_revision(state.major, state.minor)
+        if mcus and not any(fits(m, state.chip, revision) for m in mcus):
+            names = ", ".join(m.label for m in mcus)
+            return f"firmware is for {names}, the board is {state.chip} {_revision_text(state)}"
+        if revision is None:  # secure download mode: the revision was not read
             return None
         for entry in sorted_entries([e for e in firmware.entries if e.enabled]):
             header = image_header(self._ctx, entry)
-            if header is None or header.chip != state.chip:  # other chips are left out
+            mcu = entry_mcu(self._ctx, firmware, entry)
+            if header is None or not fits(mcu, state.chip, revision):  # others are left out
                 continue
             planned = PlanEntry(
                 address=entry.address or 0,
@@ -790,6 +801,10 @@ def _check_folder(folder: str, paths: Sequence[Path]) -> str:
     if outside:
         raise FolderError(folder, outside)
     return folder
+
+
+def _revision_text(state: ChipState) -> str:
+    return f"v{state.major}.{state.minor}" if state.major >= 0 else ""
 
 
 def _refuse_tracking(firmware: Firmware) -> None:

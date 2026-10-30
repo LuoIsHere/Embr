@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from embr import __version__
 from embr.app.archiving import Archiver
 from embr.app.checklist import flash_ready, preflight
+from embr.app.chips import board_revision
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, preview_command
 from embr.app.identify import IdentifyMemory, IdentifySnapshot
@@ -312,6 +313,12 @@ class EmbrWindow(FrameWindow):
             return None
         return snapshot.info.chip
 
+    def identified_revision(self) -> int | None:
+        snapshot = self._memory.snapshot
+        if self.identified_chip() is None or snapshot is None:
+            return None
+        return board_revision(snapshot.info.major, snapshot.info.minor)
+
     def is_locked(self, firmware_id: str) -> bool:
         return self._ops.running_firmware_id == firmware_id
 
@@ -434,7 +441,7 @@ class EmbrWindow(FrameWindow):
         chip = self.identified_chip()
         if chip is None or self.is_locked(firmware_id):
             return
-        unticked = self._library.fit_entries(firmware_id, chip)
+        unticked = self._library.fit_entries(firmware_id, chip, self.identified_revision())
         if unticked:
             names = ", ".join(e.name for e in unticked)
             self.note("note", f"[entries] unticked, not for this {chip}: {names}")
@@ -464,6 +471,7 @@ class EmbrWindow(FrameWindow):
                 port,
                 self.connection.selected_baud(),
                 self.identified_chip(),
+                self.identified_revision(),
             )
             self.cmdbar.set_command(command or COMMAND_UNKNOWN)
         self.connection.identify.setEnabled(port is not None and not busy)

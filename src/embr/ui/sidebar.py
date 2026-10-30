@@ -55,11 +55,11 @@ def chip_name(chip: str | None) -> str:
         return chip
 
 
-def chips_text(chips: tuple[str, ...]) -> str:
-    """Sidebar: the chip's name, "multi" for a firmware holding files for several chips."""
-    if len(chips) > 1:
+def chips_text(mcus: tuple[str, ...]) -> str:
+    """Sidebar: the MCU label, "multi" for a firmware holding files for several MCUs."""
+    if len(mcus) > 1:
         return "multi"
-    return chip_name(chips[0]) if chips else ""
+    return mcus[0] if mcus else ""
 
 
 INDENT = 8
@@ -360,7 +360,7 @@ class Sidebar(QWidget):
             row.meta.addWidget(tag(TIMES, "bad"))
         if fw.id == self._busy_id:
             row.meta.addWidget(tag("flashing", "info"))
-        row.meta.addWidget(label(chips_text(fw.chips), tone="3"))
+        row.meta.addWidget(label(chips_text(fw.mcus), tone="3"))
         reason = self._dimmed.get(fw.id)
         tip = fw.origin or fw.name
         row.setToolTip(tip if reason is None else f"{tip}\nNot for the identified board: {reason}")

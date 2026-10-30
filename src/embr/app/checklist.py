@@ -8,9 +8,9 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from embr.app.chips import firmware_chips, for_chip
+from embr.app.chips import board_revision, firmware_mcus, fits, for_chip
 from embr.app.context import AppContext
-from embr.app.flashplan import PlanError, declared_flash_size, plan_entries
+from embr.app.flashplan import PlanError, declared_flash_size, line_low, plan_entries
 from embr.app.identify import IdentifySnapshot
 from embr.app.tracking import TrackStatus
 from embr.core.firmware.entries import (
@@ -86,12 +86,13 @@ def preflight(
     enabled" also covers a board none of the entries are for; before that, item 1 checks
     each chip's entries separately and item 2 all enabled entries."""
     items = [_build(status)] if status is not None and firmware.source.tracking else []
-    chips = firmware_chips(context, firmware)
+    mcus = firmware_mcus(context, firmware)
     chip = identified.info.chip if identified is not None else None
+    revision = board_revision(identified.info.major, identified.info.minor) if identified else None
     if chip is not None:
-        views = [for_chip(context, firmware, chip)]
-    elif len(chips) > 1:
-        views = [for_chip(context, firmware, c) for c in chips]
+        views = [for_chip(context, firmware, chip, revision)]
+    elif len(mcus) > 1:
+        views = [for_chip(context, firmware, m.chip, line_low(m)) for m in mcus]
     else:
         views = [firmware]
     items += _layout(context, views, identified)
@@ -108,17 +109,20 @@ def preflight(
     if info.security.secure_download_mode:  # nothing else could be read from the chip
         return items + [_item(c) for c in check_security(info.security)]
     state = ChipState(info.chip, info.major, info.minor, info.flash_size, info.security)
-    view = for_chip(context, firmware, info.chip)
+    view = views[0]
     try:
-        entries = plan_entries(context, firmware, write_files=False, chip=info.chip)
+        entries = plan_entries(
+            context, firmware, write_files=False, chip=info.chip, revision=revision
+        )
     except PlanError:  # reported by the layout item
         entries = []
-    if chips and info.chip not in chips:
+    if mcus and not any(fits(m, info.chip, revision) for m in mcus):
+        names = ", ".join(m.label for m in mcus)
         items.append(
             CheckItem(
                 CheckState.REFUSE,
                 "Chip",
-                f"the firmware is for {', '.join(chips)}, the board is {info.chip}",
+                f"the firmware is for {names}, the board is {info.chip} {info.revision}",
             )
         )
     else:

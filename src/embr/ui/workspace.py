@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from embr.app.chips import chip_choosable, entry_chip, firmware_chips, image_header
+from embr.app.chips import Mcu, chip_choosable, entry_mcu, firmware_mcus, fits, image_header
 from embr.app.library import FirmwareFlag
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
@@ -51,7 +51,7 @@ from embr.core.firmware.tracking import ChangeKind, EntryMark, ResolveState
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.history import FlashRecord, RecordResult
 from embr.ui.owner import Owner
-from embr.ui.sidebar import PLUS, chip_name
+from embr.ui.sidebar import PLUS
 from embr.ui.widgets import ElidedLabel, button, clear_layout, elided, label, tag
 
 EN_DASH = f" {chr(0x2013)} "
@@ -140,8 +140,8 @@ class Header(QWidget):
         name = QLabel(firmware.name)
         name.setProperty("heading", "1")
         self.row.addWidget(name)
-        for chip in firmware_chips(self._owner.context, firmware):
-            self.row.addWidget(tag(chip_name(chip), "gray"))
+        for mcu in firmware_mcus(self._owner.context, firmware):
+            self.row.addWidget(tag(mcu.label, "gray"))
         self.row.addWidget(tag(*SOURCE_LABELS[firmware.source]))
         if flag == FirmwareFlag.NEEDS_CONFIRMATION:
             self.row.addWidget(tag("needs confirmation", "warn"))
@@ -206,7 +206,7 @@ class Banner(QFrame):
 
 NOTE_MIN_WIDTH = 120
 """Entry table: the Note column never gets narrower than this."""
-MCU_WIDEST = "auto (ESP32-C61)"
+MCU_WIDEST = f"auto (ESP32-P4 v0{chr(0x2013)}v1)"
 """Entry table: the longest MCU choice; the MCU column is sized to show it whole."""
 _GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80))
 """Entry table columns that shrink, in this order and down to these widths, when the
@@ -224,8 +224,8 @@ class EntriesTab(QWidget):
         self._owner = owner
         self._firmware: Firmware | None = None
         self.setAcceptDrops(True)
-        self._chips: tuple[str, ...] = ()
-        """The shown firmware's chips (app.chips.firmware_chips())."""
+        self._mcus: tuple[Mcu, ...] = ()
+        """The shown firmware's MCUs (app.chips.firmware_mcus())."""
         self._legacy: set[str] = set()
         """Tracking firmware: ids of user entries added before they were refused."""
         self.table = QTableWidget(0, len(self.COLUMNS))
@@ -284,7 +284,7 @@ class EntriesTab(QWidget):
         same = self._firmware is not None and self._firmware.id == firmware.id
         typing = self._typing() if same else None
         self._firmware = firmware
-        self._chips = firmware_chips(self._owner.context, firmware)
+        self._mcus = firmware_mcus(self._owner.context, firmware)
         locked = self._owner.is_locked(firmware.id) or firmware.read_only
         self._filling = True
         self.table.setRowCount(0)
@@ -384,9 +384,10 @@ class EntriesTab(QWidget):
 
     def _fill_row(self, row: int, entry: Entry, mark: EntryMark | None, locked: bool) -> None:
         assert self._firmware is not None
-        mcu = entry_chip(self._owner.context, self._firmware, entry)
+        mcu = entry_mcu(self._owner.context, self._firmware, entry)
         board = self._owner.identified_chip()
-        unfit = board is not None and mcu != board  # design doc §12 item 13
+        revision = self._owner.identified_revision()
+        unfit = board is not None and not fits(mcu, board, revision)  # design doc §12 item 13
         dim = "3" if not entry.enabled or unfit else None
         check = QTableWidgetItem()
         check.setData(Qt.ItemDataRole.UserRole, entry.id)
@@ -395,7 +396,7 @@ class EntriesTab(QWidget):
             flags |= Qt.ItemFlag.ItemIsUserCheckable
         check.setFlags(flags)
         if unfit:
-            check.setToolTip(f"For {mcu or 'no MCU'}; the board is {board}")
+            check.setToolTip(f"For {mcu.label if mcu else 'no MCU'}; the board is {board}")
         check.setCheckState(Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         self.table.setItem(row, 0, check)
         address = QLineEdit("" if entry.address is None else f"0x{entry.address:X}")
@@ -428,19 +429,24 @@ class EntriesTab(QWidget):
         note.editingFinished.connect(lambda e=entry, w=note: self._note(e, w))
         self.table.setCellWidget(row, 7, _cell(note))
 
-    def _mcu_cell(self, entry: Entry, mcu: str | None, locked: bool, dim: str | None) -> QWidget:
-        """The image header's chip, read-only; a chooser for files that name no chip."""
+    def _mcu_cell(self, entry: Entry, mcu: Mcu | None, locked: bool, dim: str | None) -> QWidget:
+        """The image header's chip (and P4 line), read-only; a chooser for files that name
+        no chip, with one item per revision line for chips that have lines."""
         assert self._firmware is not None
         if locked or not chip_choosable(self._owner.context, self._firmware, entry):
-            shown = label(chip_name(mcu) if mcu else "—", tone=dim or "2")
+            shown = label(mcu.label if mcu else "—", tone=dim or "2")
             return _cell(shown)
         combo = QComboBox()
         combo.setProperty("kind", "cell")
-        auto = self._chips[0] if len(self._chips) == 1 and not entry.chip else None
-        combo.addItem(f"auto ({chip_name(auto)})" if auto else "—", "")
+        auto = self._mcus[0] if len(self._mcus) == 1 and not entry.chip else None
+        combo.addItem(f"auto ({auto.label})" if auto else "—", "")
         for chip in chipinfo.supported_chips():
-            combo.addItem(chip.display_name, chip.name)
-        combo.setCurrentIndex(max(combo.findData(entry.chip or ""), 0))
+            for choice in [
+                Mcu(chip.name, ln.name) for ln in chipinfo.revision_lines(chip.name)
+            ] or [Mcu(chip.name)]:
+                combo.addItem(choice.label, f"{choice.chip}|{choice.line}")
+        current = f"{entry.chip}|{entry.chip_line}" if entry.chip else ""
+        combo.setCurrentIndex(max(combo.findData(current), 0))
         combo.setToolTip(
             "This file names no chip: choose the MCU it is for. Left empty, it follows the "
             "firmware's only chip; with several chips it is not flashed."
@@ -531,15 +537,17 @@ class EntriesTab(QWidget):
     def _set_chip(self, entry: Entry, widget: QComboBox) -> None:
         if self._firmware is None:
             return
-        chosen = str(widget.currentData() or "") or None
-        if chosen == entry.chip:
+        data = str(widget.currentData() or "")
+        chip, _, line = data.partition("|")
+        if (chip or None, line) == (entry.chip, entry.chip_line):
             return
         try:
-            self._owner.library.set_entry_chip(self._firmware.id, entry.id, chosen)
+            self._owner.library.set_entry_chip(self._firmware.id, entry.id, chip or None, line)
         except ValueError as exc:
             self._owner.note("error", f"[entry] {exc}")
             return
-        self._owner.note("dim", f"[entry] {entry.name}: MCU -> {chosen or 'not set'}")
+        shown = Mcu(chip, line).label if chip else "not set"
+        self._owner.note("dim", f"[entry] {entry.name}: MCU -> {shown}")
         self._owner.changed()
 
     def _add_files(self) -> None:
@@ -865,15 +873,15 @@ class ParamsTab(QWidget):
         return box
 
     def _chip(self, firmware: Firmware) -> QWidget:
-        chips = firmware_chips(self._owner.context, firmware)
-        return _derived(", ".join(f"{chip_name(c)} ({c})" for c in chips) or "—")
+        mcus = firmware_mcus(self._owner.context, firmware)
+        return _derived(", ".join(m.label for m in mcus) or "—")
 
     def _flash(self, firmware: Firmware, editable: bool) -> QWidget:
         flash = firmware.flash
         if not editable:
             return _derived(f"{flash.mode} / {flash.freq} / {flash.size}")
-        chips = firmware_chips(self._owner.context, firmware)
-        chip = chipinfo.get_chip(chips[0]) if len(chips) == 1 else None
+        chips = {m.chip for m in firmware_mcus(self._owner.context, firmware)}
+        chip = chipinfo.get_chip(chips.pop()) if len(chips) == 1 else None
         freqs = (
             chip.flash_freqs
             if chip
