@@ -1,7 +1,5 @@
-"""Right column: port and baud, identify, checks, flash / cancel with progress, and the log
-(design doc §6.1 "右侧栏")."""
-
-import html
+"""Right column: port and baud, identify, checks, flash / cancel with progress (design doc
+§6.1 "右侧栏"). The log is in the centre column (log_panel)."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent
@@ -12,10 +10,8 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QProgressBar,
     QScrollArea,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -25,12 +21,10 @@ from embr.app.identify import IdentifySnapshot
 from embr.core.serial import ConnectionType, PortInfo, baud_adjustable
 from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
-from embr.ui.theme import Palette, mono_font
+from embr.ui.theme import Palette
 from embr.ui.widgets import button, clear_layout, label, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
-LOG_HEIGHT = (100, 220)
-"""min, default."""
 CONNECTION_LABELS = {
     ConnectionType.UART_BRIDGE: "UART bridge",
     ConnectionType.USB_SERIAL_JTAG: "USB-Serial/JTAG",
@@ -83,8 +77,6 @@ class ConnectionPanel(QWidget):
     erase_all_toggled = Signal(bool)
     """The "erase the whole flash first" box above Flash (the firmware's erase_all)."""
     hint_dismissed = Signal()
-    expand_toggled = Signal(bool)
-    log_folder_clicked = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -182,47 +174,11 @@ class ConnectionPanel(QWidget):
         progress_row.addWidget(self.progress_text, 1)
         progress_row.addWidget(self.progress_pct)
         action_layout.addLayout(progress_row)
-        upper = QWidget()
-        upper_layout = QVBoxLayout(upper)
-        upper_layout.setContentsMargins(0, 0, 0, 0)
-        upper_layout.setSpacing(0)
-        upper_layout.addWidget(scroll, 1)
-        upper_layout.addWidget(action)
-        # ---- log ----
-        self.expand = button("Expand", "ibtn")
-        self.log_folder = button("Log folder", "ibtn")
-        self.log = QPlainTextEdit()
-        self.log.setObjectName("log")
-        self.log.setReadOnly(True)
-        self.log.setFont(mono_font(11))
-        self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        head = QFrame()
-        head.setObjectName("loghead")
-        head_layout = QHBoxLayout(head)
-        head_layout.setContentsMargins(12, 6, 12, 6)
-        caption = QLabel("Log")
-        caption.setStyleSheet("font-weight: 600;")
-        head_layout.addWidget(caption, 1)
-        head_layout.addWidget(self.expand)
-        head_layout.addWidget(self.log_folder)
-        log_box = QWidget()
-        log_layout = QVBoxLayout(log_box)
-        log_layout.setContentsMargins(0, 0, 0, 0)
-        log_layout.setSpacing(0)
-        log_layout.addWidget(head)
-        log_layout.addWidget(self.log, 1)
-        log_box.setMinimumHeight(LOG_HEIGHT[0])
-        self.split = QSplitter(Qt.Orientation.Vertical)
-        self.split.setHandleWidth(7)
-        self.split.setChildrenCollapsible(False)
-        self.split.addWidget(upper)
-        self.split.addWidget(log_box)
-        self.split.setStretchFactor(0, 1)
-        self.split.setSizes([500, LOG_HEIGHT[1]])
-        self._upper = upper
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.split)
+        layout.setSpacing(0)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(action)
 
         self.port.activated.connect(lambda: self.port_changed.emit())
         self.baud.activated.connect(lambda: self.baud_changed.emit())
@@ -233,8 +189,6 @@ class ConnectionPanel(QWidget):
         self.flash.clicked.connect(self.flash_clicked.emit)
         self.erase_all.toggled.connect(self._erase_all_toggled)
         self.hint.dismissed.connect(self.hint_dismissed.emit)
-        self.expand.clicked.connect(self._toggle_expand)
-        self.log_folder.clicked.connect(self.log_folder_clicked.emit)
         self.set_running(False)
 
     def apply_palette(self, p: Palette) -> None:
@@ -437,38 +391,6 @@ class ConnectionPanel(QWidget):
         self.progress.setValue(percent)
         self.progress_text.setText(text)
         self.progress_pct.setText(f"{percent}%" if percent or self._running else "")
-
-    # ---- log --------------------------------------------------------------------------
-
-    def clear_log(self) -> None:
-        self.log.clear()
-
-    def log_lines(self, lines: list[tuple[str, str]]) -> None:
-        """(level, text): level info, note, warning, error, ok, dim."""
-        p = self._palette
-        colors = (
-            {
-                "note": p.log_note,
-                "warning": p.log_warn,
-                "error": p.log_error,
-                "ok": p.log_ok,
-                "dim": p.log_dim,
-            }
-            if p
-            else {}
-        )
-        for level, text in lines:
-            color = colors.get(level)
-            body = html.escape(text)
-            style = "white-space: pre-wrap;" + (f" color: {color};" if color else "")
-            self.log.appendHtml(f'<span style="{style}">{body}</span>')
-        bar = self.log.verticalScrollBar()
-        bar.setValue(bar.maximum())
-
-    def _toggle_expand(self) -> None:
-        on = self.expand.text() == "Expand"
-        self.expand.setText("Restore" if on else "Expand")
-        self.expand_toggled.emit(on)
 
 
 def _row(caption: str, widget: QWidget) -> QHBoxLayout:

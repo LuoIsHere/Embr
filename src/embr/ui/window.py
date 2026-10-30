@@ -4,12 +4,13 @@ from datetime import date, datetime
 from pathlib import Path
 
 import esptool
-from PySide6.QtCore import QEvent, QPoint, QTimer, QUrl
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QKeySequence, QPalette, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QMenu,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -52,8 +53,9 @@ from embr.ui.adapters.jobs import JobSignals, MainThreadDispatcher
 from embr.ui.adapters.ports import PortMonitor
 from embr.ui.adapters.scheme import SchemeWatcher
 from embr.ui.connection import ConnectionPanel, port_text
-from embr.ui.frame import RIGHT, FrameWindow
+from embr.ui.frame import FrameWindow
 from embr.ui.icons import app_icon
+from embr.ui.log_panel import LOG_HEIGHT, LogPanel
 from embr.ui.project_view import ProjectView
 from embr.ui.sidebar import PLUS, Sidebar
 from embr.ui.theme import Palette, palette, style_sheet, ui_font
@@ -178,8 +180,17 @@ class EmbrWindow(FrameWindow):
         center_layout.setSpacing(0)
         center_layout.addWidget(self.header)
         center_layout.addWidget(self.pages, 1)
+        self.workspace = center
+        self.log_panel = LogPanel()
+        self.center_split = QSplitter(Qt.Orientation.Vertical)
+        self.center_split.setHandleWidth(7)
+        self.center_split.setChildrenCollapsible(False)
+        self.center_split.addWidget(center)
+        self.center_split.addWidget(self.log_panel)
+        self.center_split.setStretchFactor(0, 1)
+        self.center_split.setSizes([500, LOG_HEIGHT[1]])
         self.connection = ConnectionPanel()
-        self.set_panels(self.sidebar_panel, center, self.connection)
+        self.set_panels(self.sidebar_panel, self.center_split, self.connection)
         self.ports = PortMonitor(parent=self)
         self.native_event_hook = self.ports.handle_native_event
 
@@ -201,8 +212,8 @@ class EmbrWindow(FrameWindow):
         self.connection.flash_clicked.connect(self._flash_or_cancel)
         self.connection.erase_all_toggled.connect(self._set_erase_all)
         self.connection.hint_dismissed.connect(self._dismiss_hint)
-        self.connection.expand_toggled.connect(self._expand_log)
-        self.connection.log_folder_clicked.connect(self._open_log_folder)
+        self.log_panel.expand_toggled.connect(self._expand_log)
+        self.log_panel.log_folder_clicked.connect(self._open_log_folder)
         self.ports.changed.connect(self._ports_changed)
         self._signals.job_event.connect(self._job_event)
         self._signals.log_batch.connect(self._job_logs)
@@ -222,7 +233,7 @@ class EmbrWindow(FrameWindow):
 
         self._apply_palette()
         self._restore_layout()
-        self.connection.log_lines(
+        self.log_panel.log_lines(
             [("dim", "[idle] Pick a firmware and a port, then Connect & identify or Flash.")]
         )
         first = self._first_firmware()
@@ -257,7 +268,7 @@ class EmbrWindow(FrameWindow):
         self._refresh_right()
 
     def note(self, level: str, text: str) -> None:
-        self.connection.log_lines([(level, text)])
+        self.log_panel.log_lines([(level, text)])
 
     def select_firmware(self, firmware_id: str) -> None:
         self._leave_selection()
@@ -286,8 +297,8 @@ class EmbrWindow(FrameWindow):
             if text.startswith(HEADER_PREFIX):
                 break
             section.append(text)
-        self.connection.clear_log()
-        self.connection.log_lines(
+        self.log_panel.clear_log()
+        self.log_panel.log_lines(
             [("dim", f"[log] logs/{file_name}, line {line + 1}")] + [("info", t) for t in section]
         )
 
@@ -564,8 +575,8 @@ class EmbrWindow(FrameWindow):
         if port is None or self._ops.busy:
             return
         self._last_outcome = None
-        self.connection.clear_log()
-        self.connection.log_lines([("dim", f"# job identify · port {port.device} · {_now()}")])
+        self.log_panel.clear_log()
+        self.log_panel.log_lines([("dim", f"# job identify · port {port.device} · {_now()}")])
         try:
             self._ops.identify(port, self._signals)
         except (BusyError, OSError) as exc:
@@ -587,8 +598,8 @@ class EmbrWindow(FrameWindow):
             return
         firmware = self._library.firmware(firmware_id)
         self._last_outcome = None
-        self.connection.clear_log()
-        self.connection.log_lines(
+        self.log_panel.clear_log()
+        self.log_panel.log_lines(
             [("dim", f"# job flash · {firmware.name} · {port_text(port)} · {_now()}")]
         )
         shown = self._shown[2] if self._shown and self._shown[0] == firmware_id else None
@@ -632,7 +643,7 @@ class EmbrWindow(FrameWindow):
             if isinstance(event, LogEvent) and event.level != LogLevel.STAGE:
                 lines.append((LOG_LEVELS.get(event.level, "info"), event.text))
         if lines:
-            self.connection.log_lines(lines)
+            self.log_panel.log_lines(lines)
 
     def _job_event(self, event: Event) -> None:
         if isinstance(event, CheckEvent):
@@ -885,8 +896,8 @@ class EmbrWindow(FrameWindow):
             if request is None:
                 return
         self._last_outcome = None
-        self.connection.clear_log()
-        self.connection.log_lines([("dim", f"# job {kind.value} · {port_text(port)} · {_now()}")])
+        self.log_panel.clear_log()
+        self.log_panel.log_lines([("dim", f"# job {kind.value} · {port_text(port)} · {_now()}")])
         try:
             if request is None:
                 self._ops.erase(port, self._signals)
@@ -939,11 +950,8 @@ class EmbrWindow(FrameWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._context.paths.logs)))
 
     def _expand_log(self, on: bool) -> None:
-        self.center.setVisible(not on)
-        self.connection.setMaximumWidth(16777215 if on else RIGHT[2])
-        self.connection._upper.setVisible(True)  # pyright: ignore[reportPrivateUsage]
-        if not on:
-            self.reset_columns()
+        """The log takes the whole centre column (the workspace above it is hidden)."""
+        self.workspace.setVisible(not on)
 
     def _scheme_changed(self, dark: bool) -> None:
         self._palette = palette(dark)
@@ -957,6 +965,7 @@ class EmbrWindow(FrameWindow):
         self.topbar.apply_palette(self._palette)
         self.sidebar_panel.apply_palette(self._palette)
         self.connection.apply_palette(self._palette)
+        self.log_panel.apply_palette(self._palette)
 
     def _restore_layout(self) -> None:
         settings = self._context.settings
@@ -970,7 +979,7 @@ class EmbrWindow(FrameWindow):
             self.columns.setSizes(columns)
         log = ui_settings.load_ints(settings, "log")
         if log is not None and len(log) == 2:
-            self.connection.split.setSizes(log)
+            self.center_split.setSizes(log)
         if not ui_settings.load_flag(settings, "sidebar", True):
             self.toggle_sidebar()
 
@@ -981,9 +990,9 @@ class EmbrWindow(FrameWindow):
             return
         settings = self._context.settings
         ui_settings.save_bytes(settings, "window", self.saveGeometry())
-        if self.center.isVisible():
-            ui_settings.save_ints(settings, "columns", self.columns.sizes())
-        ui_settings.save_ints(settings, "log", self.connection.split.sizes())
+        ui_settings.save_ints(settings, "columns", self.columns.sizes())
+        if self.workspace.isVisible():
+            ui_settings.save_ints(settings, "log", self.center_split.sizes())
         ui_settings.save_flag(settings, "sidebar", self.sidebar_visible or self._auto_hidden)
         self.ports.blockSignals(True)
         event.accept()
