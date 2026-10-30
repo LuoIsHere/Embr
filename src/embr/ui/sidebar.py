@@ -115,7 +115,7 @@ class FirmwareTree(QTreeWidget):
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._press: QPoint | None = None
-        self._drop_row: Row | None = None
+        self._drop_row: QWidget | None = None
 
     def node(self, item: QTreeWidgetItem | None) -> Node | None:
         if item is None:
@@ -201,7 +201,7 @@ class FirmwareTree(QTreeWidget):
         row = self.itemWidget(item, 0) if item is not None else None
         if self._drop_row is not None and self._drop_row is not row:
             set_prop(self._drop_row, "dropping", "0")
-        if isinstance(row, Row):
+        if row is not None:  # a Row, or the STANDALONE FIRMWARE header
             set_prop(row, "dropping", "1")
             self._drop_row = row
         else:
@@ -325,7 +325,8 @@ class Sidebar(QWidget):
 
     def _header(self, text: str, node: Node | None = None) -> None:
         widget = QWidget()
-        widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)  # drop highlight
+        widget.setStyleSheet("background: transparent;")
         caption = label(text)
         caption.setProperty("group", "1")
         layout = QHBoxLayout(widget)

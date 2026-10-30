@@ -1182,8 +1182,8 @@ def sort_drop(paths: list[Path]) -> tuple[list[Path], Path | None, list[str]]:
             problems.append(f"<b>{name}</b>: a shortcut; drop the file it points to")
         elif path.suffix.lower() != ".bin":
             problems.append(
-                f"<b>{name}</b>: not a .bin file (other files can be added as attachments on "
-                "the Entries tab)"
+                f"<b>{name}</b>: not a .bin file. To flash another kind of file, open a "
+                "firmware and use Add entry, then Attachment, on its Entries tab."
             )
         else:
             try:
