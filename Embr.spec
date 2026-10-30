@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 datas = [
     ("src/embr/resources/esptool.cfg", "embr/resources"),
     ("src/embr/resources/logo/*.svg", "embr/resources/logo"),
+    ("src/embr/resources/fonts/*", "embr/resources/fonts"),  # HarmonyOS Sans + license
 ]
 datas += collect_data_files("esptool")  # stub flasher images
 datas += collect_data_files("esp_pylib")

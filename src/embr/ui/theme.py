@@ -3,10 +3,16 @@ UI mock). The light accent is the logo's Clay #C8582F; dark mode uses a lighter 
 same hue for contrast on dark panels."""
 
 from dataclasses import dataclass
+from importlib.resources import files
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontDatabase
 
-UI_FAMILIES = ["Segoe UI", "Segoe UI Variable"]
+UI_FAMILIES = ["HarmonyOS Sans SC", "Segoe UI", "Segoe UI Variable"]
+"""HarmonyOS Sans SC is bundled (load_fonts()); the system fonts are the fallback."""
+FONT_FILES = ("HarmonyOS_Sans_SC_Regular.ttf", "HarmonyOS_Sans_SC_Bold.ttf")
+"""In embr/resources/fonts, unmodified, with LICENSE_Fonts (HarmonyOS Sans Fonts
+License Agreement: no modification, no stand-alone redistribution, a notice in the
+software, which About shows)."""
 MONO_FAMILIES = ["Cascadia Mono", "Consolas"]
 UI_PX = 13
 MONO_PX = 12
@@ -105,10 +111,32 @@ def palette(dark: bool) -> Palette:
     return DARK if dark else LIGHT
 
 
+def load_fonts() -> list[str]:
+    """Register the bundled fonts once (needs a QGuiApplication); returns the families that
+    were loaded. A file that cannot be loaded is skipped and the system fonts are used."""
+    global _loaded
+    if _loaded is None:
+        found: list[str] = []
+        folder = files("embr.resources").joinpath("fonts")
+        for name in FONT_FILES:
+            data = folder.joinpath(name).read_bytes()
+            font_id = QFontDatabase.addApplicationFontFromData(data)
+            if font_id >= 0:
+                found += QFontDatabase.applicationFontFamilies(font_id)
+        _loaded = sorted(set(found))
+    return _loaded
+
+
+_loaded: list[str] | None = None
+
+
 def ui_font() -> QFont:
     font = QFont()
     font.setFamilies(UI_FAMILIES)
     font.setPixelSize(UI_PX)
+    # full hinting snaps stems to the pixel grid: crisper CJK text at small sizes (author's
+    # pick of four renderings, 2026-10-31); widgets with their own font-size inherit it
+    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
     return font
 
 
@@ -117,6 +145,7 @@ def mono_font(px: int = MONO_PX) -> QFont:
     font.setFamilies(MONO_FAMILIES)
     font.setStyleHint(QFont.StyleHint.Monospace)
     font.setPixelSize(px)
+    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
     return font
 
 

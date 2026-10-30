@@ -229,6 +229,10 @@ TEXT: dict[str, str] = {
     ),
     "Repository": "代码仓库",
     "Releases": "发布页面",
+    "Interface font: HarmonyOS Sans (Copyright 2021 Huawei Device Co., Ltd.), used under the HarmonyOS Sans Fonts License Agreement.": (
+        "界面字体：HarmonyOS Sans（Copyright 2021 Huawei Device Co., Ltd.），"
+        "依据 HarmonyOS Sans Fonts License Agreement 使用。"
+    ),
     "Third-party notices: THIRD_PARTY_NOTICES in the program folder.": (
         "第三方声明：见程序文件夹中的 THIRD_PARTY_NOTICES。"
     ),

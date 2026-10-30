@@ -88,7 +88,7 @@ from embr.ui.icons import app_icon
 from embr.ui.log_panel import LOG_HEIGHT, LogPanel
 from embr.ui.project_view import ProjectView
 from embr.ui.sidebar import PLUS, Node, Sidebar
-from embr.ui.theme import Palette, palette, style_sheet, ui_font
+from embr.ui.theme import Palette, load_fonts, palette, style_sheet, ui_font
 from embr.ui.widgets import label
 from embr.ui.workspace import FirmwareView, Header
 
@@ -132,6 +132,7 @@ HINT_JTAG = N_(
 
 def apply_theme(app: QApplication, p: Palette) -> None:
     app.setStyle("Fusion")
+    load_fonts()
     app.setFont(ui_font())
     qp = QPalette()
     for role, color in (

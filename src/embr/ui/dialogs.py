@@ -330,6 +330,12 @@ def about(parent: QWidget, esptool_version: str) -> None:
         link.setOpenExternalLinks(False)
         link.linkActivated.connect(_open_url)
         dialog.body.addWidget(link)
+    dialog.text(
+        tr(
+            "Interface font: HarmonyOS Sans (Copyright 2021 Huawei Device Co., Ltd.), used "
+            "under the HarmonyOS Sans Fonts License Agreement."
+        )
+    )
     dialog.text(tr("Third-party notices: THIRD_PARTY_NOTICES in the program folder."))
     dialog.exec()
 

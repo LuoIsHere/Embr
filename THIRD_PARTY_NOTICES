@@ -28,3 +28,7 @@ tomli-w 1.2.0              MIT
 Bundled assets
 --------------
 Lucide icons (menu, panel-left, search)   ISC   https://lucide.dev
+HarmonyOS Sans SC (Regular, Bold)        HarmonyOS Sans Fonts License Agreement
+    Copyright 2021 Huawei Device Co., Ltd. Bundled unmodified from
+    https://github.com/openharmony/resources; the agreement is in
+    embr/resources/fonts/LICENSE_Fonts next to the font files.
