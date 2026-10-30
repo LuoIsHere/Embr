@@ -191,12 +191,9 @@ QPushButton[kind="primary"]:disabled {{ background: {p.accent_soft}; border-colo
   color: {p.fg_3}; }}
 QLabel#flashtext {{ font-weight: 600; font-size: 14px; color: {p.accent_fg};
   background: transparent; }}
-QLabel#keycap {{ font-size: 11px; font-weight: 600; color: {p.accent_fg}; background: transparent;
-  border: 1px solid {p.accent_fg}; border-radius: 4px; padding: 0px 5px; }}
 QLabel#flashtext:disabled {{ color: {p.fg_3}; }}
-QLabel#keycap:disabled {{ color: {p.fg_3}; border-color: {p.fg_3}; }}
+QLabel#keycap {{ background: transparent; }}
 QPushButton[kind="danger"] QLabel#flashtext {{ color: #ffffff; }}
-QPushButton[kind="danger"] QLabel#keycap {{ color: #ffffff; border-color: #ffffff; }}
 QCheckBox[warn="1"] {{ color: {p.warn}; }}
 QPushButton[kind="danger"] {{ background: {p.bad}; border-color: {p.bad}; color: #ffffff;
   font-weight: 600; font-size: 14px; min-height: 32px; }}

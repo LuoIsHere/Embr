@@ -76,6 +76,49 @@ def logo_pixmap(size: int) -> QPixmap:
     return pixmap
 
 
+KEY_HEIGHT = 14
+_KEY_GAP = 3
+_KEY_TEXT = (
+    '<text x="{x}" y="9.6" text-anchor="middle" font-family="Segoe UI" font-size="7.5" '
+    'font-weight="600" fill="{color}" stroke="none">{label}</text>'
+)
+
+
+def keys_pixmap(keys: tuple[str, ...], color: str) -> QPixmap:
+    """Keyboard keys side by side in `color`: "Ctrl" and "Esc" as small square keys with
+    their name, "Enter" as the reverse-L key shape with a return arrow."""
+    parts: list[str] = []
+    x = 0.0
+    for key in keys:
+        if key == "Enter":
+            width = 20.0
+            parts.append(
+                f'<path d="M{x + 0.5} 0.5H{x + width - 0.5}V13.5H{x + 6.5}V7H{x + 0.5}Z"/>'
+                f'<path d="M{x + 15} 3.5V10H{x + 9.5}M{x + 11.5} 8L{x + 9.5} 10L{x + 11.5} 12"/>'
+            )
+        else:
+            width = 6.0 + 4.6 * len(key)
+            parts.append(
+                f'<rect x="{x + 0.5}" y="0.5" width="{width - 1}" height="13" rx="2.5"/>'
+                + _KEY_TEXT.format(x=x + width / 2, color=color, label=key)
+            )
+        x += width + _KEY_GAP
+    width = round(x - _KEY_GAP)
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {KEY_HEIGHT}" '
+        f'fill="none" stroke="{color}" stroke-width="1" stroke-linejoin="round" '
+        f'stroke-linecap="round">{"".join(parts)}</svg>'
+    )
+    renderer = QSvgRenderer(QByteArray(svg.encode()))
+    scale = 3
+    pixmap = QPixmap(QSize(width * scale, KEY_HEIGHT * scale))
+    pixmap.setDevicePixelRatio(scale)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    with _painter(pixmap) as painter:
+        renderer.render(painter, QRectF(0, 0, width, KEY_HEIGHT))
+    return pixmap
+
+
 def _pixmap(name: str, color: str, size: int) -> QPixmap:
     template, body = SHAPES[name]
     renderer = QSvgRenderer(QByteArray(template.format(color=color, body=body).encode()))

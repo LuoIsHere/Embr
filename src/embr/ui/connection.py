@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from embr.app.checklist import CheckItem, CheckState
 from embr.app.identify import IdentifySnapshot
 from embr.core.serial import ConnectionType, PortInfo, baud_adjustable
+from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
 from embr.ui.theme import Palette, mono_font
 from embr.ui.widgets import button, clear_layout, label, tag
@@ -92,6 +93,7 @@ class ConnectionPanel(QWidget):
         self._palette: Palette | None = None
         self._ports: tuple[PortInfo, ...] = ()
         self._running = False
+        self._keys: tuple[str, ...] = ("Ctrl", "Enter")
 
         # ---- port, baud, identify ----
         self.port = QComboBox()
@@ -237,6 +239,7 @@ class ConnectionPanel(QWidget):
 
     def apply_palette(self, p: Palette) -> None:
         self._palette = p
+        self._paint_keys()
 
     # ---- ports and baud ---------------------------------------------------------------
 
@@ -398,16 +401,17 @@ class ConnectionPanel(QWidget):
         self._running = running
         if running:
             self._flash_text.setText("Cancel")
-            self._flash_key.setText("Esc")
+            self._keys = ("Esc",)
             self.flash.setProperty("kind", "danger")
             self.flash.setEnabled(True)
         else:
             self._flash_text.setText("Flash")
-            self._flash_key.setText("Ctrl+Enter")
+            self._keys = ("Ctrl", "Enter")
             self.flash.setProperty("kind", "primary")
-        self.flash.setAccessibleName(f"{self._flash_text.text()} ({self._flash_key.text()})")
-        for widget in (self.flash, self._flash_text, self._flash_key):
+        self.flash.setAccessibleName(f"{self._flash_text.text()} ({'+'.join(self._keys)})")
+        for widget in (self.flash, self._flash_text):
             _repolish(widget)
+        self._paint_keys()
         self.erase_all.setEnabled(not running and self.erase_all.isEnabled())
         self.identify.setEnabled(not running)
         if running:
@@ -416,8 +420,18 @@ class ConnectionPanel(QWidget):
         self.baud.setEnabled(not running and self.selected_baud() is not None)
 
     def set_flash_enabled(self, enabled: bool) -> None:
-        if not self._running:
+        if not self._running and self.flash.isEnabled() != enabled:
             self.flash.setEnabled(enabled)
+            self._paint_keys()
+
+    def _paint_keys(self) -> None:
+        """The shortcut on the Flash button as key icons, in the button's text colour."""
+        p = self._palette
+        if p is None:
+            return
+        enabled = p.accent_fg if self.flash.isEnabled() else p.fg_3
+        color = "#ffffff" if self._running else enabled
+        self._flash_key.setPixmap(keys_pixmap(self._keys, color))
 
     def show_progress(self, percent: int, text: str) -> None:
         self.progress.setValue(percent)
