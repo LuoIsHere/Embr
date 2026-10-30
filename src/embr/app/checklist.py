@@ -83,15 +83,11 @@ def preflight(
        secure boot is on)
     Entries are taken per chip (design doc §12 item 13): once identified, items 1, 2 and 4
     look only at the entries for the identified chip (app.chips.for_chip()), so "No entries
-    enabled" also covers entries without an MCU; before that, and when the whole firmware is
-    for other chips (then the Chip item is the one refusal), item 1 checks each chip's
-    entries separately and item 2 all enabled entries."""
+    enabled" also covers a board none of the entries are for; before that, item 1 checks
+    each chip's entries separately and item 2 all enabled entries."""
     items = [_build(status)] if status is not None and firmware.source.tracking else []
     chips = firmware_chips(context, firmware)
-    # the identified chip, unless the whole firmware is for other chips (one Chip refusal)
     chip = identified.info.chip if identified is not None else None
-    if chip is not None and chips and chip not in chips:
-        chip = None
     if chip is not None:
         views = [for_chip(context, firmware, chip)]
     elif len(chips) > 1:
