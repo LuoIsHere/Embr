@@ -92,7 +92,7 @@ def _mixed_mcu(library: Library, firmware_id: str, tmp_path: Path) -> MergeOptio
 REFUSED: dict[str, tuple[Callable[[Library, str, Path], MergeOptions], str]] = {
     "no_chip": (_no_chip, "data.bin has no MCU"),
     "mixed_mcu": (_mixed_mcu, "Checked entries are for esp32p4 and esp32s3"),
-    "pad_without_flash_size": (_pad_without_flash_size, ""),
+    "pad_without_flash_size": (_pad_without_flash_size, "fw: flash size unknown"),
 }
 
 
