@@ -39,6 +39,8 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "TID"]
 "src/embr/core/flasher/worker/**" = ["TID251"]
 # tests compare against esptool directly and reopen ports on real boards
 "tests/**" = ["TID251"]
+# Chinese punctuation is intended; translations follow their English keys line by line
+"src/embr/i18n/zh_cn.py" = ["RUF001", "E501"]
 
 [tool.pyright]
 include = ["src", "tests", "scripts"]
