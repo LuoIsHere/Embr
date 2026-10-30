@@ -1,21 +1,25 @@
 """Shared helpers for the app tests. Expected values come from the fixture files
 (flasher_args.json, SOURCE.toml), never from Embr's implementation."""
 
+import configparser
 import datetime
 import json
 import os
+import re
 import shutil
 import time
 import tomllib
-from collections.abc import Callable
-from pathlib import Path
+from collections.abc import Callable, Sequence
+from pathlib import Path, PureWindowsPath
 from typing import Any, cast
 
 from embr.app.context import AppContext
 from embr.app.identify import IdentifySnapshot
 from embr.app.library import FirmwareRow, Library, Tree
+from embr.app.pio import PioConfigs
 from embr.core.firmware.entries import entry_from_file
 from embr.core.firmware.image_header import NO_MAX_REVISION
+from embr.core.firmware.import_pio import PioUnavailableError
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Firmware
 from embr.core.flasher.checks import SecurityState
@@ -24,6 +28,7 @@ from embr.core.serial import ConnectionType, PortInfo
 
 REPO = Path(__file__).resolve().parents[2]
 IDF = REPO / "tests" / "fixtures" / "idf"
+PIO = REPO / "tests" / "fixtures" / "pio"
 
 BRIDGE = PortInfo(
     device="COM3",
@@ -239,3 +244,141 @@ def flip_last_byte(path: Path) -> None:
     data = bytearray(path.read_bytes())
     data[-1] ^= 0xFF
     write_newer(path, bytes(data))
+
+
+# ---- PlatformIO projects (same helpers as tests/core/embr_testkit.py) --------------------
+
+PIO_BOARDS = {"esp32dev": "esp32", "esp32-s3-devkitc-1": "esp32s3"}
+"""Board definitions written into the fake PIO core (build.mcu)."""
+PIO_LIST_OPTIONS = ("framework", "platform_packages", "build_flags", "lib_deps")
+"""Options `pio project config --json-output` prints as JSON lists."""
+
+
+def pio_project(sample: str, root: Path, core: Path) -> None:
+    """A copy of a PIO sample: root/platformio.ini from SOURCE.toml (an hour old), the
+    sample's .pio/build/ 10 s younger with <PROJECT_DIR>, <PIO_CORE> and <HOME> in
+    idedata.json replaced (<HOME> by root/../home), and `core` holding the sample's
+    pio_core/ plus board definitions for PIO_BOARDS in platforms/espressif32/boards/."""
+    source = PIO / sample
+    t0 = time.time_ns() - 3600 * 10**9
+    ini = root / "platformio.ini"
+    ini.parent.mkdir(parents=True, exist_ok=True)
+    text = tomllib.loads((source / "SOURCE.toml").read_text(encoding="utf-8"))["platformio_ini"]
+    ini.write_text(cast(str, text), encoding="utf-8")
+    os.utime(ini, ns=(t0, t0))
+    places = {"<PROJECT_DIR>": root, "<PIO_CORE>": core, "<HOME>": root.parent / "home"}
+    for file in (source / ".pio").rglob("*"):
+        if not file.is_file():
+            continue
+        target = root / ".pio" / file.relative_to(source / ".pio")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = file.read_bytes()
+        if file.name == "idedata.json":
+            content = data.decode("utf-8")
+            for key, value in places.items():
+                content = content.replace(key, json.dumps(str(value))[1:-1])  # JSON-escaped
+            data = content.encode("utf-8")
+        target.write_bytes(data)
+        os.utime(target, ns=(t0 + 10**10, t0 + 10**10))
+    if (source / "pio_core").is_dir():
+        shutil.copytree(source / "pio_core", core, dirs_exist_ok=True)
+    boards = core / "platforms" / "espressif32" / "boards"
+    boards.mkdir(parents=True, exist_ok=True)
+    for board, mcu in PIO_BOARDS.items():
+        (boards / f"{board}.json").write_text(json.dumps({"build": {"mcu": mcu}}))
+
+
+def pio_build(root: Path, env: str) -> Path:
+    return root / ".pio" / "build" / env
+
+
+def idedata_images(build: Path) -> list[tuple[int, str]]:
+    """(address, file name) of the images idedata.json lists plus firmware.bin, by address."""
+
+    def offset(value: str | int) -> int:
+        return value if isinstance(value, int) else int(value, 16)
+
+    extra = json.loads((build / "idedata.json").read_text(encoding="utf-8"))["extra"]
+    images = [(offset(i["offset"]), PureWindowsPath(i["path"]).name) for i in extra["flash_images"]]
+    return sorted([*images, (offset(extra["application_offset"]), "firmware.bin")])
+
+
+def write_ini(root: Path, text: str) -> None:
+    """Rewrite platformio.ini as a user edit would: newer than every build file (so
+    idedata.json counts as outdated), still half an hour older than the tracker clock."""
+    ini = root / "platformio.ini"
+    mtime = max(time.time_ns() - 1800 * 10**9, ini.stat().st_mtime_ns + 10**9)
+    ini.write_text(text, encoding="utf-8")
+    os.utime(ini, ns=(mtime, mtime))
+
+
+def make_package(folder: Path, version: str, boot_app0: bytes = b"\xff" * 0x2000) -> Path:
+    """An Arduino framework package: package.json naming `version` and
+    tools/partitions/boot_app0.bin. Returns `folder`."""
+    (folder / "tools" / "partitions").mkdir(parents=True, exist_ok=True)
+    (folder / "tools" / "partitions" / "boot_app0.bin").write_bytes(boot_app0)
+    package = {"name": "framework-arduinoespressif32", "version": version}
+    (folder / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    return folder
+
+
+def pio_config_json(root: Path) -> str:
+    """What `pio project config --json-output` prints for root/platformio.ini: a list of
+    [section, [[option, value], ...]] with [env] merged into every [env:*] and list options
+    as JSON lists."""
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(root / "platformio.ini", encoding="utf-8")
+    base = dict(parser["env"]) if parser.has_section("env") else {}
+
+    def value(option: str, text: str) -> str | list[str]:
+        if option not in PIO_LIST_OPTIONS:
+            return text
+        return [part.strip() for part in re.split(r"[,\n]", text) if part.strip()]
+
+    sections: list[list[Any]] = []
+    for name in parser.sections():
+        if name == "env" or name.startswith("env:"):
+            options = base if name == "env" else {**base, **dict(parser[name])}
+            sections.append([name, [[k, value(k, v)] for k, v in options.items()]])
+    return json.dumps(sections)
+
+
+class FakePio:
+    """Runner for PioConfigs: answers from the platformio.ini in its working directory
+    (pio_config_json()) and records every argv. Raises PioUnavailableError while `fail`."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.fail = False
+
+    def __call__(self, argv: Sequence[str], cwd: Path, timeout: float) -> str:
+        self.calls.append(list(argv))
+        if self.fail:
+            raise PioUnavailableError("pio exited with status 1")
+        return pio_config_json(cwd)
+
+
+def pio_configs(
+    core: Path,
+    runner: FakePio,
+    *,
+    start: Callable[[Callable[[], None]], None] | None = None,
+    on_ready: Callable[[Path], None] | None = None,
+) -> PioConfigs:
+    """PioConfigs with PLATFORMIO_CORE_DIR = `core`, pio found on PATH (a dummy file next to
+    `core`), `runner` and a synchronous `start` unless one is given."""
+    pio = core.parent / "bin" / "pio.exe"
+    pio.parent.mkdir(parents=True, exist_ok=True)
+    pio.write_bytes(b"")
+    environ = {"PLATFORMIO_CORE_DIR": str(core), "USERPROFILE": str(core.parent / "home")}
+
+    def run_now(job: Callable[[], None]) -> None:
+        job()
+
+    return PioConfigs(
+        environ=environ,
+        run=runner,
+        which=lambda _: str(pio),
+        start=start or run_now,
+        on_ready=on_ready,
+    )

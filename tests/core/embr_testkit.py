@@ -4,6 +4,7 @@ files directly, never from Embr's implementation."""
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -204,3 +205,75 @@ def flip_last_byte(path: Path) -> None:
     data = bytearray(path.read_bytes())
     data[-1] ^= 0xFF
     write_newer(path, bytes(data))
+
+
+# ---- PlatformIO projects assembled in tmp_path -------------------------------------------
+
+PIO_BOARDS = {"esp32dev": "esp32", "esp32-s3-devkitc-1": "esp32s3"}
+"""Board definitions written into the fake PIO core (build.mcu)."""
+
+
+def pio_source(sample: str) -> dict[str, Any]:
+    return tomllib.loads((PIO / sample / "SOURCE.toml").read_text(encoding="utf-8"))
+
+
+def pio_project(sample: str, root: Path, core: Path) -> None:
+    """A copy of a PIO sample: root/platformio.ini from SOURCE.toml (an hour old), the
+    sample's .pio/build/ 10 s younger with <PROJECT_DIR>, <PIO_CORE> and <HOME> in
+    idedata.json replaced (<HOME> by root/../home), and `core` holding the sample's
+    pio_core/ plus board definitions for PIO_BOARDS in platforms/espressif32/boards/."""
+    source = PIO / sample
+    t0 = time.time_ns() - 3600 * 10**9
+    ini = root / "platformio.ini"
+    ini.parent.mkdir(parents=True, exist_ok=True)
+    ini.write_text(cast(str, pio_source(sample)["platformio_ini"]), encoding="utf-8")
+    os.utime(ini, ns=(t0, t0))
+    places = {"<PROJECT_DIR>": root, "<PIO_CORE>": core, "<HOME>": root.parent / "home"}
+    for file in (source / ".pio").rglob("*"):
+        if not file.is_file():
+            continue
+        target = root / ".pio" / file.relative_to(source / ".pio")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = file.read_bytes()
+        if file.name == "idedata.json":
+            text = data.decode("utf-8")
+            for key, value in places.items():
+                text = text.replace(key, json.dumps(str(value))[1:-1])  # JSON-escaped
+            data = text.encode("utf-8")
+        target.write_bytes(data)
+        os.utime(target, ns=(t0 + 10**10, t0 + 10**10))
+    if (source / "pio_core").is_dir():
+        shutil.copytree(source / "pio_core", core, dirs_exist_ok=True)
+    boards = core / "platforms" / "espressif32" / "boards"
+    boards.mkdir(parents=True, exist_ok=True)
+    for board, mcu in PIO_BOARDS.items():
+        (boards / f"{board}.json").write_text(json.dumps({"build": {"mcu": mcu}}))
+
+
+def pio_build(root: Path, env: str) -> Path:
+    return root / ".pio" / "build" / env
+
+
+def age(path: Path, than: Path) -> None:
+    """Give `path` a modification time 10 s before that of `than`."""
+    mtime = than.stat().st_mtime_ns - 10**10
+    os.utime(path, ns=(mtime, mtime))
+
+
+def drop_partition(path: Path, name: str) -> None:
+    """Rewrite a partition table without partition `name` (MD5 entry recomputed)."""
+    data = path.read_bytes()
+    entries = [data[i : i + 32] for i in range(0, len(data), 32) if data[i : i + 2] == b"\xaa\x50"]
+    kept = b"".join(e for e in entries if e[12:28].rstrip(b"\0").decode() != name)
+    md5 = b"\xeb\xeb" + b"\xff" * 14 + hashlib.md5(kept).digest()
+    write_newer(path, (kept + md5).ljust(len(data), b"\xff"))
+
+
+def make_package(folder: Path, version: str, boot_app0: bytes = b"\xff" * 0x2000) -> Path:
+    """An Arduino framework package: package.json naming `version` and
+    tools/partitions/boot_app0.bin. Returns `folder`."""
+    (folder / "tools" / "partitions").mkdir(parents=True, exist_ok=True)
+    (folder / "tools" / "partitions" / "boot_app0.bin").write_bytes(boot_app0)
+    package = {"name": "framework-arduinoespressif32", "version": version}
+    (folder / "package.json").write_text(json.dumps(package), encoding="utf-8")
+    return folder
