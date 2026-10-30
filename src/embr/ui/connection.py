@@ -4,7 +4,9 @@
 import html
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -49,6 +51,24 @@ def port_text(port: PortInfo) -> str:
     return text
 
 
+class HintLabel(QLabel):
+    """The hint above Flash; a click dismisses it."""
+
+    dismissed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWordWrap(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Click to dismiss")
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.hide()
+            self.dismissed.emit()
+        super().mousePressEvent(event)
+
+
 class ConnectionPanel(QWidget):
     port_changed = Signal()
     baud_changed = Signal()
@@ -59,6 +79,9 @@ class ConnectionPanel(QWidget):
     """Open logs/boards/<mac>.log of the identified board."""
     flash_clicked = Signal()
     """Flash, or Cancel while a job runs."""
+    erase_all_toggled = Signal(bool)
+    """The "erase the whole flash first" box above Flash (the firmware's erase_all)."""
+    hint_dismissed = Signal()
     expand_toggled = Signal(bool)
     log_folder_clicked = Signal()
 
@@ -100,16 +123,12 @@ class ConnectionPanel(QWidget):
         # ---- checks ----
         self.checks = QVBoxLayout()
         self.checks.setSpacing(5)
-        self.hint = QLabel()
-        self.hint.setWordWrap(True)
-        self.hint.hide()
         checks = QVBoxLayout()
         checks.setSpacing(6)
         title = QLabel("Checks")
         title.setStyleSheet("font-weight: 600;")
         checks.addWidget(title)
         checks.addLayout(self.checks)
-        checks.addWidget(self.hint)
         top = QWidget()
         top_layout = QVBoxLayout(top)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -121,8 +140,27 @@ class ConnectionPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(top)
-        # ---- action ----
+        # ---- action: hint, erase option, flash ----
+        self.hint = HintLabel()
+        self.hint.hide()
+        self.erase_all = QCheckBox("Erase the whole flash first")
+        self.erase_all.setToolTip(
+            "Saved with the firmware. Clears NVS (Wi-Fi credentials and other stored data)"
+        )
         self.flash = button("", "primary")
+        self._flash_text = QLabel()
+        self._flash_text.setObjectName("flashtext")
+        self._flash_key = QLabel()
+        self._flash_key.setObjectName("keycap")
+        face = QHBoxLayout(self.flash)
+        face.setContentsMargins(10, 0, 10, 0)
+        face.setSpacing(10)
+        face.addStretch(1)
+        face.addWidget(self._flash_text, 0, Qt.AlignmentFlag.AlignVCenter)
+        face.addWidget(self._flash_key, 0, Qt.AlignmentFlag.AlignVCenter)
+        face.addStretch(1)
+        for part in (self._flash_text, self._flash_key):
+            part.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 100)
@@ -133,6 +171,8 @@ class ConnectionPanel(QWidget):
         action_layout = QVBoxLayout(action)
         action_layout.setContentsMargins(12, 10, 12, 10)
         action_layout.setSpacing(6)
+        action_layout.addWidget(self.hint)
+        action_layout.addWidget(self.erase_all)
         action_layout.addWidget(self.flash)
         action_layout.addSpacing(4)
         action_layout.addWidget(self.progress)
@@ -189,6 +229,8 @@ class ConnectionPanel(QWidget):
         self.read.clicked.connect(self.read_clicked.emit)
         self.board_log.clicked.connect(self.board_log_clicked.emit)
         self.flash.clicked.connect(self.flash_clicked.emit)
+        self.erase_all.toggled.connect(self._erase_all_toggled)
+        self.hint.dismissed.connect(self.hint_dismissed.emit)
         self.expand.clicked.connect(self._toggle_expand)
         self.log_folder.clicked.connect(self.log_folder_clicked.emit)
         self.set_running(False)
@@ -327,25 +369,46 @@ class ConnectionPanel(QWidget):
             self.checks.addLayout(_check(item, CHECK_TEXT[item.state]))
 
     def set_hint(self, text: str, kind: str = "warn") -> None:
+        """Shown above Flash until the user clicks it away (hint_dismissed)."""
         self.hint.setText(text)
         self.hint.setProperty("hint", kind)
-        self.hint.style().unpolish(self.hint)
-        self.hint.style().polish(self.hint)
+        _repolish(self.hint)
         self.hint.setVisible(bool(text))
+
+    def set_erase_all(self, checked: bool, enabled: bool, visible: bool) -> None:
+        """Show the selected firmware's erase_all; changes come back as erase_all_toggled."""
+        self.erase_all.blockSignals(True)
+        self.erase_all.setChecked(checked)
+        self.erase_all.blockSignals(False)
+        self.erase_all.setEnabled(enabled and not self._running)
+        self.erase_all.setVisible(visible)
+        self._mark_erase_all()
+
+    def _erase_all_toggled(self, checked: bool) -> None:
+        self._mark_erase_all()
+        self.erase_all_toggled.emit(checked)
+
+    def _mark_erase_all(self) -> None:
+        self.erase_all.setProperty("warn", "1" if self.erase_all.isChecked() else "0")
+        _repolish(self.erase_all)
 
     # ---- flash and progress -----------------------------------------------------------
 
     def set_running(self, running: bool) -> None:
         self._running = running
         if running:
-            self.flash.setText("Cancel   Esc")
+            self._flash_text.setText("Cancel")
+            self._flash_key.setText("Esc")
             self.flash.setProperty("kind", "danger")
             self.flash.setEnabled(True)
         else:
-            self.flash.setText("Flash   Ctrl+Enter")
+            self._flash_text.setText("Flash")
+            self._flash_key.setText("Ctrl+Enter")
             self.flash.setProperty("kind", "primary")
-        self.flash.style().unpolish(self.flash)
-        self.flash.style().polish(self.flash)
+        self.flash.setAccessibleName(f"{self._flash_text.text()} ({self._flash_key.text()})")
+        for widget in (self.flash, self._flash_text, self._flash_key):
+            _repolish(widget)
+        self.erase_all.setEnabled(not running and self.erase_all.isEnabled())
         self.identify.setEnabled(not running)
         if running:
             self.set_board_actions(False)
@@ -439,3 +502,9 @@ def _left(widget: QWidget) -> QWidget:
     row.addWidget(widget)
     row.addStretch(1)
     return box
+
+
+def _repolish(widget: QWidget) -> None:
+    """Apply style sheet rules that depend on a property just changed."""
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)

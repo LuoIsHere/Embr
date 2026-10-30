@@ -17,16 +17,17 @@ from PySide6.QtWidgets import (
 
 from embr import __version__
 from embr.app.archiving import Archiver
-from embr.app.checklist import can_flash, preflight
+from embr.app.checklist import flash_ready, preflight
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, preview_command
-from embr.app.identify import IdentifyMemory
+from embr.app.identify import IdentifyMemory, IdentifySnapshot
 from embr.app.library import Library
 from embr.app.merging import Merger
 from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, TrackStatus
 from embr.core.firmware.import_idf import IdfBuildError
+from embr.core.firmware.model import editable_params
 from embr.core.firmware.store import default_name_archived
 from embr.core.firmware.tracking import ResolveState
 from embr.core.flasher.checks import CheckLevel
@@ -44,7 +45,7 @@ from embr.core.flasher.protocol import (
 )
 from embr.core.history import RecordResult
 from embr.core.logs import HEADER_PREFIX
-from embr.core.serial import ConnectionType, PortChange, default_baud
+from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
 from embr.ui.adapters.jobs import JobSignals, MainThreadDispatcher
@@ -80,14 +81,17 @@ HINT_DOWNLOAD_MODE = (
     "Identified. The chip stays in download mode so the next flash can start right away; "
     "reset the board to return to its application."
 )
+HINT_IDENTIFY = (
+    "Connect & identify this board first; Flash becomes available when no check refuses."
+)
 HINT_OTG = (
-    "USB-OTG: put the board into download mode as described by its vendor before flashing. "
-    "Cancel is available while waiting."
+    "Connect & identify this board first. USB-OTG: put the board into download mode as "
+    "described by its vendor before connecting; Cancel is available while waiting."
 )
 HINT_JTAG = (
-    "USB-Serial/JTAG: automatic reset is tried first. If the running firmware does not keep "
-    "this peripheral, the connect step times out; then enter download mode as described by "
-    "the board's vendor."
+    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried; if the "
+    "running firmware does not keep this peripheral, the connect step times out, then enter "
+    "download mode as described by the board's vendor."
 )
 
 
@@ -143,6 +147,8 @@ class EmbrWindow(FrameWindow):
         self._selection: tuple[str, str] | None = None
         self._query = ""
         self._last_outcome: JobOutcome | None = None
+        self._dismissed_hint: tuple[int, str | None, str] | None = None
+        """(id of the job outcome, port, text) of the hint the user clicked away."""
         self._job_firmware: str | None = None
         self._ports_pending = False
         self._scheme = SchemeWatcher(self)
@@ -193,6 +199,8 @@ class EmbrWindow(FrameWindow):
         self.connection.baud_changed.connect(self._refresh_right)
         self.connection.identify_clicked.connect(self._identify)
         self.connection.flash_clicked.connect(self._flash_or_cancel)
+        self.connection.erase_all_toggled.connect(self._set_erase_all)
+        self.connection.hint_dismissed.connect(self._dismiss_hint)
         self.connection.expand_toggled.connect(self._expand_log)
         self.connection.log_folder_clicked.connect(self._open_log_folder)
         self.ports.changed.connect(self._ports_changed)
@@ -396,7 +404,8 @@ class EmbrWindow(FrameWindow):
             firmware = status.firmware
             items = preflight(self._context, firmware, port, snapshot, status)
             self.connection.show_checks(items)
-            self.connection.set_flash_enabled(can_flash(items) and port is not None and not busy)
+            ready = flash_ready(items, snapshot, port)
+            self.connection.set_flash_enabled(ready and not busy)
             command = preview_command(
                 self._context, firmware, port, self.connection.selected_baud()
             )
@@ -408,28 +417,55 @@ class EmbrWindow(FrameWindow):
             and snapshot.port.device == port.device
             and not busy
         )
+        self._show_erase_all(firmware_id, busy)
+        text, kind = self._hint(port, snapshot)
+        key = (id(self._last_outcome), port.device if port else None, text)
+        self.connection.set_hint("" if key == self._dismissed_hint else text, kind)
+
+    def _hint(self, port: PortInfo | None, snapshot: IdentifySnapshot | None) -> tuple[str, str]:
+        """The hint above Flash: what the last job left behind, else what to do first."""
         outcome = self._last_outcome
-        if (
-            outcome is not None
-            and outcome.kind == JobKind.FLASH
-            and outcome.result == RecordResult.OK
-            and outcome.native_usb
-        ):
-            self.connection.set_hint(HINT_MANUAL_RESET, "warn")
-        elif (
-            outcome is not None
-            and outcome.kind == JobKind.IDENTIFY
-            and outcome.result == RecordResult.OK
-            and snapshot is not None
-            and snapshot.info.in_download_mode
-        ):
-            self.connection.set_hint(HINT_DOWNLOAD_MODE, "ok")
-        elif port is not None and port.connection == ConnectionType.USB_OTG:
-            self.connection.set_hint(HINT_OTG, "warn")
-        elif port is not None and port.connection == ConnectionType.USB_SERIAL_JTAG:
-            self.connection.set_hint(HINT_JTAG, "ok")
-        else:
-            self.connection.set_hint("")
+        if outcome is not None and outcome.result == RecordResult.OK:
+            if outcome.kind == JobKind.FLASH and outcome.native_usb:
+                return HINT_MANUAL_RESET, "warn"
+            if (
+                outcome.kind == JobKind.IDENTIFY
+                and snapshot is not None
+                and snapshot.info.in_download_mode
+            ):
+                return HINT_DOWNLOAD_MODE, "ok"
+        if port is None or (snapshot is not None and snapshot.port.device == port.device):
+            return "", "ok"
+        if port.connection == ConnectionType.USB_OTG:
+            return HINT_OTG, "warn"
+        if port.connection == ConnectionType.USB_SERIAL_JTAG:
+            return HINT_JTAG, "ok"
+        return HINT_IDENTIFY, "ok"
+
+    def _dismiss_hint(self) -> None:
+        """Keep a clicked-away hint hidden until the job outcome, port or text changes."""
+        port = self.connection.selected_port()
+        text, _ = self._hint(port, self._memory.snapshot)
+        self._dismissed_hint = (id(self._last_outcome), port.device if port else None, text)
+
+    def _show_erase_all(self, firmware_id: str | None, busy: bool) -> None:
+        if firmware_id is None:
+            self.connection.set_erase_all(False, False, visible=False)
+            return
+        firmware = self._library.firmware(firmware_id)
+        editable = "erase_all" in editable_params(firmware) and not firmware.read_only
+        enabled = editable and not busy and not self.is_locked(firmware_id)
+        self.connection.set_erase_all(firmware.erase_all, enabled, visible=True)
+
+    def _set_erase_all(self, checked: bool) -> None:
+        firmware_id = self._selected_firmware_id()
+        if firmware_id is None or self._ops.busy:
+            return
+        try:
+            self._library.set_param(firmware_id, "erase_all", checked)
+        except ValueError as exc:
+            self.note("error", f"[params] {exc}")
+        self.changed()
 
     # ---- sidebar actions ----------------------------------------------------------------
 

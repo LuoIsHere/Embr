@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QButtonGroup,
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -652,11 +651,6 @@ class ParamsTab(QWidget):
             "Reset after",
             self._combo(firmware, "after", AFTER_MODES, firmware.after, "after" in editable),
         )
-        erase = QCheckBox("erase the whole flash first (clears NVS)")
-        erase.setChecked(firmware.erase_all)
-        erase.setEnabled("erase_all" in editable)
-        erase.toggled.connect(self._set_erase_all)
-        self._add("Erase all before flashing", erase)
         group = (
             (firmware.device or "(ungrouped)") if firmware.project_id else "— (standalone firmware)"
         )
@@ -814,9 +808,6 @@ class ParamsTab(QWidget):
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         combo.activated.connect(lambda: self._set(name, combo.currentText()))
         return _left(combo) if name in ("before", "after") else combo
-
-    def _set_erase_all(self, on: bool) -> None:
-        self._set("erase_all", on)
 
     def _set_notes(self, text: str) -> None:
         self._set("notes", text)
