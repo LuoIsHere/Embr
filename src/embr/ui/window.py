@@ -33,7 +33,14 @@ from embr.app.flashplan import PlanError, preview_command
 from embr.app.identify import IdentifyMemory, IdentifySnapshot
 from embr.app.library import AlreadyTrackedError, Library, TrackingEntriesError
 from embr.app.merging import Merger
-from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
+from embr.app.operations import (
+    SAVE_FAILED,
+    BusyError,
+    JobKind,
+    JobOutcome,
+    JobProgress,
+    Operations,
+)
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, TrackStatus
 from embr.core.firmware.entries import FolderError
@@ -742,6 +749,8 @@ class EmbrWindow(FrameWindow):
                 "ok" if done else "warning",
                 f"{RESULT_TEXT[outcome.result]}. Record saved. Port released.",
             )
+            if outcome.message.startswith(SAVE_FAILED):
+                self.note("error", f"[read] {outcome.message}")
             if done and outcome.saved_to:
                 self.note("ok", f"[read] saved to {outcome.saved_to}")
             if done and outcome.firmware_id is not None:

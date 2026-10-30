@@ -59,6 +59,8 @@ from embr.core.logs import LogSegment
 from embr.core.serial import PortInfo, baud_adjustable, remember_baud
 from embr.core.storage.ids import new_id
 
+SAVE_FAILED = "could not save to"
+"""Start of JobOutcome.message when a finished read could not be written to its file."""
 Dispatch = Callable[[Callable[[], None]], None]
 StartJob = Callable[[Task, Callable[[Event], None]], JobHandle]
 
@@ -429,7 +431,7 @@ class Operations:
                 try:
                     _write_whole(job.output, data)
                 except OSError as exc:
-                    reason = f"could not save to {job.output}: {exc.strerror or exc}"
+                    reason = f"{SAVE_FAILED} {job.output}: {exc.strerror or exc}"
                     job.segment.write(f"[error] {reason}")
                     return RecordResult.FAILED, reason, kept
                 kept.saved_to = str(job.output)
