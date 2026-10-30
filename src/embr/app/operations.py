@@ -11,6 +11,8 @@ happens there, so the sqlite connection is only used from one thread.
 """
 
 import datetime
+import hashlib
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -128,6 +130,10 @@ class _Job:
     """The plan of an erase or read_flash job."""
     target: tuple[str | None, str] = (None, "")
     """Project and group for the dump firmware of a read_flash job."""
+    output: Path | None = None
+    """read_flash: the file chosen in the dialog."""
+    import_firmware: bool = True
+    """read_flash: also archive the content and create a dump firmware."""
     handle: JobHandle | None = None
     info: InfoEvent | None = None
     kinds: dict[tuple[int, str], str] = field(default_factory=lambda: dict[tuple[int, str], str]())
@@ -266,9 +272,9 @@ class Operations:
         BusyError while a job runs."""
         self._ensure_idle()
         record_id = new_id()
-        output = self._ctx.paths.temp / f"read-{record_id}.bin"
+        temp_file = self._ctx.paths.temp / f"read-{record_id}.bin"
         plan = build_read_plan(
-            port.device, port.connection, str(output), address=address, size=size, baud=baud
+            port.device, port.connection, str(temp_file), address=address, size=size, baud=baud
         )
         self._start_other(
             JobKind.READ_FLASH,
@@ -277,6 +283,8 @@ class Operations:
             plan,
             record_id=record_id,
             target=(project_id, device),
+            output=output,
+            import_firmware=import_firmware,
         )
 
     def cancel(self) -> None:
@@ -331,9 +339,11 @@ class Operations:
     def _finish(self, job: _Job, event: ResultEvent | ErrorEvent) -> None:
         job.finished = True
         result = result_from_event(event)
-        job.segment.write(f"[result] {result}: {event.message}")
+        message = event.message
+        job.segment.write(f"[result] {result}: {message}")
         record_id: str | None = None
         dump_id: str | None = None
+        saved = ""
         if job.kind == JobKind.FLASH and job.plan is not None and job.firmware is not None:
             record = self._record(job, result, event.message)
             self._ctx.history.add(record)
@@ -347,7 +357,11 @@ class Operations:
             ):
                 self._ctx.settings.save()
         elif job.other is not None:
-            record = self._other_record(job, result, event.message)
+            kept = _Kept()
+            if isinstance(job.other, ReadPlan):
+                result, message, kept = self._keep_read(job, job.other, result, message)
+                saved = kept.saved_to
+            record = self._other_record(job, result, message, kept)
             self._ctx.history.add(record)
             record_id = record.id
             dump_id = record.firmware_id
@@ -367,12 +381,13 @@ class Operations:
             JobOutcome(
                 kind=job.kind,
                 result=result,
-                message=event.message,
+                message=message,
                 record_id=record_id,
                 log_file=job.segment.file_name,
                 segment_id=job.segment_id,
                 native_usb=not baud_adjustable(job.port),
                 firmware_id=dump_id,
+                saved_to=saved,
             )
         )
 
@@ -385,30 +400,57 @@ class Operations:
         *,
         record_id: str | None = None,
         target: tuple[str | None, str] = (None, ""),
+        output: Path | None = None,
+        import_firmware: bool = True,
     ) -> None:
         record_id = record_id or new_id()
         start = self._clock()
         segment = self._ctx.logs.open_segment(record_id, kind, port=port.device)
         segment.write(f"$ {command_line(plan)}")
         job = _Job(kind, listener, port, segment, record_id, start, other=plan, target=target)
+        job.output, job.import_firmware = output, import_firmware
         self._run(job, plan)
 
-    def _other_record(self, job: _Job, result: RecordResult, message: str) -> FlashRecord:
-        """Record of an erase or read_flash job; a read that ended OK creates the dump
-        firmware first."""
+    def _keep_read(
+        self, job: _Job, plan: ReadPlan, result: RecordResult, message: str
+    ) -> tuple[RecordResult, str, "_Kept"]:
+        """Where the content of a finished read goes: the chosen file (written next to it
+        first, then put in place, so a failure leaves no partial file), then with import
+        the archive and a dump firmware. A file that cannot be written turns the result
+        into FAILED. The temporary file in temp/ is always removed."""
+        read = Path(plan.output)
+        kept = _Kept()
+        try:
+            if result != RecordResult.OK or job.info is None:
+                return result, message, kept
+            data = read.read_bytes()
+            name = job.output.name if job.output else ""
+            if job.output is not None:
+                try:
+                    _write_whole(job.output, data)
+                except OSError as exc:
+                    reason = f"could not save to {job.output}: {exc.strerror or exc}"
+                    job.segment.write(f"[error] {reason}")
+                    return RecordResult.FAILED, reason, kept
+                kept.saved_to = str(job.output)
+                job.segment.write(f"[read] saved to {job.output}")
+            if job.import_firmware:
+                kept.dump = self._dump_firmware(job, plan, job.info, data)
+                name = kept.dump.entries[0].name
+            digest = hashlib.sha256(data).hexdigest()
+            kept.entry = RecordEntry(name, plan.address, digest, len(data), "merged")
+            return result, message, kept
+        finally:
+            read.unlink(missing_ok=True)
+
+    def _other_record(
+        self, job: _Job, result: RecordResult, message: str, kept: "_Kept"
+    ) -> FlashRecord:
+        """Record of an erase or read_flash job (what a read kept: see _keep_read())."""
         plan, info = job.other, job.info
         assert plan is not None
-        dump: Firmware | None = None
-        entries: tuple[RecordEntry, ...] = ()
-        if isinstance(plan, ReadPlan):
-            output = Path(plan.output)
-            if result == RecordResult.OK and info is not None:
-                dump = self._dump_firmware(job, plan, info, output.read_bytes())
-                entry = dump.entries[0]
-                entries = (
-                    RecordEntry(entry.name, plan.address, entry.sha256, entry.size, "merged"),
-                )
-            output.unlink(missing_ok=True)
+        dump = kept.dump
+        entries = (kept.entry,) if kept.entry is not None else ()
         refused = result == RecordResult.REFUSED
         return FlashRecord(
             id=job.segment_id,
@@ -539,6 +581,27 @@ class Operations:
             return self._ctx.projects.get(project_id).name
         except KeyError:
             return ""
+
+
+@dataclass
+class _Kept:
+    """What a finished read_flash left behind."""
+
+    saved_to: str = ""
+    dump: Firmware | None = None
+    entry: RecordEntry | None = None
+
+
+def _write_whole(path: Path, data: bytes) -> None:
+    """Write `data` to `path` through a temporary file in the same folder, replaced in one
+    step; on failure the temporary file is removed and `path` is untouched."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f"{path.name}.{new_id()}.part")
+    try:
+        partial.write_bytes(data)
+        os.replace(partial, path)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def _progress(plan: FlashPlan, event: ProgressEvent) -> JobProgress:
