@@ -241,6 +241,7 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.import_idf.connect(self._import_idf)
         self.sidebar_panel.import_pio.connect(self._import_pio)
         self.sidebar_panel.files_dropped.connect(self._files_dropped)
+        self.sidebar_panel.tree.menu_requested.connect(self._firmware_menu)
         self.firmware_view.entries.archive_requested.connect(self._archive_entry)
         self.firmware_view.entries.merge_requested.connect(self._merge)
         self.connection.erase_clicked.connect(self._erase)
@@ -317,6 +318,13 @@ class EmbrWindow(FrameWindow):
         self._selection = ("firmware", firmware_id)
         self._last_outcome = None
         self.changed()
+
+    def _firmware_menu(self, firmware_id: str, at: QPoint) -> None:
+        """Right-click on a firmware in the sidebar: select it, then show the same menu as the
+        workspace's ⋯ button (its actions work on the selected firmware)."""
+        if self._selected_firmware_id() != firmware_id:
+            self.select_firmware(firmware_id)
+        self.header.menu.popup(at)
 
     def select_project(self, project_id: str) -> None:
         self._leave_selection()

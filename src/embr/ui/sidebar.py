@@ -5,7 +5,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
-from PySide6.QtGui import QAction, QDrag, QDragMoveEvent, QDropEvent, QMouseEvent
+from PySide6.QtGui import (
+    QAction,
+    QContextMenuEvent,
+    QDrag,
+    QDragMoveEvent,
+    QDropEvent,
+    QMouseEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGraphicsOpacityEffect,
@@ -101,6 +108,8 @@ class FirmwareTree(QTreeWidget):
     """firmware id, project id (None = standalone), group ("" = ungrouped)."""
     files_dropped = Signal(list, object)
     """local paths (list[str]), the Node they were dropped on."""
+    menu_requested = Signal(str, QPoint)
+    """firmware id, global position: right-click on a firmware row."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -118,6 +127,11 @@ class FirmwareTree(QTreeWidget):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._press: QPoint | None = None
         self._drop_row: QWidget | None = None
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        node = self.node(self.itemAt(event.pos()))
+        if node is not None and node.firmware_id is not None:
+            self.menu_requested.emit(node.firmware_id, event.globalPos())
 
     def node(self, item: QTreeWidgetItem | None) -> Node | None:
         if item is None:

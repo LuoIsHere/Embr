@@ -55,7 +55,15 @@ from embr.core.history import FlashRecord, RecordResult
 from embr.i18n import N_, tr
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS
-from embr.ui.widgets import ElidedLabel, button, clear_layout, elided, label, tag
+from embr.ui.widgets import (
+    ElidedLabel,
+    button,
+    clear_layout,
+    danger_action,
+    elided,
+    label,
+    tag,
+)
 
 EN_DASH = f" {chr(0x2013)} "
 MARK_TAGS = {
@@ -118,7 +126,7 @@ class Header(QWidget):
             tr("Archive this version…"), lambda: owner.firmware_action("archive")
         )
         self.menu.addSeparator()
-        self.menu.addAction(tr("Delete…"), lambda: owner.firmware_action("delete"))
+        danger_action(self.menu, tr("Delete…"), lambda: owner.firmware_action("delete"))
         self.menu_button.clicked.connect(
             lambda: self.menu.popup(
                 self.menu_button.mapToGlobal(QPoint(0, self.menu_button.height() + 4))

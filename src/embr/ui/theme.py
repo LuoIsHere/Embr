@@ -275,6 +275,9 @@ QMenu::item {{ padding: 6px 24px 6px 10px; border-radius: 4px; }}
 QMenu::item:selected {{ background: {p.hover}; color: {p.fg}; }}
 QMenu::item:disabled {{ color: {p.fg_3}; }}
 QMenu::separator {{ height: 1px; background: {p.line_2}; margin: 4px 0px; }}
+QLabel[menuitem="danger"] {{ color: {p.bad}; padding: 6px 24px 6px 10px;
+  border-radius: 4px; }}
+QLabel[menuitem="danger"]:hover {{ background: {p.hover}; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0px; }}
 QScrollBar::handle:vertical {{ background: {p.line}; border-radius: 4px; min-height: 24px;
   margin: 2px; }}

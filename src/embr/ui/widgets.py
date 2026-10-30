@@ -1,15 +1,19 @@
 """Small building blocks styled by theme.style_sheet() through dynamic properties."""
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QResizeEvent
+from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from embr.i18n import tr
@@ -164,3 +168,29 @@ def clear_layout(layout: QLayout) -> None:
         nested = item.layout()
         if nested is not None:
             clear_layout(nested)
+
+
+class _MenuItem(QLabel):
+    """Body of danger_action(): looks like a menu item, triggers its action on release."""
+
+    def __init__(self, text: str, action: QWidgetAction, menu: QMenu) -> None:
+        super().__init__(text)
+        self._action = action
+        self._menu = menu
+        self.setProperty("menuitem", "danger")
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
+
+    def mouseReleaseEvent(self, ev: QMouseEvent) -> None:
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._menu.close()
+            self._action.trigger()
+
+
+def danger_action(menu: QMenu, text: str, slot: Callable[[], None]) -> QWidgetAction:
+    """A menu item drawn in the danger colour (Delete…). Qt style sheets cannot colour one
+    QAction, so the item is a label in a QWidgetAction; Enter on it triggers it as well."""
+    action = QWidgetAction(menu)
+    action.setDefaultWidget(_MenuItem(text, action, menu))
+    action.triggered.connect(slot)
+    menu.addAction(action)
+    return action
