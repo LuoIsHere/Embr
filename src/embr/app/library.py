@@ -24,11 +24,13 @@ from embr.app.tracking import Tracker
 from embr.core import chipinfo
 from embr.core.firmware import model
 from embr.core.firmware.entries import (
+    FolderError,
     attachment_entry,
     blank_otadata_entry,
     copy_entry,
     enabled_partition_table,
     entry_from_file,
+    in_folder,
     resolve_partitions,
     set_address,
     sorted_entries,
@@ -292,6 +294,7 @@ class Library:
         copy.tags = list(source.tags)
         copy.flash = dataclasses.replace(source.flash)
         copy.archived_from = source.archived_from
+        copy.folder = source.folder
         copy.entries = [copy_entry(e) for e in [*source.entries, *source.user_entries]]
         self._ctx.firmware.save(copy)
         return copy
@@ -397,7 +400,16 @@ class Library:
         file: files dropped on the sidebar (design doc §12 item 19). The folder rule is
         checked first: FolderError (or OSError for an unreadable file) and nothing is
         created."""
-        raise NotImplementedError
+        if not paths:
+            raise ValueError("no files to add")
+        _check_folder(str(Path(paths[0]).resolve().parent), paths)
+        for path in paths:
+            path.read_bytes()  # unreadable files fail here, before anything is created
+        firmware = self.create_firmware(default_name_from_files([p.name for p in paths]))
+        if project_id is not None:
+            firmware = self.move_firmware(firmware.id, project_id, device)
+        self.add_files(firmware.id, paths)
+        return self._ctx.firmware.get(firmware.id)
 
     def add_files(self, firmware_id: str, paths: Sequence[Path]) -> list[Entry]:
         """Add one entry per file, classified by image_sniff. Partition tables are added
@@ -412,6 +424,8 @@ class Library:
         TrackingEntriesError, nothing changes."""
         firmware = self._ctx.firmware.get(firmware_id)
         _refuse_tracking(firmware)
+        if paths:
+            firmware.folder = _check_folder(_root(firmware, Path(paths[0])), paths)
         was_empty = not firmware.entries
         # tables first, so the files after them get addresses from the table
         ordered = sorted(paths, key=lambda p: parse_partition_table(p.read_bytes()) is None)
@@ -449,6 +463,7 @@ class Library:
         in add_files() (FolderError). Tracking firmware: TrackingEntriesError."""
         firmware = self._ctx.firmware.get(firmware_id)
         _refuse_tracking(firmware)
+        firmware.folder = _check_folder(_root(firmware, path), [path])
         entry = attachment_entry(path, address=address, partition=partition)
         firmware.entries.append(entry)
         self._save_entries(firmware)
@@ -534,7 +549,7 @@ class Library:
         return entry
 
     def remove_entry(self, firmware_id: str, entry_id: str) -> None:
-        """A fixed firmware left without "path:" entries loses its folder."""
+        """The folder of a fixed firmware stays, also when its first file is removed."""
         firmware = self._ctx.firmware.get(firmware_id)
         own = _own_entry(firmware, entry_id)
         if own is None:
@@ -554,6 +569,9 @@ class Library:
         entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
         target = self._ctx.firmware.get(target_id)
         _refuse_tracking(target)
+        if entry.file.startswith("path:"):
+            file = Path(entry.file.removeprefix("path:"))
+            target.folder = _check_folder(_root(target, file), [file])
         copy = copy_entry(entry)
         if copy.address_source == AddressSource.AUTO:  # no detection outside its firmware
             copy.address_source = AddressSource.MANUAL
@@ -568,6 +586,8 @@ class Library:
         entry = _own_entry(firmware, entry_id)
         if entry is None:
             raise _derived_error(firmware)
+        if firmware.folder and not firmware.source.tracking:
+            _check_folder(firmware.folder, [path])
         relocate(entry, path)
         if firmware.source.tracking:
             self._save(firmware)
@@ -582,7 +602,25 @@ class Library:
         folder becomes `folder`. Returns the names of entries left pointing at the old place
         (no such file under `folder`). ValueError for a firmware without a folder or a
         tracking one."""
-        raise NotImplementedError
+        firmware = self._ctx.firmware.get(firmware_id)
+        _refuse_tracking(firmware)
+        if not firmware.folder:
+            raise ValueError(f"{firmware.name} has no folder")
+        old, new = Path(firmware.folder), folder.resolve()
+        left: list[str] = []
+        for entry in firmware.entries:
+            current = Path(entry.file.removeprefix("path:"))
+            if not entry.file.startswith("path:") or not in_folder(str(old), current):
+                continue
+            moved = new / current.resolve().relative_to(old.resolve())
+            if moved.is_file():
+                entry.file = f"path:{moved}"
+            else:
+                left.append(entry.name)
+        firmware.folder = str(new)
+        self._save_entries(firmware)
+        self.check_files(firmware_id)
+        return left
 
     def confirm_entries(self, firmware_id: str) -> Firmware:
         """Accept the current content of every CHANGED "path:" entry (new hash and size).
@@ -707,9 +745,32 @@ def _origin(firmware: Firmware) -> str:
     if firmware.build_ref is not None:
         env = firmware.build_ref.env
         return f"{firmware.build_ref.path} (env: {env})" if env else firmware.build_ref.path
+    if firmware.folder:
+        return firmware.folder
     paths = [e for e in firmware.entries if e.file.startswith("path:")]
     first = next((e for e in paths if e.enabled), paths[0] if paths else None)
     return str(Path(first.file.removeprefix("path:")).parent) if first else ""
+
+
+def _root(firmware: Firmware, first_new: Path) -> str:
+    """The folder files of a fixed firmware must be in: its folder; for firmware made
+    before the rule, the folder of its first "path:" entry; else the folder of the first
+    file being added (design doc §12 item 8)."""
+    if firmware.folder:
+        return firmware.folder
+    paths = [e for e in firmware.entries if e.file.startswith("path:")]
+    first = next((e for e in paths if e.enabled), paths[0] if paths else None)
+    if first is not None:
+        return str(Path(first.file.removeprefix("path:")).resolve().parent)
+    return str(first_new.resolve().parent)
+
+
+def _check_folder(folder: str, paths: Sequence[Path]) -> str:
+    """`folder` when every path is in it or below it, else FolderError."""
+    outside = [p for p in paths if not in_folder(folder, p)]
+    if outside:
+        raise FolderError(folder, outside)
+    return folder
 
 
 def _refuse_tracking(firmware: Firmware) -> None:

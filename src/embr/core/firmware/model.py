@@ -111,7 +111,8 @@ class Firmware:
     build_ref: BuildRef | None = None
     folder: str = ""
     """Fixed firmware: the folder of the first file added; later "path:" entries must lie
-    in it or below it (design doc §12 item 8). "" until a file is added."""
+    in it or below it (design doc §12 item 8). "" until a file is added; kept when that
+    file is removed, changed only by Library.relocate_folder()."""
     framework_pkg: str = ""
     archived_from: str = ""
     user_entries: list[Entry] = field(default_factory=lambda: list[Entry]())

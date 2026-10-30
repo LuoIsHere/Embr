@@ -3,6 +3,7 @@
 
 import dataclasses
 import hashlib
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -128,14 +129,28 @@ def copy_entry(entry: Entry) -> Entry:
 def in_folder(folder: str, path: Path) -> bool:
     """`path` lies in `folder` or in one of its subfolders. Both are resolved (absolute,
     `..` removed) and compared ignoring case, as Windows does."""
-    raise NotImplementedError
+    root, target = _path_key(Path(folder)), _path_key(path)
+    try:
+        return os.path.commonpath([root, target]) == root
+    except ValueError:  # different drives
+        return False
 
 
 def entries_outside(firmware: Firmware) -> list[Entry]:
     """Entries with a "path:" file outside firmware.folder ("archive:" and "blank:" entries
     never are); none while the folder is "". Firmware made before the folder rule may have
     such entries; they still flash."""
-    raise NotImplementedError
+    if not firmware.folder:
+        return []
+    return [
+        e
+        for e in firmware.entries
+        if e.file.startswith("path:") and not in_folder(firmware.folder, Path(e.file[5:]))
+    ]
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve()))
 
 
 def sorted_entries(entries: list[Entry]) -> list[Entry]:
