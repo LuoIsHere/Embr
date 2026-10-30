@@ -7,9 +7,17 @@ from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QFontMetrics
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QFont,
+    QFontMetrics,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -45,7 +53,7 @@ from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.history import FlashRecord, RecordResult
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS, chip_name
-from embr.ui.widgets import button, clear_layout, elided, label, tag
+from embr.ui.widgets import ElidedLabel, button, clear_layout, elided, label, tag
 
 EN_DASH = f" {chr(0x2013)} "
 MARK_TAGS = {
@@ -197,6 +205,13 @@ class Banner(QFrame):
         self.show()
 
 
+NOTE_MIN_WIDTH = 120
+"""Entry table: the Note column never gets narrower than this."""
+_GIVE_WAY = ((2, 90), (4, 0), (3, 70), (5, 80))
+"""Entry table columns that shrink, in this order and down to these widths, when the
+window is too narrow for all of them (0: the column is hidden)."""
+
+
 class EntriesTab(QWidget):
     COLUMNS = ("", "Address", "Name", "Kind", "Address source", "Image requires", "Note")
     archive_requested = Signal(str)
@@ -222,18 +237,7 @@ class EntriesTab(QWidget):
         header = self.table.horizontalHeader()
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        for column, mode in enumerate(
-            (
-                QHeaderView.ResizeMode.Fixed,
-                QHeaderView.ResizeMode.Fixed,
-                QHeaderView.ResizeMode.Fixed,
-                QHeaderView.ResizeMode.ResizeToContents,
-                QHeaderView.ResizeMode.ResizeToContents,
-                QHeaderView.ResizeMode.ResizeToContents,
-                QHeaderView.ResizeMode.Stretch,
-            )
-        ):
-            header.setSectionResizeMode(column, mode)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # sized by _fit_columns()
         self.table.setColumnWidth(0, 28)
         self.table.setColumnWidth(1, 104)
         self.table.itemChanged.connect(self._toggled)
@@ -262,11 +266,13 @@ class EntriesTab(QWidget):
         layout.addWidget(self.table)
         layout.addWidget(add_row)
         layout.addStretch(1)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._filling = False
 
     def show_firmware(self, firmware: Firmware, marks: Mapping[str, EntryMark]) -> None:
+        same = self._firmware is not None and self._firmware.id == firmware.id
+        typing = self._typing() if same else None
         self._firmware = firmware
         locked = self._owner.is_locked(firmware.id) or firmware.read_only
         self._filling = True
@@ -280,15 +286,44 @@ class EntriesTab(QWidget):
         self.merge_button.setEnabled(any(e.enabled for e in firmware.entries))
         header_height = self.table.horizontalHeader().sizeHint().height()
         self._fit_columns()
-        scroll = self.table.horizontalScrollBar().sizeHint().height()
-        self.table.setFixedHeight(header_height + 30 * len(rows) + 2 + scroll)
+        self.table.setFixedHeight(header_height + 30 * len(rows) + 2)
+        if typing is not None:
+            self._restore_typing(*typing)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._fit_columns()
 
     def _fit_columns(self) -> None:
-        """Cell widgets do not take part in ResizeToContents: the name column (name plus
-        status tags) is measured with the fonts the style sheet gives them."""
-        firmware = self._firmware
-        if firmware is None:
+        """Fit every column into the visible width, so the table never scrolls sideways
+        and the Note column stays usable in a narrow window. Each column first gets what
+        its content wants (cell widgets do not take part in content sizing, see
+        _name_width()); when that is too wide, the name gives way first (elided, the tooltip
+        has the full path), then Address source (hidden), then Kind and Image requires
+        (elided). Note gets NOTE_MIN_WIDTH plus whatever is left."""
+        if self._firmware is None:
             return
+        header = self.table.horizontalHeader()
+        widths = {0: 28, 1: 104, 2: self._name_width()}
+        for column in (3, 4, 5):
+            content = self.table.sizeHintForColumn(column)
+            widths[column] = max(header.sectionSizeHint(column), content)
+        spare = self.table.viewport().width() - sum(widths.values()) - NOTE_MIN_WIDTH
+        for column, floor in _GIVE_WAY:
+            if spare >= 0:
+                break
+            give = min(widths[column] - floor, -spare)
+            if give > 0:
+                widths[column] -= give
+                spare += give
+        widths[6] = NOTE_MIN_WIDTH + max(spare, 0)
+        self.table.setColumnHidden(4, widths[4] == 0)
+        for column, width in widths.items():
+            self.table.setColumnWidth(column, width)
+
+    def _name_width(self) -> int:
+        """What the name column would like: cell widgets do not take part in content
+        sizing, so name plus status tags are measured with the style sheet's fonts."""
         text = self.table.fontMetrics()
         small = QFont(self.table.font())
         small.setPixelSize(10)
@@ -297,12 +332,39 @@ class EntriesTab(QWidget):
         widest = self.table.horizontalHeader().sectionSizeHint(2)
         for row in range(self.table.rowCount()):
             cell = self.table.cellWidget(row, 2)
-            names = [w.text() for w in cell.findChildren(QLabel) if w.property("tag") is None]
+            names = [w.full_text() for w in cell.findChildren(ElidedLabel)]
             labels = [w.text() for w in cell.findChildren(QLabel) if w.property("tag") is not None]
             width = sum(text.horizontalAdvance(n) for n in names) + 24
             width += sum(tags.horizontalAdvance(t) + 10 + 4 for t in labels)
             widest = max(widest, width + 8)
-        self.table.setColumnWidth(2, widest)
+        return widest
+
+    def _typing(self) -> tuple[str, int, str, int] | None:
+        """(entry id, column, text, cursor) of an address or note being typed, so that a
+        refresh (window activation, the periodic check) does not throw the typing away."""
+        focused = QApplication.focusWidget()
+        if not isinstance(focused, QLineEdit) or not self.table.isAncestorOf(focused):
+            return None
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            entry_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            for column in (1, 6):
+                cell = self.table.cellWidget(row, column)
+                if isinstance(entry_id, str) and cell.isAncestorOf(focused):
+                    return entry_id, column, focused.text(), focused.cursorPosition()
+        return None
+
+    def _restore_typing(self, entry_id: str, column: int, text: str, cursor: int) -> None:
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is None or item.data(Qt.ItemDataRole.UserRole) != entry_id:
+                continue
+            edit = self.table.cellWidget(row, column).findChild(QLineEdit)
+            if isinstance(edit, QLineEdit) and not edit.isReadOnly():
+                edit.setText(text)
+                edit.setFocus()
+                edit.setCursorPosition(cursor)
+            return
 
     def _fill_row(self, row: int, entry: Entry, mark: EntryMark | None, locked: bool) -> None:
         dim = "3" if not entry.enabled else None
@@ -348,14 +410,14 @@ class EntriesTab(QWidget):
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(6, 0, 6, 0)
         layout.setSpacing(4)
-        layout.addWidget(label(entry.name, tone=dim))
+        name = elided(entry.name, tone=dim)
+        layout.addWidget(name, 1)
         if entry.file.startswith("archive:"):
             layout.addWidget(tag("archived", "gray"))
         if mark is not None:
             layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
             layout.addWidget(tag("added automatically", "gray"))
-        layout.addStretch(1)
         scheme, _, rest = entry.file.partition(":")
         widget.setToolTip(
             rest
@@ -364,6 +426,7 @@ class EntriesTab(QWidget):
             if scheme == "archive"
             else "0xFF bytes, generated when flashing"
         )
+        name.setToolTip(widget.toolTip())
         return widget
 
     def _requires(self, entry: Entry) -> str:

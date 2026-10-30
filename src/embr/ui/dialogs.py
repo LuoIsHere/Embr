@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -81,6 +81,35 @@ class Dialog(QDialog):
         self.body.addLayout(box)
         return widget
 
+    def row(self, *fields: tuple[str, QWidget]) -> QWidget:
+        """Captioned fields side by side on one line; returns the line (to hide it)."""
+        line = QWidget()
+        layout = QHBoxLayout(line)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        for caption, widget in fields:
+            box = QVBoxLayout()
+            box.setSpacing(4)
+            box.addWidget(label(caption, tone="3"))
+            box.addWidget(widget)
+            layout.addLayout(box, 1)
+        self.body.addWidget(line)
+        return line
+
+    def fit(self) -> None:
+        """Height for the current width. Wrapped text makes the default size hint assume a
+        narrower dialog, and the spare height used to open gaps between the parts."""
+        layout = self.layout()
+        if layout is None:
+            return
+        layout.activate()
+        height = layout.totalHeightForWidth(self.width())
+        self.resize(self.width(), height if height > 0 else layout.sizeHint().height())
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.fit()
+
     def validate(self) -> bool:
         """Override (or set `check`) to keep the dialog open on bad input."""
         return self.check()
@@ -145,8 +174,7 @@ class PlacementFields:
         index = self.project.findData(project_id)
         self.project.setCurrentIndex(index if index >= 0 else self.project.count() - 1)
         self.group = QComboBox()
-        dialog.field("Place in", self.project)
-        dialog.field("Group", self.group)
+        dialog.row(("Place in", self.project), ("Group", self.group))
         self.project.currentIndexChanged.connect(self._sync)
         self._sync()
         if device:
@@ -460,8 +488,7 @@ def read_flash(
     dialog.body.addWidget(whole)
     start = QLineEdit("0x0")
     size = QLineEdit("0x100000")
-    dialog.field("Start address (hex)", start)
-    dialog.field("Size (hex)", size)
+    range_row = dialog.row(("Start address (hex)", start), ("Size (hex)", size))
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
         "The content is saved in the archive as a new fixed firmware with one merged entry. A "
@@ -469,8 +496,9 @@ def read_flash(
     )
 
     def sync() -> None:
-        start.setEnabled(not whole.isChecked())
-        size.setEnabled(not whole.isChecked())
+        range_row.setVisible(not whole.isChecked())
+        if dialog.isVisible():
+            dialog.fit()
 
     whole.toggled.connect(sync)
     sync()
