@@ -55,6 +55,10 @@ def chip_name(chip: str | None) -> str:
         return chip
 
 
+INDENT = 8
+"""Tree: indent of groups (and of firmware, whose names line up with group names)."""
+
+
 class Row(QWidget):
     """Content of one tree row: caret, label (one or two lines), meta on the right."""
 
@@ -63,7 +67,7 @@ class Row(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setStyleSheet("background: transparent;")
         self.caret = label(caret, tone="3")
-        self.caret.setFixedWidth(12)
+        self.caret.setFixedWidth(10)
         self.text = QVBoxLayout()
         self.text.setContentsMargins(0, 0, 0, 0)
         self.text.setSpacing(0)
@@ -71,8 +75,8 @@ class Row(QWidget):
         self.meta.setContentsMargins(0, 0, 0, 0)
         self.meta.setSpacing(4)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6 + indent, 3, 6, 3)
-        layout.setSpacing(6)
+        layout.setContentsMargins(4 + indent, 3, 6, 3)
+        layout.setSpacing(4)
         layout.addWidget(self.caret)
         layout.addLayout(self.text, 1)
         layout.addLayout(self.meta)
@@ -267,11 +271,11 @@ class Sidebar(QWidget):
             if folded:
                 continue
             if not project.groups:
-                self._placeholder("(no groups, no firmware)", 16)
+                self._placeholder("(no groups, no firmware)", INDENT)
             for group in project.groups:
                 gkey = f"g:{project.id}:{group.name}"
                 gfolded = gkey in self._folded
-                grow = Row(16, "▸" if gfolded else "▾")
+                grow = Row(INDENT, "▸" if gfolded else "▾")
                 gname = label(group.name or "Ungrouped", tone="2" if group.name else "3")
                 grow.text.addWidget(gname)
                 if not group.firmware:
@@ -281,16 +285,16 @@ class Sidebar(QWidget):
                 self._add(grow, Node("group", project.id, group.name, drop="group"), 24)
                 if not gfolded:
                     for fw in group.firmware:
-                        self._firmware(fw, 16)  # name aligned with the group name
+                        self._firmware(fw, INDENT)  # name aligned with the group name
         self._header("STANDALONE FIRMWARE", Node("header", drop="standalone"))
         if not data.standalone:
             self._placeholder(
                 "(none — drop firmware here to detach it from its project)",
-                16,
+                INDENT,
                 Node("placeholder", drop="standalone"),
             )
         for fw in data.standalone:
-            self._firmware(fw, 16)
+            self._firmware(fw, INDENT)
         self.tree.verticalScrollBar().setValue(scroll)
 
     def _header(self, text: str, node: Node | None = None) -> None:
