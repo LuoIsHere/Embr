@@ -11,13 +11,14 @@ once); fixed firmware check their "path:" and "archive:" entries by name, path a
 import copy
 import dataclasses
 import datetime
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
-from embr.app.pio import PioConfigs
+from embr.app.pio import FRAMEWORK_PKG_KEY, PIO_SECTION, PioConfigs
 from embr.core.firmware.filecache import FileCache, Fingerprint, fingerprint
 from embr.core.firmware.files import FileState, confirm_entry
 from embr.core.firmware.import_idf import (
@@ -28,6 +29,13 @@ from embr.core.firmware.import_idf import (
     configured_target,
     read_build,
 )
+from embr.core.firmware.import_pio import (
+    PLATFORMIO_INI,
+    EnvRef,
+    PioBuildError,
+    read_env,
+)
+from embr.core.firmware.import_pio import BuildMissingError as PioBuildMissingError
 from embr.core.firmware.model import Entry, Firmware, FlashParams, Source
 from embr.core.firmware.tracking import (
     Change,
@@ -166,6 +174,21 @@ class Tracker:
         self._prints.pop(firmware_id, None)
         self._inputs.pop(firmware_id, None)
 
+    def invalidate_project(self, project_root: Path) -> list[str]:
+        """A `pio project config` result for `project_root` arrived (PioConfigs on_ready):
+        invalidate every PIO firmware following an env of it and return their ids."""
+        key = os.path.normcase(str(project_root.resolve()))
+        found = [
+            f.id
+            for f in self._ctx.firmware.all()
+            if f.source == Source.PIO_BUILD
+            and f.build_ref is not None
+            and os.path.normcase(str(Path(f.build_ref.path).resolve())) == key
+        ]
+        for firmware_id in found:
+            self.invalidate(firmware_id)
+        return found
+
     def mark_seen(self, firmware_id: str) -> None:
         """The user left the firmware: clear updated_at."""
         self._updated.pop(firmware_id, None)
@@ -253,6 +276,8 @@ class Tracker:
             updated_at=None,
             idf_version=resolution.idf_version,
             configured_target=resolution.configured_target,
+            entry_notes=resolution.entry_notes,
+            build_notes=resolution.build_notes,
         )
         return status, inputs, resolution
 
@@ -299,7 +324,45 @@ class Tracker:
         then core tracking.resolve(). Build folder gone -> MISSING; env no longer in
         platformio.ini or an unreadable build -> INCOMPLETE. Inputs always include
         platformio.ini, so editing it re-resolves."""
-        raise NotImplementedError
+        if firmware.build_ref is None or not firmware.build_ref.env:
+            return missing(firmware, "No PlatformIO project and env"), ()
+        ref = EnvRef(Path(firmware.build_ref.path), firmware.build_ref.env)
+        fallback = (ref.project_root / PLATFORMIO_INI, ref.build_dir)
+        manual = (
+            firmware.framework_pkg or self._ctx.settings.get(PIO_SECTION, FRAMEWORK_PKG_KEY) or ""
+        )
+        try:
+            build = read_env(
+                ref, core=self._pio.core_dir, manual_package=manual, config=self._pio.env(ref)
+            )
+        except PioBuildMissingError:
+            return missing(firmware, f"{ref.build_dir}: build output not found"), fallback
+        except (PioBuildError, OSError) as exc:  # env removed from platformio.ini, bad files
+            found = missing(firmware, str(exc))
+            return dataclasses.replace(found, state=ResolveState.INCOMPLETE), fallback
+        derived = DerivedBuild(
+            files=tuple(
+                DerivedFile(f.address, f.path, f.kind, f.note, f.blank_size) for f in build.files
+            ),
+            declared_chips=(),
+            configured_target=self._pio.target(ref),
+            idf_version=None,
+            flash=build.flash,
+            before=None,
+            after=None,
+            stub=True,
+            inputs=build.inputs,
+            notes=build.notes,
+            problems=build.problems,
+        )
+        resolution = resolve(
+            firmware,
+            derived,
+            self._cache,
+            archive_dir=self._ctx.paths.archive,
+            now=now.isoformat(timespec="seconds"),
+        )
+        return resolution, build.inputs
 
     def _check_fixed(
         self, firmware: Firmware, now: datetime.datetime

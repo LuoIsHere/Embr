@@ -28,6 +28,8 @@ from embr.app.chips import (
 )
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
+from embr.app.pio import FRAMEWORK_PKG_KEY as FRAMEWORK_PKG_KEY
+from embr.app.pio import PIO_SECTION as PIO_SECTION
 from embr.app.tracking import Tracker
 from embr.core import chipinfo
 from embr.core.firmware import model
@@ -55,7 +57,15 @@ from embr.core.firmware.image_sniff import (
     parse_partition_table,
 )
 from embr.core.firmware.import_idf import IdfBuild, default_firmware_name, read_build
-from embr.core.firmware.import_pio import EnvRef, PioBuild
+from embr.core.firmware.import_pio import (
+    EnvRef,
+    PioBuild,
+    PioBuildError,
+    env_ref,
+    ini_envs,
+    is_built,
+    read_env,
+)
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import (
     AddressSource,
@@ -74,9 +84,6 @@ from embr.core.project import Project, ProjectDefaults
 from embr.core.storage.ids import unique_name
 
 UNTITLED = "untitled"
-PIO_SECTION = "pio"
-FRAMEWORK_PKG_KEY = "framework_pkg"
-"""settings.ini [pio] framework_pkg: the global manual framework package path."""
 """Name of a firmware created without one; replaced by the first added file's name."""
 
 
@@ -407,7 +414,37 @@ class Library:
         sibling envs would bring, for the import dialog. Blocking: runs
         PioConfigs.load() (about two seconds), so call it off the UI thread. EnvDirError
         propagates; pio problems go into config_error, env read errors into problem."""
-        raise NotImplementedError
+        picked = env_ref(build_dir)
+        root = picked.project_root
+        pio = self._tracker.pio
+        config = pio.load(root)
+        manual = self.framework_pkg_default()
+        choices: list[PioEnvChoice] = []
+        for name in ini_envs(root):
+            ref = EnvRef(root, name)
+            built = is_built(ref)
+            tracked = self.tracking_firmware_for_env(root, name)
+            env_config = config.envs.get(name)
+            build: PioBuild | None = None
+            problem: str | None = None
+            if built:
+                try:
+                    build = read_env(
+                        ref, core=pio.core_dir, manual_package=manual, config=env_config
+                    )
+                except (PioBuildError, OSError) as exc:
+                    problem = str(exc)
+            choices.append(
+                PioEnvChoice(
+                    name=name,
+                    built=built,
+                    tracked_by=tracked.id if tracked is not None else None,
+                    board=env_config.board if env_config is not None else None,
+                    build=build,
+                    problem=problem,
+                )
+            )
+        return PioPreview(picked=picked, envs=tuple(choices), config_error=config.error)
 
     def import_pio(
         self,
@@ -425,26 +462,84 @@ class Library:
         finds one of them followed already, PlanError (naming the env) when one cannot be
         resolved (unbuilt, incomplete, target switched); nothing is created then. ValueError
         for an empty `envs`."""
-        raise NotImplementedError
+        if not envs:
+            raise ValueError("no env to import")
+        root = project_root.resolve()
+        for env in envs:
+            tracked = self.tracking_firmware_for_env(root, env)
+            if tracked is not None:
+                raise AlreadyTrackedError(
+                    f"{root} env {env} is already followed by '{tracked.name}'", tracked.id
+                )
+        created: list[Firmware] = []
+        try:
+            for env in envs:
+                ref = EnvRef(root, env)
+                if not is_built(ref):
+                    raise PlanError(f"{env}: not built (no .bin in {ref.build_dir})")
+                if project_id is None:
+                    firmware = self._ctx.firmware.create(env, source=Source.PIO_BUILD)
+                else:
+                    firmware = self._ctx.projects.create_firmware(
+                        self._ctx.firmware, project_id, env, device=device, source=Source.PIO_BUILD
+                    )
+                created.append(firmware)
+                firmware.build_ref = BuildRef(str(root), env)
+                self._ctx.firmware.save(firmware)
+                status = self._tracker.check(firmware.id, settle=False)
+                if status.state != ResolveState.OK:
+                    raise PlanError(
+                        f"{env}: " + "; ".join(status.problems or ("cannot be resolved",))
+                    )
+        except BaseException:
+            for firmware in created:
+                self.delete_firmware(firmware.id)
+            raise
+        return [self._ctx.firmware.get(f.id) for f in created]
 
     def tracking_firmware_for_env(self, project_root: Path, env: str) -> Firmware | None:
         """The PIO tracking firmware following `env` of `project_root`, or None. Roots are
         compared as tracking_firmware_for() compares build directories; env names exactly."""
-        raise NotImplementedError
+        key = _path_key(project_root)
+        return next(
+            (
+                f
+                for f in self._ctx.firmware.all()
+                if f.source == Source.PIO_BUILD
+                and f.build_ref is not None
+                and f.build_ref.env == env
+                and _path_key(Path(f.build_ref.path)) == key
+            ),
+            None,
+        )
 
     def framework_pkg_default(self) -> str:
         """settings.ini [pio] framework_pkg; "" means auto-detect."""
-        raise NotImplementedError
+        return self._ctx.settings.get(PIO_SECTION, FRAMEWORK_PKG_KEY) or ""
 
     def set_framework_pkg_default(self, path: str) -> None:
         """Store (stripped; "" removes the key) and re-check every PIO firmware that has no
         path of its own."""
-        raise NotImplementedError
+        path = path.strip()
+        if path:
+            self._ctx.settings.set(PIO_SECTION, FRAMEWORK_PKG_KEY, path)
+        else:
+            self._ctx.settings.remove(PIO_SECTION, FRAMEWORK_PKG_KEY)
+        self._ctx.settings.save()
+        for firmware in self._ctx.firmware.all():
+            if firmware.source == Source.PIO_BUILD and not firmware.framework_pkg:
+                self._tracker.invalidate(firmware.id)
 
     def set_framework_pkg(self, firmware_id: str, path: str) -> Firmware:
         """The firmware's own framework package path (stripped; "" falls back to the global
         default). Saved and re-checked. ValueError for a firmware that is not PIO_BUILD."""
-        raise NotImplementedError
+        firmware = self._ctx.firmware.get(firmware_id)
+        if firmware.source != Source.PIO_BUILD:
+            raise ValueError(f"{firmware.name} is not a PlatformIO firmware")
+        firmware.framework_pkg = path.strip()
+        self._ctx.firmware.save(firmware)
+        self._tracker.invalidate(firmware_id)
+        return firmware
 
     def mismatches(self, info: InfoEvent) -> dict[str, str]:
         """Firmware that do not fit the identified chip, by id, with the reason: no MCU of

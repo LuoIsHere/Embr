@@ -203,7 +203,7 @@ def resolve(
     last = firmware.last_resolved
     last_entries = {doc_str(e, "key"): e for e in doc_tables(last or {}, "entries")}
     last_kinds = {doc_str(e, "name"): doc_str(e, "kind") for e in last_entries.values()}
-    incomplete: list[str] = []
+    incomplete: list[str] = list(build.problems)
     marks: dict[str, EntryMark] = {}
 
     # the partition table first: SPIFFS images are only recognised through it
@@ -265,6 +265,7 @@ def resolve(
         )
         state = ResolveState.UPDATED if content_only else ResolveState.NEEDS_CONFIRMATION
     changes.sort(key=lambda c: _ORDER.index(c.kind))
+    entry_notes = {d.key: d.file.note for d in derived if d.file.note}
     return Resolution(
         state=state,
         firmware=resolved,
@@ -274,6 +275,8 @@ def resolve(
         snapshot=snapshot,
         idf_version=build.idf_version,
         configured_target=build.configured_target,
+        entry_notes=entry_notes,
+        build_notes=build.notes,
     )
 
 
@@ -357,6 +360,9 @@ def digest(firmware: Firmware) -> str:
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
 
 
+BLANK_NAME = "otadata (blank)"
+"""Name of a blank DerivedFile's entry."""
+
 _IDF_VER_CHARS = 31
 """Characters of idf_ver kept by the image descriptors."""
 
@@ -382,7 +388,10 @@ def _classify(
     last_kinds: Mapping[str, str],
 ) -> _Derived:
     if file.path is None:
-        raise NotImplementedError
+        content = bytes([0xFF]) * file.blank_size
+        sha = hashlib.sha256(content).hexdigest()
+        key = entry_key(EntryKind.OTADATA, BLANK_NAME)
+        return _Derived(file, BLANK_NAME, EntryKind.OTADATA, key, sha, file.blank_size, None, False)
     name = file.path.name
     try:
         sha = cache.sha256(file.path)
@@ -423,7 +432,7 @@ def _resolved_firmware(
         entry = Entry(
             id=d.key,
             name=d.name,
-            file=f"path:{d.file.path}",
+            file=_file_ref(d.file),
             sha256=d.sha256,
             size=d.size,
             kind=d.kind,
@@ -435,6 +444,10 @@ def _resolved_firmware(
         entries.append(entry)
     resolved.entries = entries
     return resolved
+
+
+def _file_ref(file: DerivedFile) -> str:
+    return "blank:" if file.path is None else f"path:{file.path}"
 
 
 def _apply_override(entry: Entry, override: EntryOverride | None) -> None:
@@ -473,7 +486,7 @@ def _snapshot(
             "name": d.name,
             "kind": d.kind.value,
             "address": f"{d.file.address:#x}",
-            "file": f"path:{d.file.path}",
+            "file": _file_ref(d.file),
             "sha256": d.sha256,
             "size": d.size,
         }
