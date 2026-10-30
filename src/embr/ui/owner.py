@@ -30,6 +30,10 @@ class Owner(Protocol):
 
     def select_project(self, project_id: str) -> None: ...
 
+    def identified_chip(self) -> str | None:
+        """Chip of the last identification on the selected port, else None."""
+        ...
+
     def is_locked(self, firmware_id: str) -> bool:
         """True while the firmware is being flashed (editing is locked)."""
         ...

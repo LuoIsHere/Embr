@@ -38,11 +38,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from embr.app.chips import image_header
+from embr.app.chips import chip_choosable, entry_chip, firmware_chips, image_header
 from embr.app.library import FirmwareFlag
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
-from embr.core.firmware.entries import AddressError
+from embr.core.firmware.entries import AddressError, FolderError, entries_outside
 from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import format_revision
 from embr.core.firmware.image_sniff import parse_partition_table
@@ -140,8 +140,8 @@ class Header(QWidget):
         name = QLabel(firmware.name)
         name.setProperty("heading", "1")
         self.row.addWidget(name)
-        if firmware.chip:
-            self.row.addWidget(tag(chip_name(firmware.chip), "gray"))
+        for chip in firmware_chips(self._owner.context, firmware):
+            self.row.addWidget(tag(chip_name(chip), "gray"))
         self.row.addWidget(tag(*SOURCE_LABELS[firmware.source]))
         if flag == FirmwareFlag.NEEDS_CONFIRMATION:
             self.row.addWidget(tag("needs confirmation", "warn"))
@@ -206,13 +206,15 @@ class Banner(QFrame):
 
 NOTE_MIN_WIDTH = 120
 """Entry table: the Note column never gets narrower than this."""
-_GIVE_WAY = ((2, 90), (4, 0), (3, 70), (5, 80))
+MCU_WIDTH = 118
+"""Entry table: the MCU column (fits "auto (ESP32-C61)")."""
+_GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80))
 """Entry table columns that shrink, in this order and down to these widths, when the
 window is too narrow for all of them (0: the column is hidden)."""
 
 
 class EntriesTab(QWidget):
-    COLUMNS = ("", "Address", "Name", "Kind", "Address source", "Image requires", "Note")
+    COLUMNS = ("", "Address", "MCU", "Name", "Kind", "Address source", "Image requires", "Note")
     archive_requested = Signal(str)
     """entry id"""
     merge_requested = Signal()
@@ -222,6 +224,8 @@ class EntriesTab(QWidget):
         self._owner = owner
         self._firmware: Firmware | None = None
         self.setAcceptDrops(True)
+        self._chips: tuple[str, ...] = ()
+        """The shown firmware's chips (app.chips.firmware_chips())."""
         self._legacy: set[str] = set()
         """Tracking firmware: ids of user entries added before they were refused."""
         self.table = QTableWidget(0, len(self.COLUMNS))
@@ -241,6 +245,7 @@ class EntriesTab(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # sized by _fit_columns()
         self.table.setColumnWidth(0, 28)
         self.table.setColumnWidth(1, 104)
+        self.table.setColumnWidth(2, MCU_WIDTH)
         self.table.itemChanged.connect(self._toggled)
         self.add_button = button(f"{PLUS} Add entry (or drop bin files here)", "addrow")
         self.add_menu = QMenu(self)
@@ -280,6 +285,7 @@ class EntriesTab(QWidget):
         same = self._firmware is not None and self._firmware.id == firmware.id
         typing = self._typing() if same else None
         self._firmware = firmware
+        self._chips = firmware_chips(self._owner.context, firmware)
         locked = self._owner.is_locked(firmware.id) or firmware.read_only
         self._filling = True
         self.table.setRowCount(0)
@@ -314,8 +320,8 @@ class EntriesTab(QWidget):
         if self._firmware is None:
             return
         header = self.table.horizontalHeader()
-        widths = {0: 28, 1: 104, 2: self._name_width()}
-        for column in (3, 4, 5):
+        widths = {0: 28, 1: 104, 2: MCU_WIDTH, 3: self._name_width()}
+        for column in (4, 5, 6):
             content = self.table.sizeHintForColumn(column)
             widths[column] = max(header.sectionSizeHint(column), content)
         spare = self.table.viewport().width() - sum(widths.values()) - NOTE_MIN_WIDTH
@@ -326,8 +332,8 @@ class EntriesTab(QWidget):
             if give > 0:
                 widths[column] -= give
                 spare += give
-        widths[6] = NOTE_MIN_WIDTH + max(spare, 0)
-        self.table.setColumnHidden(4, widths[4] == 0)
+        widths[7] = NOTE_MIN_WIDTH + max(spare, 0)
+        self.table.setColumnHidden(5, widths[5] == 0)
         for column, width in widths.items():
             self.table.setColumnWidth(column, width)
 
@@ -339,9 +345,9 @@ class EntriesTab(QWidget):
         small.setPixelSize(10)
         small.setBold(True)
         tags = QFontMetrics(small)
-        widest = self.table.horizontalHeader().sectionSizeHint(2)
+        widest = self.table.horizontalHeader().sectionSizeHint(3)
         for row in range(self.table.rowCount()):
-            cell = self.table.cellWidget(row, 2)
+            cell = self.table.cellWidget(row, 3)
             names = [w.full_text() for w in cell.findChildren(ElidedLabel)]
             labels = [w.text() for w in cell.findChildren(QLabel) if w.property("tag") is not None]
             width = sum(text.horizontalAdvance(n) for n in names) + 24
@@ -358,7 +364,7 @@ class EntriesTab(QWidget):
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
             entry_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-            for column in (1, 6):
+            for column in (1, 7):
                 cell = self.table.cellWidget(row, column)
                 if isinstance(entry_id, str) and cell.isAncestorOf(focused):
                     return entry_id, column, focused.text(), focused.cursorPosition()
@@ -377,13 +383,19 @@ class EntriesTab(QWidget):
             return
 
     def _fill_row(self, row: int, entry: Entry, mark: EntryMark | None, locked: bool) -> None:
-        dim = "3" if not entry.enabled else None
+        assert self._firmware is not None
+        mcu = entry_chip(self._owner.context, self._firmware, entry)
+        board = self._owner.identified_chip()
+        unfit = board is not None and mcu != board  # design doc §12 item 13
+        dim = "3" if not entry.enabled or unfit else None
         check = QTableWidgetItem()
         check.setData(Qt.ItemDataRole.UserRole, entry.id)
         flags = Qt.ItemFlag.ItemIsEnabled
-        if not locked:
+        if not locked and not unfit:
             flags |= Qt.ItemFlag.ItemIsUserCheckable
         check.setFlags(flags)
+        if unfit:
+            check.setToolTip(f"For {mcu or 'no MCU'}; the board is {board}")
         check.setCheckState(Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         self.table.setItem(row, 0, check)
         address = QLineEdit("" if entry.address is None else f"0x{entry.address:X}")
@@ -397,12 +409,13 @@ class EntriesTab(QWidget):
         address.setToolTip(hint)
         address.editingFinished.connect(lambda e=entry, w=address: self._address(e, w))
         self.table.setCellWidget(row, 1, _cell(address))
-        self.table.setCellWidget(row, 2, self._name_cell(entry, mark, dim))
+        self.table.setCellWidget(row, 2, self._mcu_cell(entry, mcu, locked, dim))
+        self.table.setCellWidget(row, 3, self._name_cell(entry, mark, dim))
         p = self._owner.palette
         for column, text, color in (
-            (3, entry.kind.value, p.fg_3 if dim else p.fg_2),
-            (4, _address_source(entry), p.fg_3),
-            (5, self._requires(entry), p.fg_3),
+            (4, entry.kind.value, p.fg_3 if dim else p.fg_2),
+            (5, _address_source(entry), p.fg_3),
+            (6, self._requires(entry), p.fg_3),
         ):
             item = QTableWidgetItem(text)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -413,7 +426,30 @@ class EntriesTab(QWidget):
         note.setPlaceholderText("add note")
         note.setReadOnly(locked)
         note.editingFinished.connect(lambda e=entry, w=note: self._note(e, w))
-        self.table.setCellWidget(row, 6, _cell(note))
+        self.table.setCellWidget(row, 7, _cell(note))
+
+    def _mcu_cell(self, entry: Entry, mcu: str | None, locked: bool, dim: str | None) -> QWidget:
+        """The image header's chip, read-only; a chooser for files that name no chip."""
+        assert self._firmware is not None
+        if locked or not chip_choosable(self._owner.context, self._firmware, entry):
+            shown = label(chip_name(mcu) if mcu else "—", tone=dim or "2")
+            return _cell(shown)
+        combo = QComboBox()
+        auto = self._chips[0] if len(self._chips) == 1 and not entry.chip else None
+        combo.addItem(f"auto ({chip_name(auto)})" if auto else "—", "")
+        for chip in chipinfo.supported_chips():
+            combo.addItem(chip.display_name, chip.name)
+        combo.setCurrentIndex(max(combo.findData(entry.chip or ""), 0))
+        combo.setToolTip(
+            "This file names no chip: choose the MCU it is for. Left empty, it follows the "
+            "firmware's only chip; with several chips it is not flashed."
+        )
+
+        def chosen(_index: int, e: Entry = entry, w: QComboBox = combo) -> None:
+            self._set_chip(e, w)
+
+        combo.activated.connect(chosen)
+        return _cell(combo)
 
     def _name_cell(self, entry: Entry, mark: EntryMark | None, dim: str | None) -> QWidget:
         widget = QWidget()
@@ -490,6 +526,20 @@ class EntriesTab(QWidget):
             return
         self._owner.library.set_entry_note(self._firmware.id, entry.id, widget.text().strip())
         entry.note = widget.text().strip()
+
+    def _set_chip(self, entry: Entry, widget: QComboBox) -> None:
+        if self._firmware is None:
+            return
+        chosen = str(widget.currentData() or "") or None
+        if chosen == entry.chip:
+            return
+        try:
+            self._owner.library.set_entry_chip(self._firmware.id, entry.id, chosen)
+        except ValueError as exc:
+            self._owner.note("error", f"[entry] {exc}")
+            return
+        self._owner.note("dim", f"[entry] {entry.name}: MCU -> {chosen or 'not set'}")
+        self._owner.changed()
 
     def _add_files(self) -> None:
         if self._firmware is None:
@@ -661,7 +711,7 @@ class ParamsTab(QWidget):
         name.setReadOnly(locked)
         name.editingFinished.connect(lambda: self._rename(name))
         self._add("Name", name, "unique within the project, or among standalone firmware")
-        self._add("Chip", self._chip(firmware, "chip" in editable))
+        self._add("Chip", self._chip(firmware), "from the entries: MCU column on the Entries tab")
         self._add(*self._origin(firmware))
         self._add("Flash mode / freq / size", self._flash(firmware, "flash_mode" in editable))
         self._add(
@@ -732,17 +782,57 @@ class ParamsTab(QWidget):
             return "Build directory", self._build_dir(firmware)
         paths = [e for e in firmware.entries if e.file.startswith("path:")]
         first = next((e for e in paths if e.enabled), paths[0] if paths else None)
-        text = str(Path(first.file.removeprefix("path:")).parent) if first else "—"
-        widget = elided(text, mono=True, middle=True)
+        text = firmware.folder or (
+            str(Path(first.file.removeprefix("path:")).parent) if first else "—"
+        )
         box = QWidget()
         column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(2)
-        column.addWidget(widget)
-        small = label("fixed firmware: entries are recorded by name, path and hash", tone="3")
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(elided(text, mono=True, middle=True), 1)
+        move = button("Re-locate folder…", "ibtn")
+        move.setEnabled(bool(firmware.folder) and not self._owner.is_locked(firmware.id))
+        move.setToolTip("Point every file at the same place in another folder")
+        move.clicked.connect(lambda: self._relocate_folder(firmware))
+        row.addWidget(move)
+        column.addLayout(row)
+        small = label(
+            "fixed firmware: files must be in this folder or below it; entries are recorded "
+            "by name, path and hash",
+            tone="3",
+        )
         small.setStyleSheet("font-size: 12px;")
+        small.setWordWrap(True)
         column.addWidget(small)
+        outside = entries_outside(firmware)
+        if outside:
+            spread = label(
+                "Entries spread over several folders (added before this rule): "
+                + ", ".join(e.name for e in outside),
+                tone="2",
+            )
+            spread.setStyleSheet("font-size: 12px;")
+            spread.setWordWrap(True)
+            column.addWidget(spread)
         return "Files folder", box
+
+    def _relocate_folder(self, firmware: Firmware) -> None:
+        chosen = QFileDialog.getExistingDirectory(self, "Re-locate folder", firmware.folder)
+        if not chosen:
+            return
+        try:
+            left = self._owner.library.relocate_folder(firmware.id, Path(chosen))
+        except (FolderError, ValueError) as exc:
+            self._owner.note("error", f"[firmware] {exc}")
+            return
+        if left:
+            names = ", ".join(left)
+            self._owner.note("warning", f"[firmware] not found under {chosen}, unchanged: {names}")
+        else:
+            self._owner.note("ok", f"[firmware] {firmware.name}: files now in {chosen}")
+        self._owner.changed()
 
     def _build_dir(self, firmware: Firmware) -> QWidget:
         assert firmware.build_ref is not None
@@ -773,27 +863,16 @@ class ParamsTab(QWidget):
         column.addWidget(small)
         return box
 
-    def _chip(self, firmware: Firmware, editable: bool) -> QWidget:
-        if not editable:
-            return _derived(
-                f"{chip_name(firmware.chip)} ({firmware.chip})" if firmware.chip else "—"
-            )
-        combo = QComboBox()
-        combo.addItem("(not set)", "")
-        for chip in chipinfo.supported_chips():
-            combo.addItem(f"{chip.display_name} ({chip.name})", chip.name)
-        combo.setCurrentIndex(max(combo.findData(firmware.chip or ""), 0))
-        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        combo.activated.connect(
-            lambda: combo.currentData() and self._set("chip", str(combo.currentData()))
-        )
-        return _left(combo)
+    def _chip(self, firmware: Firmware) -> QWidget:
+        chips = firmware_chips(self._owner.context, firmware)
+        return _derived(", ".join(f"{chip_name(c)} ({c})" for c in chips) or "—")
 
     def _flash(self, firmware: Firmware, editable: bool) -> QWidget:
         flash = firmware.flash
         if not editable:
             return _derived(f"{flash.mode} / {flash.freq} / {flash.size}")
-        chip = chipinfo.get_chip(firmware.chip) if firmware.chip else None
+        chips = firmware_chips(self._owner.context, firmware)
+        chip = chipinfo.get_chip(chips[0]) if len(chips) == 1 else None
         freqs = (
             chip.flash_freqs
             if chip

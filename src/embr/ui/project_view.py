@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from embr.app.chips import firmware_chips
 from embr.core.firmware.model import Firmware
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.project import DuplicateGroupError, Project, ProjectDefaults
 from embr.ui import dialogs
 from embr.ui.owner import Owner
-from embr.ui.sidebar import chip_name
+from embr.ui.sidebar import chips_text
 from embr.ui.widgets import button, clear_layout, label, tag
 from embr.ui.workspace import NotesEdit
 
@@ -27,7 +28,7 @@ from embr.ui.workspace import NotesEdit
 class FirmwareLink(QFrame):
     clicked = Signal(str)
 
-    def __init__(self, firmware: Firmware) -> None:
+    def __init__(self, firmware: Firmware, chips: tuple[str, ...]) -> None:
         super().__init__()
         self.setObjectName("rec")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -39,8 +40,8 @@ class FirmwareLink(QFrame):
         text.addWidget(QLabel(firmware.name))
         text.addWidget(label(firmware.notes or "", tone="3"))
         row.addLayout(text, 1)
-        if firmware.chip:
-            row.addWidget(tag(chip_name(firmware.chip), "gray"))
+        if chips:
+            row.addWidget(tag(chips_text(chips), "gray"))
 
     def mousePressEvent(self, event: object) -> None:  # type: ignore[override]
         self.clicked.emit(self._id)
@@ -218,7 +219,7 @@ class ProjectView(QScrollArea):
             if not listed:
                 inner.addWidget(label("(empty)", tone="3"))
             for firmware in listed:
-                link = FirmwareLink(firmware)
+                link = FirmwareLink(firmware, firmware_chips(self._owner.context, firmware))
                 link.clicked.connect(self._owner.select_firmware)
                 inner.addWidget(link)
         if not members and not project.devices:

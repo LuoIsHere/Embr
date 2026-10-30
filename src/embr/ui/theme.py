@@ -200,6 +200,8 @@ QPushButton[kind="danger"] {{ background: {p.bad}; border-color: {p.bad}; color:
 QPushButton[kind="danger-small"] {{ background: {p.bad}; border-color: {p.bad}; color: #ffffff; }}
 QPushButton[kind="accent-small"] {{ background: {p.accent}; border-color: {p.accent};
   color: {p.accent_fg}; font-weight: 600; }}
+QPushButton[kind="accent-small"]:disabled, QPushButton[kind="danger-small"]:disabled {{
+  background: {p.accent_soft}; border-color: {p.accent_soft}; color: {p.fg_3}; }}
 QPushButton[kind="newbtn"] {{ background: transparent; border: 1px dashed {p.line}; color: {p.fg_2};
   min-height: 26px; }}
 QPushButton[kind="newbtn"]:hover {{ border-color: {p.accent}; color: {p.accent}; }}

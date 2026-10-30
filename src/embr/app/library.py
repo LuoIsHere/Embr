@@ -394,20 +394,23 @@ class Library:
     # ---- entries ----------------------------------------------------------------------
 
     def create_from_files(
-        self, paths: Sequence[Path], project_id: str | None = None, device: str = ""
+        self,
+        paths: Sequence[Path],
+        project_id: str | None = None,
+        device: str = "",
+        name: str = "",
     ) -> Firmware:
-        """New fixed firmware (as create_firmware()) holding `paths`, named after the first
-        file: files dropped on the sidebar (design doc §12 item 19). The folder rule is
-        checked first: FolderError (or OSError for an unreadable file) and nothing is
+        """New fixed firmware (as create_firmware()) holding `paths`, named `name` or after
+        the first file: files dropped on the sidebar (design doc §12 item 19). The folder
+        rule is checked first: FolderError (or OSError for an unreadable file) and nothing is
         created."""
         if not paths:
             raise ValueError("no files to add")
         _check_folder(str(Path(paths[0]).resolve().parent), paths)
         for path in paths:
             path.read_bytes()  # unreadable files fail here, before anything is created
-        firmware = self.create_firmware(default_name_from_files([p.name for p in paths]))
-        if project_id is not None:
-            firmware = self.move_firmware(firmware.id, project_id, device)
+        stem = name.strip() or default_name_from_files([p.name for p in paths])
+        firmware = self.create_firmware(stem, project_id, device)
         self.add_files(firmware.id, paths)
         return self._ctx.firmware.get(firmware.id)
 

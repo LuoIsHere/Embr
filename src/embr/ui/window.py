@@ -1,5 +1,6 @@
 """The main window: wires the panels to the app layer."""
 
+import html
 from datetime import date, datetime
 from pathlib import Path
 
@@ -30,12 +31,13 @@ from embr.app.checklist import flash_ready, preflight
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, preview_command
 from embr.app.identify import IdentifyMemory, IdentifySnapshot
-from embr.app.library import AlreadyTrackedError, Library
+from embr.app.library import AlreadyTrackedError, Library, TrackingEntriesError
 from embr.app.merging import Merger
 from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, TrackStatus
-from embr.core.firmware.import_idf import IdfBuildError
+from embr.core.firmware.entries import FolderError
+from embr.core.firmware.import_idf import IdfBuildError, build_dir_below
 from embr.core.firmware.model import editable_params
 from embr.core.firmware.store import default_name_archived
 from embr.core.firmware.tracking import ResolveState
@@ -65,7 +67,7 @@ from embr.ui.frame import FrameWindow
 from embr.ui.icons import app_icon
 from embr.ui.log_panel import LOG_HEIGHT, LogPanel
 from embr.ui.project_view import ProjectView
-from embr.ui.sidebar import PLUS, Sidebar
+from embr.ui.sidebar import PLUS, Node, Sidebar
 from embr.ui.theme import Palette, palette, style_sheet, ui_font
 from embr.ui.widgets import label
 from embr.ui.workspace import FirmwareView, Header
@@ -83,6 +85,9 @@ RESULT_TEXT = {
     RecordResult.FAILED: "Failed",
     RecordResult.CANCELLED: "Cancelled",
 }
+COMMAND_UNKNOWN = "(identify the board, or add entries with addresses, to see the command)"
+READ_FOLDER = "read_folder"
+"""settings.ini [ui]: the folder the last read flash was saved to."""
 HINT_MANUAL_RESET = (
     "Flashed and verified. If the device did not restart on its own (usually when download "
     "mode was entered by hand), reset it manually."
@@ -209,6 +214,7 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.new_firmware.connect(self._new_firmware)
         self.sidebar_panel.new_project.connect(self._new_project)
         self.sidebar_panel.import_idf.connect(self._import_idf)
+        self.sidebar_panel.files_dropped.connect(self._files_dropped)
         self.firmware_view.entries.archive_requested.connect(self._archive_entry)
         self.firmware_view.entries.merge_requested.connect(self._merge)
         self.connection.erase_clicked.connect(self._erase)
@@ -291,6 +297,13 @@ class EmbrWindow(FrameWindow):
         self._selection = ("project", project_id)
         self._last_outcome = None
         self.changed()
+
+    def identified_chip(self) -> str | None:
+        port = self.connection.selected_port()
+        snapshot = self._memory.snapshot
+        if port is None or snapshot is None or snapshot.port.device != port.device:
+            return None
+        return snapshot.info.chip
 
     def is_locked(self, firmware_id: str) -> bool:
         return self._ops.running_firmware_id == firmware_id
@@ -391,6 +404,7 @@ class EmbrWindow(FrameWindow):
         selection = self._selection
         try:
             if selection is not None and selection[0] == "firmware":
+                self._fit_entries(selection[1])
                 status = self._library.tracker.check(selection[1])
                 self._show_status(status)
                 self.pages.setCurrentWidget(self.firmware_view)
@@ -406,6 +420,17 @@ class EmbrWindow(FrameWindow):
         self.header.hide()
         self.pages.setCurrentWidget(self.empty_view)
         return
+
+    def _fit_entries(self, firmware_id: str) -> None:
+        """Untick the entries that are not for the identified board (design doc §12 item
+        13); the entries table then shows them greyed out."""
+        chip = self.identified_chip()
+        if chip is None or self.is_locked(firmware_id):
+            return
+        unticked = self._library.fit_entries(firmware_id, chip)
+        if unticked:
+            names = ", ".join(e.name for e in unticked)
+            self.note("note", f"[entries] unticked, not for this {chip}: {names}")
 
     def _refresh_right(self) -> None:
         self.header.setVisible(self._selection is not None)
@@ -427,9 +452,13 @@ class EmbrWindow(FrameWindow):
             ready = flash_ready(items, snapshot, port)
             self.connection.set_flash_enabled(ready and not busy)
             command = preview_command(
-                self._context, firmware, port, self.connection.selected_baud()
+                self._context,
+                firmware,
+                port,
+                self.connection.selected_baud(),
+                self.identified_chip(),
             )
-            self.cmdbar.set_command(command or "(add entries with addresses to see the command)")
+            self.cmdbar.set_command(command or COMMAND_UNKNOWN)
         self.connection.identify.setEnabled(port is not None and not busy)
         self.connection.set_board_actions(
             port is not None
@@ -575,6 +604,7 @@ class EmbrWindow(FrameWindow):
             port, default_baud(self._context.settings, port) if port else 460800
         )
         self._refresh_tree()
+        self._refresh_workspace()  # entries for another chip turn grey, or back
         self._refresh_right()
 
     # ---- jobs -------------------------------------------------------------------------
@@ -712,6 +742,8 @@ class EmbrWindow(FrameWindow):
                 "ok" if done else "warning",
                 f"{RESULT_TEXT[outcome.result]}. Record saved. Port released.",
             )
+            if done and outcome.saved_to:
+                self.note("ok", f"[read] saved to {outcome.saved_to}")
             if done and outcome.firmware_id is not None:
                 self.note("note", "[read] saved as a new firmware; it may contain secrets (NVS)")
                 self.select_firmware(outcome.firmware_id)
@@ -798,9 +830,13 @@ class EmbrWindow(FrameWindow):
 
     # ---- stage two actions --------------------------------------------------------------
 
-    def _import_idf(self) -> None:
-        project_id, device = self._current_placement()
-        request = dialogs.import_idf(self, self._library, project_id, device, self.select_firmware)
+    def _import_idf(
+        self, build_dir: Path | None = None, placement: tuple[str | None, str] | None = None
+    ) -> None:
+        project_id, device = placement or self._current_placement()
+        request = dialogs.import_idf(
+            self, self._library, project_id, device, self.select_firmware, build_dir
+        )
         if request is None:
             return
         try:
@@ -902,9 +938,15 @@ class EmbrWindow(FrameWindow):
                 return
         else:
             project_id, device = self._current_placement()
-            request = dialogs.read_flash(self, self._library, snapshot.info, project_id, device)
+            settings = self._context.settings
+            folder = Path(settings.get(ui_settings.UI_SECTION, READ_FOLDER) or Path.home())
+            request = dialogs.read_flash(
+                self, self._library, snapshot.info, project_id, device, folder
+            )
             if request is None:
                 return
+            settings.set(ui_settings.UI_SECTION, READ_FOLDER, str(request.output.parent))
+            settings.save()
         self._last_outcome = None
         self.log_panel.clear_log()
         self.log_panel.log_lines([("dim", f"# job {kind.value} · {port_text(port)} · {_now()}")])
@@ -920,6 +962,8 @@ class EmbrWindow(FrameWindow):
                     size=request.size,
                     project_id=request.placement.project_id,
                     device=request.placement.device,
+                    output=request.output,
+                    import_firmware=request.import_firmware,
                 )
         except (BusyError, OSError, ValueError) as exc:
             self.note("error", f"[{kind.value}] {exc}")
@@ -928,6 +972,61 @@ class EmbrWindow(FrameWindow):
         self._job_kind = kind
         self.connection.set_running(True)
         self.connection.show_progress(0, "Connecting…")
+
+    def _files_dropped(self, names: list[str], node: object) -> None:
+        """Files or a folder dragged from Explorer onto the sidebar (design doc §12 item 19):
+        on a firmware they are added; on a project, group or the standalone header a fixed
+        firmware is created after its name is confirmed, or an ESP-IDF build folder opens the
+        import dialog. Anything else is refused as a whole, with a dialog saying why."""
+        if not isinstance(node, Node):
+            return
+        if node.firmware_id is not None and self.is_locked(node.firmware_id):
+            dialogs.notice(self, "Nothing added", ["This firmware is being flashed."])
+            return
+        files, build, problems = sort_drop([Path(n) for n in names])
+        if node.firmware_id is not None:
+            self._drop_on_firmware(node.firmware_id, files, build, problems)
+            return
+        if build is not None and not problems:
+            self._import_idf(build, (node.project_id, node.device))
+            return
+        if problems or not files:
+            dialogs.notice(self, "Nothing added", problems or ["No files were dropped."])
+            return
+        name = dialogs.ask_text(
+            self,
+            "New firmware",
+            "Name shown in the sidebar",
+            files[0].stem,
+            f"{len(files)} file(s) from {files[0].parent}",
+            "Create",
+        )
+        if name is None:
+            return
+        try:
+            firmware = self._library.create_from_files(files, node.project_id, node.device, name)
+        except (FolderError, OSError, ValueError) as exc:
+            dialogs.notice(self, "Nothing added", [_text(exc)])
+            return
+        self.note("dim", f"[new] fixed firmware '{firmware.name}' from {len(files)} file(s)")
+        self.select_firmware(firmware.id)
+
+    def _drop_on_firmware(
+        self, firmware_id: str, files: list[Path], build: Path | None, problems: list[str]
+    ) -> None:
+        if build is not None:
+            problems = [*problems, f"{build.name}: drop a build folder on a project or group"]
+        if problems or not files:
+            dialogs.notice(self, "Nothing added", problems or ["No files were dropped."])
+            return
+        try:
+            added = self._library.add_files(firmware_id, files)
+        except (TrackingEntriesError, FolderError, OSError, ValueError) as exc:
+            dialogs.notice(self, "Nothing added", [_text(exc)])
+            return
+        name = self._library.firmware(firmware_id).name
+        self.note("dim", f"[entry] {len(added)} entries added to '{name}'")
+        self.select_firmware(firmware_id)
 
     def _erase(self) -> None:
         self._board_job(JobKind.ERASE)
@@ -1043,3 +1142,48 @@ def _port_unavailable(message: str) -> bool:
     """The job could not open its port: in use by another program, or gone."""
     text = message.lower()
     return any(k in text for k in ("could not open", "port is busy", "access is denied"))
+
+
+def sort_drop(paths: list[Path]) -> tuple[list[Path], Path | None, list[str]]:
+    """(.bin files to add, an ESP-IDF build folder, problems) of what was dropped. A build
+    folder counts only when dropped on its own; a project folder with a build folder below
+    it stands for that build folder."""
+    files: list[Path] = []
+    builds: list[Path] = []
+    problems: list[str] = []
+    for path in paths:
+        name = html.escape(path.name or str(path))
+        if path.is_dir():
+            build = path if (path / "flasher_args.json").is_file() else build_dir_below(path)
+            if build is None:
+                problems.append(f"<b>{name}</b>: a folder without an ESP-IDF build in it")
+            else:
+                builds.append(build)
+        elif not path.exists():
+            problems.append(f"<b>{name}</b>: not found")
+        elif path.suffix.lower() == ".lnk":
+            problems.append(f"<b>{name}</b>: a shortcut; drop the file it points to")
+        elif path.suffix.lower() != ".bin":
+            problems.append(
+                f"<b>{name}</b>: not a .bin file (other files can be added as attachments on "
+                "the Entries tab)"
+            )
+        else:
+            try:
+                with path.open("rb") as handle:
+                    empty = not handle.read(1)
+            except OSError as exc:
+                problems.append(f"<b>{name}</b>: cannot be read ({html.escape(_text(exc))})")
+                continue
+            if empty:
+                problems.append(f"<b>{name}</b>: empty file (0 bytes)")
+            else:
+                files.append(path)
+    if builds and (files or len(builds) > 1 or problems):
+        problems.append("Drop an ESP-IDF build folder on its own.")
+    build = builds[0] if len(builds) == 1 else None
+    return files, build, problems
+
+
+def _text(exc: Exception) -> str:
+    return exc.strerror if isinstance(exc, OSError) and exc.strerror else str(exc)

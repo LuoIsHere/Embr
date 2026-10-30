@@ -4,6 +4,7 @@ say what they affect."""
 import html
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
@@ -36,6 +37,8 @@ from embr.core.flasher.protocol import InfoEvent
 from embr.core.storage.paths import AppPaths
 from embr.ui.widgets import button, label
 
+IMPORT_LABEL = "Import into Embr as a firmware"
+"""Read flash and merge: keep the result in the firmware list too (checked by default)."""
 REPOSITORY = "https://github.com/LuoIsHere/Embr"
 RELEASES = "https://github.com/LuoIsHere/Embr/releases"
 
@@ -142,6 +145,15 @@ def confirm(
         dialog.body.addWidget(box)
     accepted = dialog.exec() == QDialog.DialogCode.Accepted
     return accepted, bool(box and box.isChecked())
+
+
+def notice(parent: QWidget, title: str, lines: list[str]) -> None:
+    """A message with a Close button only. Lines are rich text."""
+    dialog = Dialog(parent, title, "Close", danger=False)
+    dialog.cancel.hide()
+    for line in lines:
+        dialog.text(line)
+    dialog.exec()
 
 
 def ask_text(
@@ -300,8 +312,10 @@ def import_idf(
     project_id: str | None,
     device: str,
     show_firmware: Callable[[str], None],
+    build_dir: Path | None = None,
 ) -> IdfImport | None:
-    """Only a folder with flasher_args.json is accepted. A project folder gets a button to
+    """`build_dir` fills in the folder (a folder dropped on the sidebar). Only a folder with
+    flasher_args.json is accepted. A project folder gets a button to
     use its build folder (never replaced silently); a build folder another firmware already
     follows gets a button that closes the dialog and shows that firmware."""
     dialog = Dialog(parent, "Import ESP-IDF build", "Import", danger=False)
@@ -406,6 +420,9 @@ def import_idf(
 
     browse.clicked.connect(pick)
     folder.editingFinished.connect(refresh)
+    if build_dir is not None:
+        folder.setText(str(build_dir))
+        refresh()
     dialog.check = lambda: bool(found)
     accepted = dialog.exec() == QDialog.DialogCode.Accepted
     if chosen:
@@ -511,7 +528,7 @@ def merge(
     row.addWidget(browse)
     dialog.body.addWidget(label("Save as", tone="3"))
     dialog.body.addLayout(row)
-    add = QCheckBox("add the result to the list as a new firmware")
+    add = QCheckBox(IMPORT_LABEL)
     add.setChecked(True)
     dialog.body.addWidget(add)
     dialog.text(
@@ -531,13 +548,16 @@ def merge(
 
     def refresh() -> None:
         chosen = options()
+        dialog.ok.setEnabled(False)
         if chosen is None:
             command.setText("The start offset is not a hex number.")
             return
         try:
             command.setText(merger.command(firmware.id, Path(output.text()), chosen))
-        except (PlanError, ValueError) as exc:
+        except (PlanError, ValueError) as exc:  # e.g. checked entries for two chips
             command.setText(str(exc))
+            return
+        dialog.ok.setEnabled(True)
 
     def pick() -> None:
         chosen, _ = QFileDialog.getSaveFileName(
@@ -581,11 +601,19 @@ class ReadRequest:
     size: int | None
     """None: to the end of the flash."""
     placement: Placement
+    output: Path
+    import_firmware: bool
 
 
 def read_flash(
-    parent: QWidget, library: Library, info: InfoEvent, project_id: str | None, device: str
+    parent: QWidget,
+    library: Library,
+    info: InfoEvent,
+    project_id: str | None,
+    device: str,
+    folder: Path,
 ) -> ReadRequest | None:
+    """`folder`: where the file goes by default (the last one used)."""
     dialog = Dialog(parent, "Read flash", "Read", danger=False)
     whole = QCheckBox(f"whole flash ({info.flash_size or 'detected size'})")
     whole.setChecked(True)
@@ -593,18 +621,41 @@ def read_flash(
     start = QLineEdit("0x0")
     size = QLineEdit("0x100000")
     range_row = dialog.row(("Start address (hex)", start), ("Size (hex)", size))
+    mac = (info.mac or "unknown").replace(":", "")
+    output = QLineEdit(str(folder / f"{info.chip}_{mac}_{datetime.now():%Y%m%d-%H%M%S}.bin"))
+    browse = button("Browse…")
+    row = QHBoxLayout()
+    row.setSpacing(6)
+    row.addWidget(output, 1)
+    row.addWidget(browse)
+    dialog.body.addWidget(label("Save to", tone="3"))
+    dialog.body.addLayout(row)
+    add = QCheckBox(IMPORT_LABEL)
+    add.setChecked(True)
+    dialog.body.addWidget(add)
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
-        "The content is saved in the archive as a new fixed firmware with one merged entry. A "
-        "dump includes NVS and may contain Wi-Fi credentials and other secrets."
+        "Imported, the content is also kept in the archive as a new fixed firmware with one "
+        "merged entry. A dump includes NVS and may contain Wi-Fi credentials and other secrets."
     )
 
     def sync() -> None:
         range_row.setVisible(not whole.isChecked())
+        placement.project.setEnabled(add.isChecked())
+        placement.group.setEnabled(add.isChecked() and placement.value().project_id is not None)
         if dialog.isVisible():
             dialog.fit()
 
+    def pick() -> None:
+        chosen, _ = QFileDialog.getSaveFileName(
+            dialog, "Save flash content", output.text(), "Binary files (*.bin)"
+        )
+        if chosen:
+            output.setText(chosen)
+
     whole.toggled.connect(sync)
+    add.toggled.connect(sync)
+    browse.clicked.connect(pick)
     sync()
 
     def parsed() -> tuple[int, int | None] | None:
@@ -616,10 +667,29 @@ def read_flash(
             return None
         return (address, length) if address >= 0 and length > 0 else None
 
-    dialog.check = lambda: parsed() is not None
+    def target_ok() -> bool:
+        path = Path(output.text().strip())
+        if not output.text().strip() or path.is_dir():
+            return False
+        if not path.exists():
+            return True
+        accepted, _ = confirm(
+            dialog,
+            "Replace file",
+            [
+                f"<b>{html.escape(path.name)}</b> already exists in "
+                f"{html.escape(str(path.parent))}. Replace it?"
+            ],
+            "Replace",
+        )
+        return accepted
+
+    dialog.check = lambda: parsed() is not None and target_ok()
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     found = parsed()
     if found is None:
         return None
-    return ReadRequest(found[0], found[1], placement.value())
+    return ReadRequest(
+        found[0], found[1], placement.value(), Path(output.text().strip()), add.isChecked()
+    )

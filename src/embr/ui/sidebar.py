@@ -91,10 +91,14 @@ class Row(QWidget):
 
 class FirmwareTree(QTreeWidget):
     """Rows are QTreeWidgetItems carrying a Node, drawn with Row widgets. Dragging a
-    firmware row emits move_requested on a valid drop; the tree itself never moves items."""
+    firmware row emits move_requested on a valid drop; the tree itself never moves items.
+    Files dragged in from Explorer emit files_dropped (design doc §12 item 19): on a
+    project, group or the standalone header, or on a firmware row."""
 
     move_requested = Signal(str, object, str)
     """firmware id, project id (None = standalone), group ("" = ungrouped)."""
+    files_dropped = Signal(list, object)
+    """local paths (list[str]), the Node they were dropped on."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -143,14 +147,15 @@ class FirmwareTree(QTreeWidget):
         self._highlight(None)
 
     def dragEnterEvent(self, event: QDragMoveEvent) -> None:  # type: ignore[override]
-        if event.mimeData().hasFormat(MIME):
+        if event.mimeData().hasFormat(MIME) or event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        target = self._target(event.position().toPoint())
-        if target is None or not event.mimeData().hasFormat(MIME):
+        mime = event.mimeData()
+        target = self._target(event.position().toPoint(), files=not mime.hasFormat(MIME))
+        if target is None or not (mime.hasFormat(MIME) or mime.hasUrls()):
             self._highlight(None)
             event.ignore()
             return
@@ -161,10 +166,17 @@ class FirmwareTree(QTreeWidget):
         self._highlight(None)
 
     def dropEvent(self, event: QDropEvent) -> None:
-        item = self._target(event.position().toPoint())
+        mime = event.mimeData()
+        files = not mime.hasFormat(MIME) and mime.hasUrls()
+        item = self._target(event.position().toPoint(), files=files)
         self._highlight(None)
         node = self.node(item)
-        if node is None or not event.mimeData().hasFormat(MIME):
+        if node is not None and files:
+            event.acceptProposedAction()
+            paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+            self.files_dropped.emit(paths, node)
+            return
+        if node is None or not mime.hasFormat(MIME):
             event.ignore()
             return
         firmware_id = bytes(event.mimeData().data(MIME).data()).decode()
@@ -176,10 +188,14 @@ class FirmwareTree(QTreeWidget):
         elif node.drop == "group":
             self.move_requested.emit(firmware_id, node.project_id, node.device)
 
-    def _target(self, pos: QPoint) -> QTreeWidgetItem | None:
+    def _target(self, pos: QPoint, *, files: bool = False) -> QTreeWidgetItem | None:
+        """The row a drop lands on: a project, group or the standalone header; for files
+        also a firmware row."""
         item = self.itemAt(pos)
         node = self.node(item)
-        return item if node is not None and node.drop is not None else None
+        if node is None:
+            return None
+        return item if node.drop is not None or (files and node.kind == "firmware") else None
 
     def _highlight(self, item: QTreeWidgetItem | None) -> None:
         row = self.itemWidget(item, 0) if item is not None else None
@@ -199,6 +215,8 @@ class Sidebar(QWidget):
     new_project = Signal()
     import_idf = Signal()
     query_changed = Signal(str)
+    files_dropped = Signal(list, object)
+    """See FirmwareTree.files_dropped."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -230,6 +248,7 @@ class Sidebar(QWidget):
         layout.addWidget(self.tree, 1)
         self.search.textChanged.connect(self.query_changed.emit)
         self.tree.itemClicked.connect(self._clicked)
+        self.tree.files_dropped.connect(self.files_dropped.emit)
         self._folded: set[str] = set()
         self._data: Tree | None = None
         self._selected: tuple[str, str] | None = None
