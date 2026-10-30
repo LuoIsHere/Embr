@@ -127,7 +127,12 @@ def flash_ready(
     """Whether the Flash button may be pressed (design doc §12 item 5): a port is selected,
     the last identification is a snapshot of that port (same device name), and no item
     refuses. The flash job still identifies the chip again in its own connection."""
-    raise NotImplementedError
+    return (
+        port is not None
+        and snapshot is not None
+        and snapshot.port.device == port.device
+        and can_flash(items)
+    )
 
 
 _TITLES = {

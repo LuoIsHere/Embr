@@ -10,6 +10,7 @@ change to a tracking firmware invalidates its tracker status.
 """
 
 import dataclasses
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from embr.app.context import AppContext
-from embr.app.flashplan import PlanError
+from embr.app.flashplan import PlanError, image_header
 from embr.app.tracking import Tracker
 from embr.core.firmware import model
 from embr.core.firmware.entries import (
@@ -28,6 +29,7 @@ from embr.core.firmware.entries import (
     entry_from_file,
     resolve_partitions,
     set_address,
+    sorted_entries,
 )
 from embr.core.firmware.files import (
     FileState,
@@ -37,7 +39,6 @@ from embr.core.firmware.files import (
     relocate,
 )
 from embr.core.firmware.image_sniff import (
-    PartitionTable,
     blank_otadata,
     parse_partition_table,
     sniff,
@@ -54,6 +55,8 @@ from embr.core.firmware.model import (
 )
 from embr.core.firmware.store import default_name_from_files
 from embr.core.firmware.tracking import EntryMark, ResolveState
+from embr.core.flasher.checks import ChipState, revision_incompatibility
+from embr.core.flasher.plan import PlanEntry
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.project import Project, ProjectDefaults
 from embr.core.storage.ids import unique_name
@@ -317,6 +320,11 @@ class Library:
         AlreadyTrackedError when tracking_firmware_for() finds a firmware already following
         the same directory, nothing is created."""
         build = read_build(build_dir)
+        tracked = self.tracking_firmware_for(build.build_dir)
+        if tracked is not None:
+            raise AlreadyTrackedError(
+                f"{build.build_dir} is already followed by '{tracked.name}'", tracked.id
+            )
         stem = name.strip() or default_firmware_name(build)
         if project_id is None:
             firmware = self._ctx.firmware.create(stem, source=Source.IDF_BUILD)
@@ -336,7 +344,17 @@ class Library:
         """The IDF tracking firmware that follows `build_dir`, or None. Paths are compared
         after resolving them (absolute, `..` removed) and ignoring case and a trailing
         separator, as Windows does."""
-        raise NotImplementedError
+        key = _path_key(build_dir)
+        return next(
+            (
+                f
+                for f in self._ctx.firmware.all()
+                if f.source == Source.IDF_BUILD
+                and f.build_ref is not None
+                and _path_key(Path(f.build_ref.path)) == key
+            ),
+            None,
+        )
 
     def mismatches(self, info: InfoEvent) -> dict[str, str]:
         """Firmware that do not fit the identified chip, by id, with the reason: a different
@@ -346,7 +364,20 @@ class Library:
         cached resolution (not resolved here; skipped when never resolved). Image headers
         are read at most once per file content. Firmware without a chip and without ESP
         images fit any chip."""
-        raise NotImplementedError
+        state = ChipState(info.chip, info.major, info.minor, info.flash_size, info.security)
+        found: dict[str, str] = {}
+        for stored in self._ctx.firmware.all():
+            if stored.source.tracking:
+                status = self._tracker.cached(stored.id)
+                if status is None:
+                    continue
+                firmware = status.firmware
+            else:
+                firmware = stored
+            reason = self._mismatch(firmware, state)
+            if reason is not None:
+                found[stored.id] = reason
+        return found
 
     def set_param(self, firmware_id: str, name: str, value: object) -> Firmware:
         """firmware.model.set_param() and save; its errors propagate."""
@@ -367,12 +398,7 @@ class Library:
         of the first ESP image added. Returns the new entries. Tracking firmware:
         TrackingEntriesError, nothing changes."""
         firmware = self._ctx.firmware.get(firmware_id)
-        if firmware.source.tracking:
-            table = self._build_table(firmware_id)
-            added = [entry_from_file(path, table) for path in paths]
-            firmware.user_entries += added
-            self._save(firmware)
-            return added
+        _refuse_tracking(firmware)
         was_empty = not firmware.entries
         # tables first, so the files after them get addresses from the table
         ordered = sorted(paths, key=lambda p: parse_partition_table(p.read_bytes()) is None)
@@ -412,13 +438,10 @@ class Library:
         larger than it is reported by the checklist, not raised. Tracking firmware:
         TrackingEntriesError."""
         firmware = self._ctx.firmware.get(firmware_id)
+        _refuse_tracking(firmware)
         entry = attachment_entry(path, address=address, partition=partition)
-        if firmware.source.tracking:
-            firmware.user_entries.append(entry)
-            self._save(firmware)
-        else:
-            firmware.entries.append(entry)
-            self._save_entries(firmware)
+        firmware.entries.append(entry)
+        self._save_entries(firmware)
         return entry
 
     def set_entry_address(self, firmware_id: str, entry_id: str, text: str) -> Entry:
@@ -483,15 +506,12 @@ class Library:
         source = self._ctx.firmware.get(firmware_id)
         entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
         target = self._ctx.firmware.get(target_id)
+        _refuse_tracking(target)
         copy = copy_entry(entry)
         if copy.address_source == AddressSource.AUTO:  # no detection outside its firmware
             copy.address_source = AddressSource.MANUAL
-        if target.source.tracking:
-            target.user_entries.append(copy)
-            self._save(target)
-        else:
-            target.entries.append(copy)
-            self._save_entries(target)
+        target.entries.append(copy)
+        self._save_entries(target)
         return copy
 
     def relocate_entry(self, firmware_id: str, entry_id: str, path: Path) -> Entry:
@@ -552,13 +572,32 @@ class Library:
         resolved = self._tracker.check(firmware_id).firmware
         return dataclasses.replace(_entry(resolved, entry_id))
 
-    def _build_table(self, firmware_id: str) -> PartitionTable | None:
-        resolved = self._tracker.check(firmware_id).firmware
-        try:
-            table, _ = enabled_partition_table(resolved, self._read)
-        except OSError:
-            return None
-        return table
+    def _mismatch(self, firmware: Firmware, state: ChipState) -> str | None:
+        if firmware.chip is not None and firmware.chip != state.chip:
+            return f"firmware is for {firmware.chip}, the board is {state.chip}"
+        for entry in sorted_entries([e for e in firmware.entries if e.enabled]):
+            header = image_header(self._ctx, entry)
+            if header is None:
+                continue
+            if header.chip is not None and header.chip != state.chip:
+                return f"{entry.name} is for {header.chip}, the board is {state.chip}"
+            if state.major < 0:  # secure download mode: the revision was not read
+                continue
+            planned = PlanEntry(
+                address=entry.address or 0,
+                path="",
+                name=entry.name,
+                sha256=entry.sha256,
+                size=entry.size,
+                image_chip=header.chip,
+                min_rev_full=header.min_rev_full,
+                max_rev_full=header.max_rev_full,
+                legacy_min_rev=header.legacy_min_rev,
+            )
+            reason = revision_incompatibility(state, planned)
+            if reason is not None:
+                return reason
+        return None
 
     def _row(self, firmware: Firmware) -> FirmwareRow:
         return FirmwareRow(
@@ -612,6 +651,18 @@ def _origin(firmware: Firmware) -> str:
     paths = [e for e in firmware.entries if e.file.startswith("path:")]
     first = next((e for e in paths if e.enabled), paths[0] if paths else None)
     return str(Path(first.file.removeprefix("path:")).parent) if first else ""
+
+
+def _refuse_tracking(firmware: Firmware) -> None:
+    if firmware.source.tracking:
+        raise TrackingEntriesError(
+            f"entries of '{firmware.name}' come from its build directory; archive this "
+            "version or create a fixed firmware to add files"
+        )
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve()))
 
 
 def _own_entry(firmware: Firmware, entry_id: str) -> Entry | None:

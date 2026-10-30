@@ -112,7 +112,22 @@ class Archiver:
     def usage(self) -> list[ArchiveUsage]:
         """Every indexed archive file with the firmware referring to it, in the archive
         index order (what the Clean archive dialog shows before deleting anything)."""
-        raise NotImplementedError
+        users: dict[str, list[Firmware]] = {}
+        for firmware in self._ctx.firmware.all():
+            shas = {
+                e.file.removeprefix(_ARCHIVE)
+                for e in [*firmware.entries, *firmware.user_entries]
+                if e.file.startswith(_ARCHIVE)
+            }
+            for sha in shas:
+                users.setdefault(sha, []).append(firmware)
+        return [
+            ArchiveUsage(
+                f,
+                tuple(fw.id for fw in sorted(users.get(f.sha256, []), key=lambda fw: fw.name)),
+            )
+            for f in self._ctx.archive.files()
+        ]
 
     def unreferenced(self) -> list[ArchiveFile]:
         """Archive files no firmware refers to (entries and user entries of all firmware)."""

@@ -140,7 +140,10 @@ def default_firmware_name(build: IdfBuild) -> str:
 def build_dir_below(path: Path) -> Path | None:
     """`path/build` when `path` itself has no flasher_args.json but `path/build` has one
     (the user picked the project folder), else None. Never searches deeper."""
-    raise NotImplementedError
+    if (path / FLASHER_ARGS).is_file():
+        return None
+    child = path / "build"
+    return child if (child / FLASHER_ARGS).is_file() else None
 
 
 _TARGET_LINE = re.compile(r'^CONFIG_IDF_TARGET="([^"]*)"', re.MULTILINE)
