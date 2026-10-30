@@ -2,7 +2,7 @@
 say what they affect."""
 
 import html
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,10 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from embr import __version__
+from embr.app.archiving import ArchiveUsage
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
 from embr.app.merging import MergeOptions, Merger
-from embr.core.archive import ArchiveFile
 from embr.core.firmware.import_idf import (
     IdfBuild,
     IdfBuildError,
@@ -435,26 +435,64 @@ def archive_version(
     return name.text().strip(), notes.text().strip()
 
 
-def clean_archive(parent: QWidget, files: list[ArchiveFile]) -> bool:
-    if not files:
-        confirm(parent, "Clean archive", ["No unreferenced archive files."], "Close", danger=False)
-        return False
-    total = sum(f.size for f in files)
-    lines = "".join(
-        f"<br>•&nbsp;{f.sha256[:12]}… {f.size:,} bytes, archived {f.first_archived[:10]}"
-        for f in files[:12]
+def clean_archive(
+    parent: QWidget,
+    usage: list[ArchiveUsage],
+    names: Mapping[str, str],
+    show_firmware: Callable[[str], None],
+) -> list[str]:
+    """What the archive holds and why files are kept; returns the hashes to delete (the
+    unreferenced ones, after confirming), else []. `names`: firmware id -> name. A firmware
+    name is a link that closes the dialog and shows that firmware."""
+    unused = [u.file for u in usage if not u.firmware_ids]
+    kept = [u for u in usage if u.firmware_ids]
+    dialog = Dialog(
+        parent, "Clean archive", "Delete files" if unused else "Close", danger=bool(unused)
     )
-    more = f"<br>…and {len(files) - 12} more" if len(files) > 12 else ""
-    accepted, _ = confirm(
-        parent,
-        "Clean archive",
-        [
-            f"Delete {len(files)} archive files ({total:,} bytes) that no firmware refers to? "
+    if not unused:
+        dialog.cancel.hide()
+    total = sum(u.file.size for u in usage)
+    dialog.text(f"The archive holds {len(usage)} files ({total:,} bytes).")
+    if kept:
+        users: dict[str, int] = {}
+        for u in kept:
+            for firmware_id in u.firmware_ids:
+                users[firmware_id] = users.get(firmware_id, 0) + 1
+        links = ", ".join(
+            f'<a href="{html.escape(fid)}">{html.escape(names.get(fid, fid))}</a> ({count})'
+            for fid, count in sorted(users.items(), key=lambda item: names.get(item[0], ""))
+        )
+        kept_text = dialog.text(
+            f"{len(kept)} files are kept because firmware refers to them: {links}. Archived "
+            "versions are firmware too; delete one of them first to free its files."
+        )
+        chosen: list[str] = []
+
+        def show(firmware_id: str) -> None:
+            chosen.append(firmware_id)
+            dialog.reject()
+
+        kept_text.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        kept_text.linkActivated.connect(show)
+    else:
+        chosen = []
+    if unused:
+        size = sum(f.size for f in unused)
+        lines = "".join(
+            f"<br>•&nbsp;{f.sha256[:12]}… {f.size:,} bytes, archived {f.first_archived[:10]}"
+            for f in unused[:12]
+        )
+        more = f"<br>…and {len(unused) - 12} more" if len(unused) > 12 else ""
+        dialog.text(
+            f"<b>Delete {len(unused)} files ({size:,} bytes) that no firmware refers to?</b> "
             f"This cannot be undone.{lines}{more}"
-        ],
-        "Delete files",
-    )
-    return accepted
+        )
+    else:
+        dialog.text("<b>Nothing to clean:</b> every archived file is in use.")
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    if chosen:
+        show_firmware(chosen[0])
+    return [f.sha256 for f in unused] if accepted and unused else []
 
 
 def merge(

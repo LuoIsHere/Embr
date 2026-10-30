@@ -854,10 +854,11 @@ class EmbrWindow(FrameWindow):
         self.changed()
 
     def _clean_archive(self) -> None:
-        files = self._archiver.unreferenced()
-        if dialogs.clean_archive(self, files):
-            self._archiver.clean([f.sha256 for f in files])
-            self.note("warning", f"[archive] {len(files)} unreferenced files deleted")
+        names = {f.id: f.name for f in self._context.firmware.all()}
+        doomed = dialogs.clean_archive(self, self._archiver.usage(), names, self.select_firmware)
+        if doomed:
+            self._archiver.clean(doomed)
+            self.note("warning", f"[archive] {len(doomed)} unreferenced files deleted")
 
     def _merge(self) -> None:
         firmware_id = self._selected_firmware_id()
