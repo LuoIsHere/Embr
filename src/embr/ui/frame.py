@@ -1,10 +1,13 @@
 """Frameless main window shell: top bar, three resizable columns, command bar (design doc
 §6.1 "布局"). The panels themselves live in their own modules."""
 
+import contextlib
+import ctypes
+import sys
 from collections.abc import Callable
 
 from PySide6.QtCore import QByteArray, QEvent, QObject, QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -174,6 +177,25 @@ class CommandBar(QWidget):
         set_prop(self.copy_button, "copied", "0")
 
 
+def round_corners(window: QWidget) -> None:
+    """Ask Windows 11 to draw rounded corners (with its shadow) for a frameless window.
+    Earlier Windows versions do not know the attribute and keep square corners."""
+    if sys.platform != "win32":
+        return
+    preference = ctypes.c_int(_DWMWCP_ROUND)
+    with contextlib.suppress(OSError, AttributeError):
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(  # pyright: ignore[reportUnknownMemberType]
+            ctypes.c_void_p(int(window.winId())),
+            _DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(preference),
+            ctypes.sizeof(preference),
+        )
+
+
+_DWMWA_WINDOW_CORNER_PREFERENCE = 33
+_DWMWCP_ROUND = 2
+
+
 class FrameWindow(QMainWindow):
     """The window shell. Panels are set with set_panels(); the owner wires the rest."""
 
@@ -208,6 +230,10 @@ class FrameWindow(QMainWindow):
         if app is not None:
             app.installEventFilter(self)  # resize grips at the frameless border
         self.native_event_hook: Callable[[bytes, int], None] | None = None
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        round_corners(self)
 
     def set_panels(self, sidebar: QWidget, center: QWidget, right: QWidget) -> None:
         self.sidebar, self.center, self.right = sidebar, center, right

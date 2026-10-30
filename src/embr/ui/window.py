@@ -5,7 +5,15 @@ from pathlib import Path
 
 import esptool
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
-from PySide6.QtGui import QCloseEvent, QColor, QDesktopServices, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import (
+    QActionGroup,
+    QCloseEvent,
+    QColor,
+    QDesktopServices,
+    QKeySequence,
+    QPalette,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -154,7 +162,8 @@ class EmbrWindow(FrameWindow):
         self._job_firmware: str | None = None
         self._ports_pending = False
         self._scheme = SchemeWatcher(self)
-        self._palette = palette(self._scheme.dark)
+        self._theme = ui_settings.load_choice(context.settings, "theme", THEMES, "system")
+        self._palette = palette(self._dark())
 
         self.sidebar_panel = Sidebar()
         self.header = Header(self)
@@ -942,6 +951,13 @@ class EmbrWindow(FrameWindow):
         menu = QMenu(self)
         menu.addAction("Settings…", lambda: dialogs.settings(self, self._context.paths))
         menu.addAction("Clean archive…", self._clean_archive)
+        themes = menu.addMenu("Theme")
+        group = QActionGroup(themes)
+        for mode in THEMES:
+            action = themes.addAction(mode.capitalize(), lambda m=mode: self._set_theme(m))
+            action.setCheckable(True)
+            action.setChecked(mode == self._theme)
+            group.addAction(action)
         menu.addSeparator()
         menu.addAction("About Embr", lambda: dialogs.about(self, esptool.__version__))
         button = self.topbar.menu_button
@@ -955,7 +971,20 @@ class EmbrWindow(FrameWindow):
         self.workspace.setVisible(not on)
 
     def _scheme_changed(self, dark: bool) -> None:
-        self._palette = palette(dark)
+        if self._theme == "system":
+            self._palette = palette(dark)
+            self._apply_palette()
+            self.changed()
+
+    def _dark(self) -> bool:
+        return self._scheme.dark if self._theme == "system" else self._theme == "dark"
+
+    def _set_theme(self, mode: str) -> None:
+        """System follows the Windows light / dark setting; the choice is kept in
+        settings.ini."""
+        self._theme = mode
+        ui_settings.save_choice(self._context.settings, "theme", mode)
+        self._palette = palette(self._dark())
         self._apply_palette()
         self.changed()
 
@@ -1002,6 +1031,9 @@ class EmbrWindow(FrameWindow):
 def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
+
+THEMES = ("system", "light", "dark")
+"""Theme menu choices; "system" follows Windows."""
 
 SETTLE_RECHECK_MS = 2500
 """Look again after a build was seen settling (app.tracking.SETTLE_SECONDS plus margin)."""

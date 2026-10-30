@@ -48,3 +48,13 @@ def save_flag(settings: Settings, key: str, value: bool) -> None:
 def load_flag(settings: Settings, key: str, default: bool) -> bool:
     text = settings.get(UI_SECTION, key)
     return default if text not in ("0", "1") else text == "1"
+
+
+def save_choice(settings: Settings, key: str, value: str) -> None:
+    settings.set(UI_SECTION, key, value)
+
+
+def load_choice(settings: Settings, key: str, choices: tuple[str, ...], default: str) -> str:
+    """The stored value when it is one of `choices`, else `default`."""
+    text = settings.get(UI_SECTION, key)
+    return text if text in choices else default
