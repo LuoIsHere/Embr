@@ -222,6 +222,8 @@ class EntriesTab(QWidget):
         self._owner = owner
         self._firmware: Firmware | None = None
         self.setAcceptDrops(True)
+        self._legacy: set[str] = set()
+        """Tracking firmware: ids of user entries added before they were refused."""
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setObjectName("entries")
         self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
@@ -255,6 +257,11 @@ class EntriesTab(QWidget):
         row_layout = QHBoxLayout(add_row)
         row_layout.setContentsMargins(6, 0, 6, 0)
         row_layout.addWidget(self.add_button, 1)
+        self.from_build = label("Entries come from the build directory", tone="3")
+        self.from_build.setToolTip(
+            "To add files, archive this version (⋯ menu) or create a fixed firmware"
+        )
+        row_layout.addWidget(self.from_build, 1)
         self.merge_button = button("Merge to .bin…", "ibtn")
         self.merge_button.setFixedWidth(130)
         self.merge_button.clicked.connect(self.merge_requested.emit)
@@ -277,11 +284,15 @@ class EntriesTab(QWidget):
         self._filling = True
         self.table.setRowCount(0)
         rows = sorted(firmware.entries, key=lambda e: (e.address is None, e.address or 0))
+        tracking = firmware.source.tracking
+        self._legacy = {e.id for e in firmware.user_entries} if tracking else set[str]()
         self.table.setRowCount(len(rows))
         for row, entry in enumerate(rows):
             self._fill_row(row, entry, marks.get(entry.id), locked)
         self._filling = False
         self.add_button.setEnabled(not locked)
+        self.add_button.setVisible(not tracking)
+        self.from_build.setVisible(tracking)
         self.merge_button.setEnabled(any(e.enabled for e in firmware.entries))
         header_height = self.table.horizontalHeader().sizeHint().height()
         self._fit_columns()
@@ -413,6 +424,13 @@ class EntriesTab(QWidget):
         layout.addWidget(name, 1)
         if entry.file.startswith("archive:"):
             layout.addWidget(tag("archived", "gray"))
+        if entry.id in self._legacy:
+            added = tag("added earlier", "gray")
+            added.setToolTip(
+                "Added before tracking firmware stopped taking extra files; it still flashes "
+                "and can be removed"
+            )
+            layout.addWidget(added)
         if mark is not None:
             layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
@@ -577,7 +595,11 @@ class EntriesTab(QWidget):
         self._owner.changed()
 
     def _copy_to(self, firmware: Firmware, entry: Entry) -> None:
-        targets = [f for f in self._owner.context.firmware.all() if f.id != firmware.id]
+        targets = [
+            f
+            for f in self._owner.context.firmware.all()
+            if f.id != firmware.id and not f.source.tracking
+        ]
         if not targets:
             self._owner.note("note", "[entry] no other firmware to copy to")
             return
@@ -606,7 +628,7 @@ class EntriesTab(QWidget):
         files = [p for p in paths if p.is_file()]
         if files:
             event.acceptProposedAction()
-            self._add_paths(files)
+            self._add_paths(files)  # tracking firmware: the library refuses, the log says why
 
 
 class ParamsTab(QWidget):

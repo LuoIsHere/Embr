@@ -21,7 +21,7 @@ from embr.app.checklist import flash_ready, preflight
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, preview_command
 from embr.app.identify import IdentifyMemory, IdentifySnapshot
-from embr.app.library import Library
+from embr.app.library import AlreadyTrackedError, Library
 from embr.app.merging import Merger
 from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
@@ -363,7 +363,7 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.show_tree(
             self._library.tree(self._query),
             self._selection,
-            snapshot.info.chip if snapshot else None,
+            self._library.mismatches(snapshot.info) if snapshot else {},
             self._ops.running_firmware_id,
         )
 
@@ -780,7 +780,7 @@ class EmbrWindow(FrameWindow):
 
     def _import_idf(self) -> None:
         project_id, device = self._current_placement()
-        request = dialogs.import_idf(self, self._library, project_id, device)
+        request = dialogs.import_idf(self, self._library, project_id, device, self.select_firmware)
         if request is None:
             return
         try:
@@ -790,6 +790,10 @@ class EmbrWindow(FrameWindow):
                 project_id=request.placement.project_id,
                 device=request.placement.device,
             )
+        except AlreadyTrackedError as exc:  # imported meanwhile by another way
+            self.note("error", f"[import] {exc}")
+            self.select_firmware(exc.firmware_id)
+            return
         except (PlanError, IdfBuildError, OSError) as exc:
             self.note("error", f"[import] {exc}")
             return

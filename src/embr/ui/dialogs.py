@@ -25,7 +25,12 @@ from embr.app.flashplan import PlanError
 from embr.app.library import Library
 from embr.app.merging import MergeOptions, Merger
 from embr.core.archive import ArchiveFile
-from embr.core.firmware.import_idf import IdfBuild, IdfBuildError, default_firmware_name
+from embr.core.firmware.import_idf import (
+    IdfBuild,
+    IdfBuildError,
+    build_dir_below,
+    default_firmware_name,
+)
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.storage.paths import AppPaths
@@ -290,8 +295,15 @@ class IdfImport:
 
 
 def import_idf(
-    parent: QWidget, library: Library, project_id: str | None, device: str
+    parent: QWidget,
+    library: Library,
+    project_id: str | None,
+    device: str,
+    show_firmware: Callable[[str], None],
 ) -> IdfImport | None:
+    """Only a folder with flasher_args.json is accepted. A project folder gets a button to
+    use its build folder (never replaced silently); a build folder another firmware already
+    follows gets a button that closes the dialog and shows that firmware."""
     dialog = Dialog(parent, "Import ESP-IDF build", "Import", danger=False)
     folder = QLineEdit()
     folder.setPlaceholderText(r"e.g. D:\work\my_project\build")
@@ -305,6 +317,16 @@ def import_idf(
     preview = label("", tone="2", wrap=True)
     preview.setTextFormat(Qt.TextFormat.RichText)
     dialog.body.addWidget(preview)
+    use_build = button("Use the build folder")
+    show_existing = button("Show that firmware")
+    redirect = QHBoxLayout()
+    redirect.addWidget(use_build)
+    redirect.addWidget(show_existing)
+    redirect.addStretch(1)
+    dialog.body.addLayout(redirect)
+    below: list[Path] = []
+    existing: list[str] = []
+    chosen: list[str] = []
     name = QLineEdit()
     dialog.field("Name", name)
     placement = PlacementFields(dialog, library, project_id, device)
@@ -317,14 +339,39 @@ def import_idf(
 
     def refresh() -> None:
         found.clear()
+        below.clear()
+        existing.clear()
+        use_build.hide()
+        show_existing.hide()
         text = folder.text().strip()
         if not text:
             preview.setText("")
+            dialog.fit()
             return
         try:
             build = library.preview_idf(Path(text))
         except (IdfBuildError, OSError) as exc:
-            preview.setText(f"<b>{html.escape(str(exc))}</b>")
+            child = build_dir_below(Path(text))
+            if child is None:
+                preview.setText(f"<b>{html.escape(str(exc))}</b>")
+            else:
+                below.append(child)
+                preview.setText(
+                    "<b>This is the project folder.</b> Pick its build folder, which contains "
+                    f"flasher_args.json: {html.escape(str(child))}"
+                )
+                use_build.show()
+            dialog.fit()
+            return
+        tracked = library.tracking_firmware_for(build.build_dir)
+        if tracked is not None:
+            existing.append(tracked.id)
+            preview.setText(
+                f"<b>'{html.escape(tracked.name)}' already follows this build folder.</b> "
+                "A build folder is followed by one firmware only."
+            )
+            show_existing.show()
+            dialog.fit()
             return
         found.append(build)
         files = ", ".join(f"{f.name} @ 0x{f.address:X}" for f in build.files)
@@ -334,6 +381,22 @@ def import_idf(
             f"{build.flash_size}<br>{html.escape(files)}"
         )
         name.setPlaceholderText(default_firmware_name(build))
+        dialog.fit()
+
+    def use_below() -> None:
+        if below:
+            folder.setText(str(below[0]))
+            refresh()
+
+    def show_it() -> None:
+        if existing:
+            chosen.append(existing[0])
+            dialog.reject()
+
+    use_build.clicked.connect(use_below)
+    show_existing.clicked.connect(show_it)
+    use_build.hide()
+    show_existing.hide()
 
     def pick() -> None:
         chosen = QFileDialog.getExistingDirectory(dialog, "Build directory", folder.text())
@@ -344,7 +407,10 @@ def import_idf(
     browse.clicked.connect(pick)
     folder.editingFinished.connect(refresh)
     dialog.check = lambda: bool(found)
-    if dialog.exec() != QDialog.DialogCode.Accepted or not found:
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    if chosen:
+        show_firmware(chosen[0])
+    if not accepted or not found:
         return None
     return IdfImport(found[0].build_dir, name.text().strip(), placement.value())
 

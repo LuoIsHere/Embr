@@ -1,6 +1,7 @@
 """Sidebar: search, New menu, project / group / firmware tree with drag and drop
 (design doc §6.1 "左侧边栏")."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
@@ -221,7 +222,7 @@ class Sidebar(QWidget):
         self._folded: set[str] = set()
         self._data: Tree | None = None
         self._selected: tuple[str, str] | None = None
-        self._dim_chip: str | None = None
+        self._dimmed: Mapping[str, str] = {}
         self._busy_id: str | None = None
 
     def apply_palette(self, p: Palette) -> None:
@@ -236,15 +237,16 @@ class Sidebar(QWidget):
         self,
         data: Tree,
         selected: tuple[str, str] | None,
-        dim_chip: str | None,
+        dimmed: Mapping[str, str],
         busy_id: str | None,
     ) -> None:
-        """selected: ("firmware" | "project", id). dim_chip: identified chip; firmware for
-        other chips is dimmed. busy_id: firmware being flashed."""
-        self._data, self._selected, self._dim_chip, self._busy_id = (
+        """selected: ("firmware" | "project", id). dimmed: firmware that do not fit the
+        identified chip (chip or revision) with the reason, shown on hover. busy_id:
+        firmware being flashed."""
+        self._data, self._selected, self._dimmed, self._busy_id = (
             data,
             selected,
-            dim_chip,
+            dimmed,
             busy_id,
         )
         scroll = self.tree.verticalScrollBar().value()
@@ -279,7 +281,7 @@ class Sidebar(QWidget):
                 self._add(grow, Node("group", project.id, group.name, drop="group"), 24)
                 if not gfolded:
                     for fw in group.firmware:
-                        self._firmware(fw, 32)
+                        self._firmware(fw, 16)  # name aligned with the group name
         self._header("STANDALONE FIRMWARE", Node("header", drop="standalone"))
         if not data.standalone:
             self._placeholder(
@@ -329,8 +331,10 @@ class Sidebar(QWidget):
         if fw.id == self._busy_id:
             row.meta.addWidget(tag("flashing", "info"))
         row.meta.addWidget(label(chip_name(fw.chip), tone="3"))
-        row.setToolTip(fw.origin or fw.name)
-        dimmed = self._dim_chip is not None and fw.chip is not None and fw.chip != self._dim_chip
+        reason = self._dimmed.get(fw.id)
+        tip = fw.origin or fw.name
+        row.setToolTip(tip if reason is None else f"{tip}\nNot for the identified board: {reason}")
+        dimmed = reason is not None
         if fw.flag == FirmwareFlag.MISSING or dimmed:
             effect = QGraphicsOpacityEffect(row)
             effect.setOpacity(DIMMED if dimmed else 0.6)
@@ -378,4 +382,4 @@ class Sidebar(QWidget):
     def _toggle(self, key: str) -> None:
         self._folded ^= {key}
         if self._data is not None:
-            self.show_tree(self._data, self._selected, self._dim_chip, self._busy_id)
+            self.show_tree(self._data, self._selected, self._dimmed, self._busy_id)
