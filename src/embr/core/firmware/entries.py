@@ -136,19 +136,6 @@ def in_folder(folder: str, path: Path) -> bool:
         return False
 
 
-def entries_outside(firmware: Firmware) -> list[Entry]:
-    """Entries with a "path:" file outside firmware.folder ("archive:" and "blank:" entries
-    never are); none while the folder is "". Firmware made before the folder rule may have
-    such entries; they still flash."""
-    if not firmware.folder:
-        return []
-    return [
-        e
-        for e in firmware.entries
-        if e.file.startswith("path:") and not in_folder(firmware.folder, Path(e.file[5:]))
-    ]
-
-
 def _path_key(path: Path) -> str:
     return os.path.normcase(str(path.resolve()))
 

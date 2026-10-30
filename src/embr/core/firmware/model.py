@@ -118,7 +118,6 @@ class Firmware:
     file is removed, changed only by Library.relocate_folder()."""
     framework_pkg: str = ""
     archived_from: str = ""
-    user_entries: list[Entry] = field(default_factory=lambda: list[Entry]())
     entry_overrides: dict[str, EntryOverride] = field(
         default_factory=lambda: dict[str, EntryOverride]()
     )

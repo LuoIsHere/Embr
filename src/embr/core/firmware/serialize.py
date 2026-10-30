@@ -85,7 +85,7 @@ def firmware_to_doc(fw: Firmware) -> Document:
         "tags": list(fw.tags),
         "source": fw.source.value,
     }
-    if fw.chip is not None and fw.source.tracking:  # fixed firmware: chips of the entries
+    if fw.chip is not None:
         doc["chip"] = fw.chip
     doc["flash"] = {"mode": fw.flash.mode, "freq": fw.flash.freq, "size": fw.flash.size}
     doc["reset"] = {"before": fw.before, "after": fw.after}
@@ -105,8 +105,6 @@ def firmware_to_doc(fw: Firmware) -> Document:
     doc["updated_at"] = fw.updated_at
     if not fw.source.tracking:
         doc["entries"] = [entry_to_doc(e) for e in fw.entries]
-    if fw.user_entries:
-        doc["user_entries"] = [entry_to_doc(e) for e in fw.user_entries]
     if fw.entry_overrides:
         doc["entry_overrides"] = {k: _override_to_doc(v) for k, v in fw.entry_overrides.items()}
     if fw.last_resolved is not None:
@@ -126,7 +124,7 @@ def firmware_from_doc(doc: Document) -> Firmware:
         project_id=doc_opt_str(doc, "project_id"),
         device=doc_str(doc, "device"),
         source=source,
-        chip=doc_opt_str(doc, "chip") if source.tracking else None,
+        chip=doc_opt_str(doc, "chip"),
         notes=doc_str(doc, "notes"),
         tags=doc_strs(doc, "tags"),
         flash=FlashParams(
@@ -144,7 +142,6 @@ def firmware_from_doc(doc: Document) -> Firmware:
         folder=doc_str(doc, "folder"),
         framework_pkg=doc_str(doc, "framework_pkg"),
         archived_from=doc_str(doc, "archived_from"),
-        user_entries=[entry_from_doc(d) for d in doc_tables(doc, "user_entries")],
         entry_overrides={
             key: _override_from_doc(value)
             for key in overrides

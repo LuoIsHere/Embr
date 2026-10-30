@@ -42,7 +42,7 @@ from embr.app.chips import Mcu, chip_choosable, entry_mcu, firmware_mcus, fits, 
 from embr.app.library import FirmwareFlag
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
-from embr.core.firmware.entries import AddressError, FolderError, entries_outside
+from embr.core.firmware.entries import AddressError, FolderError
 from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import format_revision
 from embr.core.firmware.image_sniff import parse_partition_table
@@ -226,8 +226,6 @@ class EntriesTab(QWidget):
         self.setAcceptDrops(True)
         self._mcus: tuple[Mcu, ...] = ()
         """The shown firmware's MCUs (app.chips.firmware_mcus())."""
-        self._legacy: set[str] = set()
-        """Tracking firmware: ids of user entries added before they were refused."""
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setObjectName("entries")
         self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
@@ -290,7 +288,6 @@ class EntriesTab(QWidget):
         self.table.setRowCount(0)
         rows = sorted(firmware.entries, key=lambda e: (e.address is None, e.address or 0))
         tracking = firmware.source.tracking
-        self._legacy = {e.id for e in firmware.user_entries} if tracking else set[str]()
         self.table.setRowCount(len(rows))
         for row, entry in enumerate(rows):
             self._fill_row(row, entry, marks.get(entry.id), locked)
@@ -467,13 +464,6 @@ class EntriesTab(QWidget):
         layout.addWidget(name, 1)
         if entry.file.startswith("archive:"):
             layout.addWidget(tag("archived", "gray"))
-        if entry.id in self._legacy:
-            added = tag("added earlier", "gray")
-            added.setToolTip(
-                "Added before tracking firmware stopped taking extra files; it still flashes "
-                "and can be removed"
-            )
-            layout.addWidget(added)
         if mark is not None:
             layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
@@ -621,7 +611,7 @@ class EntriesTab(QWidget):
         entry = next((e for e in firmware.entries if e.id == entry_id), None)
         if entry is None:
             return
-        derived = firmware.source.tracking and entry.id not in {e.id for e in firmware.user_entries}
+        derived = firmware.source.tracking
         menu = QMenu(self)
         relocate = menu.addAction("Re-locate…")
         relocate.setEnabled(entry.file.startswith("path:") and not derived)
@@ -789,11 +779,7 @@ class ParamsTab(QWidget):
             return "Archived from", label(firmware.archived_from or "—", tone="2")
         if firmware.build_ref is not None:
             return "Build directory", self._build_dir(firmware)
-        paths = [e for e in firmware.entries if e.file.startswith("path:")]
-        first = next((e for e in paths if e.enabled), paths[0] if paths else None)
-        text = firmware.folder or (
-            str(Path(first.file.removeprefix("path:")).parent) if first else "—"
-        )
+        text = firmware.folder or "—"
         box = QWidget()
         column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
@@ -815,16 +801,6 @@ class ParamsTab(QWidget):
         small.setStyleSheet("font-size: 12px;")
         small.setWordWrap(True)
         column.addWidget(small)
-        outside = entries_outside(firmware)
-        if outside:
-            spread = label(
-                "Entries spread over several folders (added before this rule): "
-                + ", ".join(e.name for e in outside),
-                tone="2",
-            )
-            spread.setStyleSheet("font-size: 12px;")
-            spread.setWordWrap(True)
-            column.addWidget(spread)
         return "Files folder", box
 
     def _relocate_folder(self, firmware: Firmware) -> None:

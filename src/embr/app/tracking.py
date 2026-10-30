@@ -266,7 +266,6 @@ class Tracker:
             stub=build.stub,
             inputs=build.inputs,
         )
-        user = tuple(Path(e.file[5:]) for e in firmware.user_entries if e.file.startswith("path:"))
         resolution = resolve(
             firmware,
             derived,
@@ -274,7 +273,7 @@ class Tracker:
             archive_dir=self._ctx.paths.archive,
             now=now.isoformat(timespec="seconds"),
         )
-        return resolution, (*build.inputs, *user)
+        return resolution, build.inputs
 
     def _check_fixed(
         self, firmware: Firmware, now: datetime.datetime

@@ -5,8 +5,7 @@ Every change is saved before the method returns. Entry operations on fixed firmw
 note of a derived entry (id = tracking.entry_key()) go to entry_overrides; adding files,
 attachments or copied entries raises TrackingEntriesError (entries come from the build
 only, design doc §12 item 16); removing, relocating or copying into a derived entry raises
-ValueError; user entries added before that rule still flash and can be removed. Every
-change to a tracking firmware invalidates its tracker status.
+ValueError. Every change to a tracking firmware invalidates its tracker status.
 """
 
 import dataclasses
@@ -104,9 +103,8 @@ class FirmwareRow:
     id: str
     name: str
     origin: str
-    """Second sidebar line: the firmware's folder (for firmware without one, the folder of
-    the first enabled path entry), "Archive" for archived firmware, or the build directory
-    for tracking firmware."""
+    """Second sidebar line: the firmware's folder, "Archive" for archived firmware, or the
+    build directory for tracking firmware."""
     source: Source
     chips: tuple[str, ...]
     """app.chips.firmware_chips()."""
@@ -199,14 +197,14 @@ class Library:
     def check_files(self, firmware_id: str) -> dict[str, FileState]:
         """Re-check every entry by name, path and hash (done when a firmware is opened and
         before flashing) and update the firmware's flag. Tracking firmware: Tracker.check()
-        decides the flag; the returned states cover their user entries only."""
+        decides the flag and nothing is returned."""
         status = self._tracker.check(firmware_id)
         firmware = status.firmware
-        user = {e.id for e in firmware.user_entries}
+        if firmware.source.tracking:
+            return {}
         return {
             e.id: _MARK_STATES.get(status.marks.get(e.id, EntryMark.NEW), FileState.OK)
             for e in firmware.entries
-            if not firmware.source.tracking or e.id in user
         }
 
     def flag(self, firmware_id: str) -> FirmwareFlag:
@@ -307,7 +305,7 @@ class Library:
         copy.flash = dataclasses.replace(source.flash)
         copy.archived_from = source.archived_from
         copy.folder = source.folder
-        copy.entries = [copy_entry(e) for e in [*source.entries, *source.user_entries]]
+        copy.entries = [copy_entry(e) for e in source.entries]
         self._ctx.firmware.save(copy)
         return copy
 
@@ -433,9 +431,9 @@ class Library:
         otadata entry exists, a blank otadata entry is added too. Entries placed by
         partition are re-resolved. A firmware still named UNTITLED with no entries takes
         the first file's name (without extension). Returns the new entries. Folder rule
-        (design doc §12 item 8): a firmware without a folder takes the folder of its first
-        "path:" entry, or else of the first of `paths`; every file must be in that folder or
-        below it, otherwise FolderError and nothing changes. Tracking firmware:
+        (design doc §12 item 8): a firmware without a folder takes the folder of the first
+        of `paths`; every file must be in that folder or below it, otherwise FolderError and
+        nothing changes. Tracking firmware:
         TrackingEntriesError, nothing changes."""
         firmware = self._ctx.firmware.get(firmware_id)
         _refuse_tracking(firmware)
@@ -580,12 +578,8 @@ class Library:
         own = _own_entry(firmware, entry_id)
         if own is None:
             raise _derived_error(firmware)
-        if firmware.source.tracking:
-            firmware.user_entries.remove(own)
-            self._save(firmware)
-        else:
-            firmware.entries.remove(own)
-            self._save_entries(firmware)
+        firmware.entries.remove(own)
+        self._save_entries(firmware)
 
     def copy_entry_to(self, firmware_id: str, entry_id: str, target_id: str) -> Entry:
         """Copy an entry (same file, address, note, chosen MCU) into another firmware. A
@@ -612,13 +606,10 @@ class Library:
         entry = _own_entry(firmware, entry_id)
         if entry is None:
             raise _derived_error(firmware)
-        if firmware.folder and not firmware.source.tracking:
+        if firmware.folder:
             _check_folder(firmware.folder, [path])
         relocate(entry, path)
-        if firmware.source.tracking:
-            self._save(firmware)
-        else:
-            self._save_entries(firmware)
+        self._save_entries(firmware)
         self.check_files(firmware_id)
         return entry
 
@@ -775,24 +766,13 @@ def _origin(firmware: Firmware) -> str:
     if firmware.build_ref is not None:
         env = firmware.build_ref.env
         return f"{firmware.build_ref.path} (env: {env})" if env else firmware.build_ref.path
-    if firmware.folder:
-        return firmware.folder
-    paths = [e for e in firmware.entries if e.file.startswith("path:")]
-    first = next((e for e in paths if e.enabled), paths[0] if paths else None)
-    return str(Path(first.file.removeprefix("path:")).parent) if first else ""
+    return firmware.folder
 
 
 def _root(firmware: Firmware, first_new: Path) -> str:
-    """The folder files of a fixed firmware must be in: its folder; for firmware made
-    before the rule, the folder of its first "path:" entry; else the folder of the first
-    file being added (design doc §12 item 8)."""
-    if firmware.folder:
-        return firmware.folder
-    paths = [e for e in firmware.entries if e.file.startswith("path:")]
-    first = next((e for e in paths if e.enabled), paths[0] if paths else None)
-    if first is not None:
-        return str(Path(first.file.removeprefix("path:")).resolve().parent)
-    return str(first_new.resolve().parent)
+    """The folder files of a fixed firmware must be in: its folder, else the folder of the
+    first file being added (design doc §12 item 8)."""
+    return firmware.folder or str(first_new.resolve().parent)
 
 
 def _check_folder(folder: str, paths: Sequence[Path]) -> str:
@@ -820,11 +800,9 @@ def _path_key(path: Path) -> str:
 
 
 def _own_entry(firmware: Firmware, entry_id: str) -> Entry | None:
-    """The firmware's stored entry: any entry of a fixed firmware, a user entry of a
-    tracking one; None for derived entries."""
-    if not firmware.source.tracking:
-        return _entry(firmware, entry_id)
-    return next((e for e in firmware.user_entries if e.id == entry_id), None)
+    """The firmware's stored entry: any entry of a fixed firmware; None for the derived
+    entries of a tracking one."""
+    return None if firmware.source.tracking else _entry(firmware, entry_id)
 
 
 def _derived_error(firmware: Firmware) -> ValueError:

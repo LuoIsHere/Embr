@@ -1,8 +1,8 @@
 """Resolve tracking firmware against its build output (design doc §3.4).
 
 Source-agnostic: an importer (import_idf; import_pio later) describes the build as a
-DerivedBuild. resolve() classifies its files, applies the user's entry_overrides and
-user_entries, cross-checks chips and ESP-IDF versions, and compares the result with
+DerivedBuild. resolve() classifies its files, applies the user's entry_overrides,
+cross-checks chips and ESP-IDF versions, and compares the result with
 last_resolved. accept() stores a resolution as the new last_resolved.
 """
 
@@ -18,7 +18,6 @@ from pathlib import Path
 
 from embr.core.firmware.entries import resolve_partitions
 from embr.core.firmware.filecache import FileCache
-from embr.core.firmware.files import FileState, confirm_entry, entry_state
 from embr.core.firmware.image_header import ImageHeader, format_revision
 from embr.core.firmware.image_sniff import (
     PARTITION_TABLE_MAX_SIZE,
@@ -81,9 +80,6 @@ class ChangeKind(StrEnum):
     MANUAL_ADDRESS = "manual_address"
     """Manual address of a derived entry, listed on a chip or IDF change for review (on a
     chip change it is dropped on confirmation)."""
-    ATTACHMENT = "attachment"
-    """User entry placed by address, listed on a chip change for review; or one placed by
-    partition whose address followed the new table."""
     CONTENT = "content"
     """Same file, new content. The only kind in an UPDATED resolution."""
     GROUP_HINT = "group_hint"
@@ -147,7 +143,7 @@ class Resolution:
     firmware: Firmware
     """A copy of the firmware as it would be flashed: chip, flash, reset and stub from the
     build; entries = derived entries (id = entry_key(), overrides applied, partition
-    placement resolved) followed by user_entries. For MISSING: entries rebuilt from
+    placement resolved). For MISSING: entries rebuilt from
     last_resolved for display."""
     changes: tuple[Change, ...]
     """Against last_resolved, ordered by ChangeKind. Empty for OK."""
@@ -227,16 +223,6 @@ def resolve(
         incomplete.append("ESP-IDF versions differ: " + ", ".join(f"{s} {v}" for s, v in versions))
 
     resolved = _resolved_firmware(firmware, build, chip, derived)
-    user_ids = {e.id for e in firmware.user_entries}
-    for entry in resolved.entries:
-        if entry.id not in user_ids:
-            continue
-        state = entry_state(entry, archive_dir)
-        if state == FileState.MISSING:
-            incomplete.append(f"{entry.name}: file missing")
-            marks[entry.id] = EntryMark.MISSING
-        elif state == FileState.CHANGED:
-            marks[entry.id] = EntryMark.CHANGED
     if table is not None:
         resolve_partitions(resolved, table)
 
@@ -295,7 +281,7 @@ def missing(firmware: Firmware, problem: str) -> Resolution:
         )
         _apply_override(entry, firmware.entry_overrides.get(key))
         derived.append(entry)
-    resolved.entries = [*derived, *(dataclasses.replace(e) for e in firmware.user_entries)]
+    resolved.entries = derived
     return Resolution(
         state=ResolveState.MISSING,
         firmware=resolved,
@@ -333,9 +319,6 @@ def accept(firmware: Firmware, resolution: Resolution) -> None:
             override.address = None
         if key not in keys or override == EntryOverride():
             del firmware.entry_overrides[key]
-    for entry in firmware.user_entries:
-        if resolution.marks.get(entry.id) == EntryMark.CHANGED:
-            confirm_entry(entry, Path())
 
 
 def digest(firmware: Firmware) -> str:
@@ -431,7 +414,7 @@ def _resolved_firmware(
         )
         _apply_override(entry, firmware.entry_overrides.get(d.key))
         entries.append(entry)
-    resolved.entries = [*entries, *(dataclasses.replace(e) for e in firmware.user_entries)]
+    resolved.entries = entries
     return resolved
 
 
@@ -480,9 +463,6 @@ def _snapshot(
             item["max_rev"] = d.header.max_rev_full
         entries.append(item)
     doc["entries"] = entries
-    user = {e.id: f"{e.address:#x}" for e in resolved.entries if e.partition and e.address}
-    if user:
-        doc["user_addresses"] = user
     return doc
 
 
@@ -584,31 +564,6 @@ def _changes(
                 f"{name}: manual address {override.address:#x} {fate}",
             )
 
-    old_user = doc_table(last, "user_addresses") or {}
-    for entry in resolved.entries:
-        if entry.id in {d.key for d in derived}:
-            continue
-        if entry.partition is not None:
-            before = doc_str(old_user, entry.id)
-            after = f"{entry.address:#x}" if entry.address is not None else ""
-            if before and after and before != after:
-                add(
-                    ChangeKind.ATTACHMENT,
-                    entry.name,
-                    before,
-                    after,
-                    f"{entry.name}: follows partition '{entry.partition}': {before} -> {after}",
-                )
-        elif chip_changed and entry.address is not None:
-            add(
-                ChangeKind.ATTACHMENT,
-                entry.name,
-                f"{entry.address:#x}",
-                f"{entry.address:#x}",
-                f"{entry.name}: stays at {entry.address:#x}; check it on {new_chip}",
-            )
-        if marks.get(entry.id) == EntryMark.CHANGED:
-            add(ChangeKind.CONTENT, entry.name, "", "", f"{entry.name}: content changed")
     return changes
 
 

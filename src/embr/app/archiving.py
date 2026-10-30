@@ -87,12 +87,11 @@ class Archiver:
         return created
 
     def archive_entry(self, firmware_id: str, entry_id: str) -> Entry:
-        """Copy one "path:" entry of a fixed firmware (or a user entry of a tracking one)
-        into the archive and point the entry at it; the name stays, the note is kept.
-        ValueError for derived entries and entries already archived; PlanError when its
-        file is missing or changed."""
+        """Copy one "path:" entry of a fixed firmware into the archive and point the
+        entry at it; the name stays, the note is kept. ValueError for derived entries and
+        entries already archived; PlanError when its file is missing or changed."""
         firmware = self._ctx.firmware.get(firmware_id)
-        stored = firmware.user_entries if firmware.source.tracking else firmware.entries
+        stored = [] if firmware.source.tracking else firmware.entries
         entry = next((e for e in stored if e.id == entry_id), None)
         if entry is None:
             raise ValueError(f"{firmware.name}: this entry comes from the build output")
@@ -119,7 +118,7 @@ class Archiver:
         for firmware in self._ctx.firmware.all():
             shas = {
                 e.file.removeprefix(_ARCHIVE)
-                for e in [*firmware.entries, *firmware.user_entries]
+                for e in firmware.entries
                 if e.file.startswith(_ARCHIVE)
             }
             for sha in shas:
@@ -145,7 +144,7 @@ class Archiver:
         return {
             e.file.removeprefix(_ARCHIVE)
             for f in self._ctx.firmware.all()
-            for e in [*f.entries, *f.user_entries]
+            for e in f.entries
             if e.file.startswith(_ARCHIVE)
         }
 
