@@ -38,7 +38,8 @@ class Node:
     """What a tree row stands for."""
 
     kind: str
-    """"header", "project", "group", "firmware", "placeholder"."""
+    """"header", "project", "group", "firmware", "placeholder", "spare" (the empty row
+    at the end)."""
     project_id: str | None = None
     device: str = ""
     firmware_id: str | None = None
@@ -190,12 +191,20 @@ class FirmwareTree(QTreeWidget):
 
     def _target(self, pos: QPoint, *, files: bool = False) -> QTreeWidgetItem | None:
         """The row a drop lands on: a project, group or the standalone header; for files
-        also a firmware row."""
+        also a firmware row. The empty space below the rows counts as the spare row at the
+        end, a standalone drop target (design doc §12 item 19)."""
         item = self.itemAt(pos)
+        if item is None:
+            return self._spare_row()
         node = self.node(item)
         if node is None:
             return None
         return item if node.drop is not None or (files and node.kind == "firmware") else None
+
+    def _spare_row(self) -> QTreeWidgetItem | None:
+        last = self.topLevelItem(self.topLevelItemCount() - 1)
+        node = self.node(last)
+        return last if node is not None and node.kind == "spare" else None
 
     def _highlight(self, item: QTreeWidgetItem | None) -> None:
         row = self.itemWidget(item, 0) if item is not None else None
@@ -321,6 +330,10 @@ class Sidebar(QWidget):
             )
         for fw in data.standalone:
             self._firmware(fw, INDENT)
+        # a firmware row's worth of space at the very end, also when the list scrolls, to
+        # drop files or firmware on as standalone
+        spare = self._add(Row(INDENT), Node("spare", drop="standalone"), 40)
+        spare.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDropEnabled)
         self.tree.verticalScrollBar().setValue(scroll)
 
     def _header(self, text: str, node: Node | None = None) -> None:
