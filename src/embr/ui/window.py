@@ -73,9 +73,12 @@ RESULT_TEXT = {
     RecordResult.CANCELLED: "Cancelled",
 }
 HINT_MANUAL_RESET = (
-    "Flashed and verified. If the device did not restart on its own, reset it manually "
-    "(software reset has no effect on boards whose reset is handled by an on-board power "
-    "controller)."
+    "Flashed and verified. If the device did not restart on its own (usually when download "
+    "mode was entered by hand), reset it manually."
+)
+HINT_DOWNLOAD_MODE = (
+    "Identified. The chip stays in download mode so the next flash can start right away; "
+    "reset the board to return to its application."
 )
 HINT_OTG = (
     "USB-OTG: put the board into download mode as described by its vendor before flashing. "
@@ -413,6 +416,14 @@ class EmbrWindow(FrameWindow):
             and outcome.native_usb
         ):
             self.connection.set_hint(HINT_MANUAL_RESET, "warn")
+        elif (
+            outcome is not None
+            and outcome.kind == JobKind.IDENTIFY
+            and outcome.result == RecordResult.OK
+            and snapshot is not None
+            and snapshot.info.in_download_mode
+        ):
+            self.connection.set_hint(HINT_DOWNLOAD_MODE, "ok")
         elif port is not None and port.connection == ConnectionType.USB_OTG:
             self.connection.set_hint(HINT_OTG, "warn")
         elif port is not None and port.connection == ConnectionType.USB_SERIAL_JTAG:
