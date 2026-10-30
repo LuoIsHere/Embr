@@ -1,13 +1,15 @@
 """In-app dialogs (design doc §6.1 "对话框"): Esc closes, destructive buttons are red and
 say what they affect."""
 
+import contextlib
 import html
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -24,7 +26,7 @@ from PySide6.QtWidgets import (
 from embr import __version__
 from embr.app.archiving import ArchiveUsage
 from embr.app.flashplan import PlanError
-from embr.app.library import Library
+from embr.app.library import Library, PioPreview
 from embr.app.merging import MergeOptions, Merger
 from embr.core.firmware.import_idf import (
     IdfBuild,
@@ -32,9 +34,11 @@ from embr.core.firmware.import_idf import (
     build_dir_below,
     default_firmware_name,
 )
+from embr.core.firmware.import_pio import PioBuild, PioBuildError, built_envs_below
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.storage.paths import AppPaths
+from embr.ui.adapters.jobs import MainThreadDispatcher
 from embr.ui.widgets import button, label
 
 IMPORT_LABEL = "Import into Embr as a firmware"
@@ -265,9 +269,38 @@ def move_firmware(
     return placement.value()
 
 
-def settings(parent: QWidget, paths: AppPaths) -> None:
+def settings(parent: QWidget, paths: AppPaths, library: Library) -> None:
+    """Program folder (read-only) and the global framework package path for PlatformIO
+    Arduino firmware (saved on Close; empty means auto-detect)."""
     dialog = Dialog(parent, "Settings", "Close", danger=False)
     dialog.cancel.hide()
+    package = QLineEdit(library.framework_pkg_default())
+    detected = library.detected_framework_pkg()
+    package.setPlaceholderText(
+        f"auto-detect (now: {detected})" if detected else "auto-detect (nothing found)"
+    )
+    browse = button("Browse…")
+    row = QHBoxLayout()
+    row.setSpacing(6)
+    row.addWidget(package, 1)
+    row.addWidget(browse)
+
+    def pick() -> None:
+        chosen = QFileDialog.getExistingDirectory(dialog, "Framework package", package.text())
+        if chosen:
+            package.setText(chosen)
+
+    browse.clicked.connect(pick)
+    dialog.body.addWidget(
+        label(
+            "PlatformIO framework package (the framework-arduinoespressif32 folder that "
+            "boot_app0.bin of Arduino firmware comes from). Empty: auto-detect. A firmware "
+            "can override it on its Parameters tab.",
+            tone="3",
+            wrap=True,
+        )
+    )
+    dialog.body.addLayout(row)
     folder = label(str(paths.root), mono=True, wrap=True)
     folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     dialog.field("Program folder", folder)
@@ -276,6 +309,8 @@ def settings(parent: QWidget, paths: AppPaths) -> None:
         label("data\\ · logs\\ · temp\\ · settings.ini", mono=True),
     )
     dialog.exec()
+    if package.text().strip() != library.framework_pkg_default():
+        library.set_framework_pkg_default(package.text())
 
 
 def about(parent: QWidget, esptool_version: str) -> None:
@@ -430,6 +465,213 @@ def import_idf(
     if not accepted or not found:
         return None
     return IdfImport(found[0].build_dir, name.text().strip(), placement.value())
+
+
+@dataclass(frozen=True)
+class PioImport:
+    project_root: Path
+    envs: tuple[str, ...]
+    placement: Placement
+
+
+def import_pio(
+    parent: QWidget,
+    library: Library,
+    project_id: str | None,
+    device: str,
+    show_firmware: Callable[[str], None],
+    build_dir: Path | None = None,
+) -> PioImport | None:
+    """Pick `<project>/.pio/build/<env>`; the project is read in the background (about two
+    seconds for `pio project config`). Every env of platformio.ini is listed: built ones can
+    be checked (the picked one is), unbuilt and already followed ones are greyed. All
+    checked envs go to the same project and group (design doc §12.5)."""
+    dialog = Dialog(parent, "Import PlatformIO build", "Import", danger=False)
+    folder = QLineEdit()
+    folder.setPlaceholderText(r"e.g. D:\work\my_project\.pio\build\esp32dev")
+    browse = button("Browse…")
+    row = QHBoxLayout()
+    row.setSpacing(6)
+    row.addWidget(folder, 1)
+    row.addWidget(browse)
+    dialog.body.addWidget(label(r"Env build folder (.pio\build\<env>)", tone="3"))
+    dialog.body.addLayout(row)
+    status = label("", tone="2", wrap=True)
+    status.setTextFormat(Qt.TextFormat.RichText)
+    dialog.body.addWidget(status)
+    use_env = button("Use this env")
+    show_existing = button("Show that firmware")
+    redirect = QHBoxLayout()
+    redirect.addWidget(use_env)
+    redirect.addWidget(show_existing)
+    redirect.addStretch(1)
+    dialog.body.addLayout(redirect)
+    envs_box = QWidget()
+    envs_layout = QVBoxLayout(envs_box)
+    envs_layout.setContentsMargins(0, 0, 0, 0)
+    envs_layout.setSpacing(2)
+    dialog.field("Envs (each checked env becomes a firmware named after it)", envs_box)
+    placement = PlacementFields(dialog, library, project_id, device)
+    dialog.text(
+        "Each firmware follows its env's build output: entries and flash settings are read "
+        "from the files PlatformIO wrote. Embr never builds; when the board or the files "
+        "change, it tells you. Rebuilds that only change file contents are followed "
+        "automatically; other changes need confirming."
+    )
+    dispatcher = MainThreadDispatcher(dialog)
+    found: list[PioPreview] = []
+    boxes: list[tuple[QCheckBox, str]] = []
+    below: list[Path] = []
+    existing: list[str] = []
+    chosen: list[str] = []
+    generation = [0]
+
+    def usable_checked() -> bool:
+        return any(b.isChecked() and b.isEnabled() for b, _ in boxes)
+
+    def sync_ok() -> None:
+        dialog.ok.setEnabled(bool(found) and usable_checked())
+
+    def clear() -> None:
+        found.clear()
+        below.clear()
+        existing.clear()
+        use_env.hide()
+        show_existing.hide()
+        for box, _ in boxes:
+            box.deleteLater()
+        boxes.clear()
+
+    def refresh() -> None:
+        generation[0] += 1
+        ticket = generation[0]
+        clear()
+        text = folder.text().strip()
+        if not text:
+            status.setText("")
+            sync_ok()
+            dialog.fit()
+            return
+        path = Path(text)
+        built = built_envs_below(path)
+        if built:
+            below.append(built[0].build_dir)
+            names = ", ".join(html.escape(r.env) for r in built)
+            status.setText(
+                "<b>This is the project folder.</b> Pick an env build folder under "
+                rf".pio\build: {names}"
+            )
+            use_env.setText(f"Use {built[0].env}")
+            use_env.show()
+            sync_ok()
+            dialog.fit()
+            return
+        status.setText("Reading the PlatformIO project…")
+        sync_ok()
+        dialog.fit()
+
+        def work() -> None:
+            try:
+                result: PioPreview | str = library.preview_pio(path)
+            except (PioBuildError, OSError) as exc:
+                result = str(exc)
+            with contextlib.suppress(RuntimeError):  # the dialog is gone
+                dispatcher.dispatch(lambda: shown(ticket, result))
+
+        threading.Thread(target=work, name="pio-preview", daemon=True).start()
+
+    def shown(ticket: int, result: PioPreview | str) -> None:
+        if ticket != generation[0]:  # the folder changed or the dialog closed meanwhile
+            return
+        if isinstance(result, str):
+            status.setText(f"<b>{html.escape(result)}</b>")
+            dialog.fit()
+            return
+        found.append(result)
+        lines = [f"Project {html.escape(str(result.picked.project_root))}"]
+        if result.config_error:
+            lines.append(
+                f"pio project config gave nothing ({html.escape(result.config_error)}); boards "
+                "are unknown and the board check is skipped until it works."
+            )
+        for choice in result.envs:
+            box = QCheckBox(_env_text(choice.name, choice.board, choice.build))
+            picked = choice.name == result.picked.env
+            usable = choice.built and choice.tracked_by is None and choice.build is not None
+            box.setEnabled(usable)
+            box.setChecked(usable and picked)
+            if not choice.built:
+                box.setText(f"{choice.name} · not built")
+            elif choice.tracked_by is not None:
+                follower = library.firmware(choice.tracked_by).name
+                box.setText(f"{choice.name} · already followed by '{follower}'")
+                if picked:
+                    existing.append(choice.tracked_by)
+                    show_existing.show()
+            elif choice.problem:
+                box.setText(f"{choice.name} · {choice.problem}")
+            if choice.build is not None:
+                box.setToolTip(_build_text(choice.build))
+            box.toggled.connect(sync_ok)
+            envs_layout.addWidget(box)
+            boxes.append((box, choice.name))
+        status.setText("<br>".join(lines))
+        sync_ok()
+        dialog.fit()
+        QTimer.singleShot(0, dialog.fit)  # the new check boxes are laid out on the next pass
+
+    def use_below() -> None:
+        if below:
+            folder.setText(str(below[0]))
+            refresh()
+
+    def show_it() -> None:
+        if existing:
+            chosen.append(existing[0])
+            dialog.reject()
+
+    def pick() -> None:
+        picked = QFileDialog.getExistingDirectory(dialog, "Env build folder", folder.text())
+        if picked:
+            folder.setText(picked)
+            refresh()
+
+    use_env.clicked.connect(use_below)
+    show_existing.clicked.connect(show_it)
+    use_env.hide()
+    show_existing.hide()
+    browse.clicked.connect(pick)
+    folder.editingFinished.connect(refresh)
+    if build_dir is not None:
+        folder.setText(str(build_dir))
+        refresh()
+    sync_ok()
+    dialog.check = lambda: bool(found) and usable_checked()
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    generation[0] += 1  # drop a preview that arrives after the dialog closed
+    if chosen:
+        show_firmware(chosen[0])
+    if not accepted or not found:
+        return None
+    envs = tuple(name for box, name in boxes if box.isChecked() and box.isEnabled())
+    return PioImport(found[0].picked.project_root, envs, placement.value())
+
+
+def _env_text(name: str, board: str | None, build: PioBuild | None) -> str:
+    parts = [name, board or "board unknown"]
+    if build is not None:
+        parts.append(build.chip or "chip unknown")
+        flash = build.flash
+        parts.append(f"{flash.mode} {flash.freq} {flash.size}")
+    return " · ".join(parts)
+
+
+def _build_text(build: PioBuild) -> str:
+    lines = [
+        f"0x{f.address:X}  {f.name}" + (f"  ({f.note})" if f.note else "") for f in build.files
+    ]
+    lines += build.notes
+    return "\n".join(lines)
 
 
 def archive_version(

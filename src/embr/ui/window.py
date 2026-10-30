@@ -1,5 +1,6 @@
 """The main window: wires the panels to the app layer."""
 
+import contextlib
 import html
 from datetime import date, datetime
 from pathlib import Path
@@ -42,10 +43,12 @@ from embr.app.operations import (
     JobProgress,
     Operations,
 )
+from embr.app.pio import PioConfigs
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
-from embr.app.tracking import BuildChangedError, TrackStatus
+from embr.app.tracking import BuildChangedError, Tracker, TrackStatus
 from embr.core.firmware.entries import FolderError
 from embr.core.firmware.import_idf import IdfBuildError, build_dir_below
+from embr.core.firmware.import_pio import PioBuildError
 from embr.core.firmware.model import editable_params
 from embr.core.firmware.store import default_name_archived
 from embr.core.firmware.tracking import ResolveState
@@ -152,10 +155,11 @@ class EmbrWindow(FrameWindow):
         self.setWindowTitle("Embr")
         self.setWindowIcon(app_icon())
         self._context = context
-        self._library = Library(context)
+        self._dispatcher = MainThreadDispatcher(self)
+        pio = PioConfigs(on_ready=self._pio_queried)
+        self._library = Library(context, Tracker(context, pio=pio))
         tracker = self._library.tracker
         self._memory = IdentifyMemory()
-        self._dispatcher = MainThreadDispatcher(self)
         self._ops = Operations(context, self._memory, self._dispatcher.dispatch, tracker=tracker)
         self._archiver = Archiver(context, tracker)
         self._merger = Merger(context, tracker)
@@ -222,6 +226,7 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.new_firmware.connect(self._new_firmware)
         self.sidebar_panel.new_project.connect(self._new_project)
         self.sidebar_panel.import_idf.connect(self._import_idf)
+        self.sidebar_panel.import_pio.connect(self._import_pio)
         self.sidebar_panel.files_dropped.connect(self._files_dropped)
         self.firmware_view.entries.archive_requested.connect(self._archive_entry)
         self.firmware_view.entries.merge_requested.connect(self._merge)
@@ -905,13 +910,64 @@ class EmbrWindow(FrameWindow):
         self.note("ok", f"[archive] {entry.name} copied into the archive")
         self.changed()
 
+    def _import_pio(
+        self, build_dir: Path | None = None, placement: tuple[str | None, str] | None = None
+    ) -> None:
+        project_id, device = placement or self._current_placement()
+        request = dialogs.import_pio(
+            self, self._library, project_id, device, self.select_firmware, build_dir
+        )
+        if request is None:
+            return
+        try:
+            created = self._library.import_pio(
+                request.project_root,
+                request.envs,
+                project_id=request.placement.project_id,
+                device=request.placement.device,
+            )
+        except AlreadyTrackedError as exc:  # imported meanwhile by another way
+            self.note("error", f"[import] {exc}")
+            self.select_firmware(exc.firmware_id)
+            return
+        except (PlanError, PioBuildError, OSError, ValueError) as exc:
+            self.note("error", f"[import] {exc}")
+            return
+        for firmware in created:
+            ref = firmware.build_ref
+            env = ref.env if ref is not None else "?"
+            self.note("ok", f"[import] '{firmware.name}' follows {request.project_root} env {env}")
+        self.select_firmware(created[0].id)
+
+    def _pio_queried(self, project_root: Path) -> None:
+        """PioConfigs on_ready, called from its worker thread; the query may end after the
+        window is gone (then the dispatcher is deleted and there is nothing to refresh)."""
+        with contextlib.suppress(RuntimeError):
+            self._dispatcher.dispatch(lambda: self._pio_ready(project_root))
+
+    def _pio_ready(self, project_root: Path) -> None:
+        """A `pio project config` result arrived: re-check the PIO firmware of that project
+        (the board may have changed) and refresh what is shown."""
+        changed = self._library.tracker.invalidate_project(project_root)
+        if self._selected_firmware_id() in changed:
+            self._recheck_selected()
+
     def _change_build_dir(self, firmware_id: str) -> None:
         firmware = self._library.firmware(firmware_id)
         start = firmware.build_ref.path if firmware.build_ref else ""
-        chosen = QFileDialog.getExistingDirectory(self, "Build directory", start)
+        title = (
+            "Env build folder (.pio\\build\\<env>)"
+            if firmware.build_ref and firmware.build_ref.env
+            else "Build directory"
+        )
+        chosen = QFileDialog.getExistingDirectory(self, title, start)
         if not chosen:
             return
-        status = self._library.tracker.set_build_dir(firmware_id, Path(chosen))
+        try:
+            status = self._library.tracker.set_build_dir(firmware_id, Path(chosen))
+        except ValueError as exc:  # not an env build folder of a PlatformIO project
+            self.note("error", f"[build] {exc}")
+            return
         self.note("dim", f"[build] {firmware.name} now follows {chosen} ({status.state.value})")
         self.changed()
 
@@ -1065,7 +1121,9 @@ class EmbrWindow(FrameWindow):
 
     def _window_menu(self) -> None:
         menu = QMenu(self)
-        menu.addAction("Settings…", lambda: dialogs.settings(self, self._context.paths))
+        menu.addAction(
+            "Settings…", lambda: dialogs.settings(self, self._context.paths, self._library)
+        )
         menu.addAction("Clean archive…", self._clean_archive)
         themes = menu.addMenu("Theme")
         group = QActionGroup(themes)

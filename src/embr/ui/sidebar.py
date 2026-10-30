@@ -223,6 +223,7 @@ class Sidebar(QWidget):
     new_firmware = Signal()
     new_project = Signal()
     import_idf = Signal()
+    import_pio = Signal()
     query_changed = Signal(str)
     files_dropped = Signal(list, object)
     """See FirmwareTree.files_dropped."""
@@ -244,6 +245,9 @@ class Sidebar(QWidget):
         )
         self.new_menu.addAction("Import ESP-IDF build…", self.import_idf.emit).setToolTip(
             "follows a build directory"
+        )
+        self.new_menu.addAction("Import PlatformIO build…", self.import_pio.emit).setToolTip(
+            "follows the build folders of PlatformIO envs"
         )
         self.new_menu.addSeparator()
         self.new_menu.addAction("New project", self.new_project.emit)

@@ -33,6 +33,7 @@ from embr.core.firmware.import_pio import (
     PLATFORMIO_INI,
     EnvRef,
     PioBuildError,
+    env_ref,
     read_env,
 )
 from embr.core.firmware.import_pio import BuildMissingError as PioBuildMissingError
@@ -217,11 +218,17 @@ class Tracker:
 
     def set_build_dir(self, firmware_id: str, path: Path) -> TrackStatus:
         """ "Change directory" for a tracking firmware: store the new build_ref path and
-        check. ValueError for fixed firmware."""
+        check. PIO firmware take an env build folder (`<project>/.pio/build/<env>`) and store
+        its project root and env; import_pio.EnvDirError (a ValueError) for anything else.
+        ValueError for fixed firmware."""
         firmware = self._ctx.firmware.get(firmware_id)
         if firmware.build_ref is None:
             raise ValueError(f"{firmware.name} does not follow a build")
-        firmware.build_ref.path = str(path.resolve())
+        if firmware.source == Source.PIO_BUILD:  # .pio/build/<env>: EnvDirError is a ValueError
+            ref = env_ref(path)
+            firmware.build_ref.path, firmware.build_ref.env = str(ref.project_root), ref.env
+        else:
+            firmware.build_ref.path = str(path.resolve())
         self._ctx.firmware.save(firmware)
         self.invalidate(firmware_id)
         return self.check(firmware_id)

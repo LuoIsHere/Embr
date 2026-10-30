@@ -64,6 +64,7 @@ from embr.core.firmware.import_pio import (
     env_ref,
     ini_envs,
     is_built,
+    locate_package,
     read_env,
 )
 from embr.core.firmware.kinds import EntryKind
@@ -516,6 +517,12 @@ class Library:
     def framework_pkg_default(self) -> str:
         """settings.ini [pio] framework_pkg; "" means auto-detect."""
         return self._ctx.settings.get(PIO_SECTION, FRAMEWORK_PKG_KEY) or ""
+
+    def detected_framework_pkg(self) -> str:
+        """The framework package auto-detection finds under the PIO core folder (no env
+        preference), for the Settings placeholder; "" when there is none."""
+        found = locate_package(manual="", listed=None, config=None, core=self._tracker.pio.core_dir)
+        return str(found.path) if found.path is not None else ""
 
     def set_framework_pkg_default(self, path: str) -> None:
         """Store (stripped; "" removes the key) and re-check every PIO firmware that has no

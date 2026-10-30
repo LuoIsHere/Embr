@@ -46,6 +46,8 @@ from embr.core.firmware.entries import AddressError, FolderError
 from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import format_revision
 from embr.core.firmware.image_sniff import parse_partition_table
+from embr.core.firmware.import_pio import BOOT_APP0
+from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, Firmware, Source, editable_params
 from embr.core.firmware.tracking import ChangeKind, EntryMark, ResolveState
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
@@ -278,7 +280,14 @@ class EntriesTab(QWidget):
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._filling = False
 
-    def show_firmware(self, firmware: Firmware, marks: Mapping[str, EntryMark]) -> None:
+    def show_firmware(
+        self,
+        firmware: Firmware,
+        marks: Mapping[str, EntryMark],
+        notes: Mapping[str, str] | None = None,
+    ) -> None:
+        """`notes`: importer remarks by entry id (TrackStatus.entry_notes)."""
+        notes = notes or {}
         same = self._firmware is not None and self._firmware.id == firmware.id
         typing = self._typing() if same else None
         self._firmware = firmware
@@ -290,7 +299,7 @@ class EntriesTab(QWidget):
         tracking = firmware.source.tracking
         self.table.setRowCount(len(rows))
         for row, entry in enumerate(rows):
-            self._fill_row(row, entry, marks.get(entry.id), locked)
+            self._fill_row(row, entry, marks.get(entry.id), locked, notes.get(entry.id, ""))
         self._filling = False
         self.add_button.setEnabled(not locked)
         self.add_button.setVisible(not tracking)
@@ -379,7 +388,9 @@ class EntriesTab(QWidget):
                 edit.setCursorPosition(cursor)
             return
 
-    def _fill_row(self, row: int, entry: Entry, mark: EntryMark | None, locked: bool) -> None:
+    def _fill_row(
+        self, row: int, entry: Entry, mark: EntryMark | None, locked: bool, remark: str = ""
+    ) -> None:
         assert self._firmware is not None
         mcu = entry_mcu(self._owner.context, self._firmware, entry)
         board = self._owner.identified_chip()
@@ -408,7 +419,7 @@ class EntriesTab(QWidget):
         address.editingFinished.connect(lambda e=entry, w=address: self._address(e, w))
         self.table.setCellWidget(row, 1, _cell(address))
         self.table.setCellWidget(row, 2, self._mcu_cell(entry, mcu, locked, dim))
-        self.table.setCellWidget(row, 3, self._name_cell(entry, mark, dim))
+        self.table.setCellWidget(row, 3, self._name_cell(entry, mark, dim, remark))
         p = self._owner.palette
         for column, text, color in (
             (4, entry.kind.value, p.fg_3 if dim else p.fg_2),
@@ -455,7 +466,9 @@ class EntriesTab(QWidget):
         combo.activated.connect(chosen)
         return _cell(combo, left=0)  # its text starts where the read-only names start
 
-    def _name_cell(self, entry: Entry, mark: EntryMark | None, dim: str | None) -> QWidget:
+    def _name_cell(
+        self, entry: Entry, mark: EntryMark | None, dim: str | None, note: str = ""
+    ) -> QWidget:
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(6, 0, 6, 0)
@@ -468,14 +481,23 @@ class EntriesTab(QWidget):
             layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
             layout.addWidget(tag("added automatically", "gray"))
+        if note:  # PIO: boot_app0 placed by the table, or a listed address the image disputes
+            moved = entry.kind == EntryKind.OTADATA
+            layout.addWidget(
+                tag(
+                    "placed by partition table" if moved else "address differs",
+                    "info" if moved else "warn",
+                )
+            )
         scheme, _, rest = entry.file.partition(":")
-        widget.setToolTip(
+        where = (
             rest
             if scheme == "path"
             else f"data/archive/{rest}.bin, original name {entry.name}"
             if scheme == "archive"
             else "0xFF bytes, generated when flashing"
         )
+        widget.setToolTip(f"{where}\n{note}" if note else where)
         name.setToolTip(widget.toolTip())
         return widget
 
@@ -712,6 +734,13 @@ class ParamsTab(QWidget):
         self._add("Name", name, "unique within the project, or among standalone firmware")
         self._add("Chip", self._chip(firmware), "from the entries: MCU column on the Entries tab")
         self._add(*self._origin(firmware))
+        if firmware.source == Source.PIO_BUILD:
+            self._add(
+                "Framework package",
+                self._package(firmware, locked),
+                "Arduino: boot_app0.bin comes from this package; empty uses the Settings path, "
+                "else auto-detection",
+            )
         self._add("Flash mode / freq / size", self._flash(firmware, "flash_mode" in editable))
         self._add(
             "Reset before",
@@ -828,7 +857,9 @@ class ParamsTab(QWidget):
         column.setSpacing(2)
         row = QHBoxLayout()
         row.setSpacing(6)
-        row.addWidget(elided(firmware.build_ref.path, mono=True, middle=True), 1)
+        env = firmware.build_ref.env
+        shown = f"{firmware.build_ref.path}  ·  env {env}" if env else firmware.build_ref.path
+        row.addWidget(elided(shown, mono=True, middle=True), 1)
         change = button("Change…", "ibtn")
         change.setEnabled(not self._owner.is_locked(firmware.id))
         change.clicked.connect(lambda: self._owner.firmware_action("directory"))
@@ -839,14 +870,65 @@ class ParamsTab(QWidget):
             "exists" if Path(firmware.build_ref.path).is_dir() else "not found",
             f"last resolved {str(resolved).replace('T', ' ')}" if resolved else "",
             f"ESP-IDF {status.idf_version}" if status and status.idf_version else "",
-            f"sdkconfig target {status.configured_target}"
+            f"{'board' if env else 'sdkconfig'} target {status.configured_target}"
             if status and status.configured_target
             else "",
         ]
         small = label(" · ".join(f for f in facts if f), tone="3")
         small.setStyleSheet("font-size: 12px;")
         column.addWidget(small)
+        for line in status.build_notes if status else ():
+            note = label(line, tone="3", wrap=True)
+            note.setStyleSheet("font-size: 12px;")
+            column.addWidget(note)
         return box
+
+    def _package(self, firmware: Firmware, locked: bool) -> QWidget:
+        status = self._owner.library.tracker.cached(firmware.id)
+        entries = status.firmware.entries if status else []
+        boot = next(
+            (e.file[5:] for e in entries if e.name == BOOT_APP0 and e.file.startswith("path:")),
+            None,
+        )
+        auto = str(Path(boot).parents[2]) if boot else ""
+        default = self._owner.library.framework_pkg_default()
+        path = QLineEdit(firmware.framework_pkg)
+        path.setPlaceholderText(
+            f"Settings path: {default}"
+            if default
+            else f"auto-detected: {auto}"
+            if auto
+            else "auto-detect (nothing found)"
+        )
+        path.setReadOnly(locked)
+        path.editingFinished.connect(lambda: self._set_package(firmware, path.text()))
+        browse = button("Browse…", "ibtn")
+        browse.setEnabled(not locked)
+
+        def pick() -> None:
+            chosen = QFileDialog.getExistingDirectory(
+                self, "Framework package", path.text() or auto
+            )
+            if chosen:
+                path.setText(chosen)
+                self._set_package(firmware, chosen)
+
+        browse.clicked.connect(pick)
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(path, 1)
+        row.addWidget(browse)
+        return box
+
+    def _set_package(self, firmware: Firmware, text: str) -> None:
+        if text.strip() == firmware.framework_pkg:
+            return
+        self._owner.library.set_framework_pkg(firmware.id, text)
+        shown = text.strip() or "the Settings path / auto-detection"
+        self._owner.note("dim", f"[firmware] {firmware.name}: framework package {shown}")
+        self._owner.changed()
 
     def _chip(self, firmware: Firmware) -> QWidget:
         mcus = firmware_mcus(self._owner.context, firmware)
@@ -1058,7 +1140,7 @@ class FirmwareView(QWidget):
         else:
             self._fixed_banner(status)
         self.banner.action.setEnabled(not self._owner.is_locked(firmware.id))
-        self.entries.show_firmware(firmware, status.marks)
+        self.entries.show_firmware(firmware, status.marks, status.entry_notes)
         self.params.show_firmware(firmware)
         self.records.show_firmware(firmware)
 
@@ -1088,12 +1170,17 @@ class FirmwareView(QWidget):
     def _tracking_banner(self, status: TrackStatus) -> None:
         firmware = status.firmware
         problems = html.escape("; ".join(status.problems))
+        rebuild = (
+            "Rebuild the env in PlatformIO"
+            if firmware.source == Source.PIO_BUILD
+            else "Run <code>idf.py build</code>"
+        )
         if status.state == ResolveState.TARGET_SWITCHED:
             self.banner.show_text(
                 f"Target switched, rebuild needed: the configuration targets "
                 f"<b>{status.configured_target}</b>, the build output is still "
-                f"<b>{firmware.chip}</b>. Run <code>idf.py build</code>; flashing, archiving "
-                "and merging are blocked until then."
+                f"<b>{firmware.chip}</b>. {rebuild}; flashing, archiving and merging are "
+                "blocked until then."
             )
         elif status.state == ResolveState.INCOMPLETE:
             self.banner.show_text(
