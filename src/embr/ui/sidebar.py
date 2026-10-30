@@ -4,7 +4,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
+from PySide6.QtCore import QMargins, QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QContextMenuEvent,
@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QDragMoveEvent,
     QDropEvent,
     QMouseEvent,
+    QResizeEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -72,6 +73,8 @@ def chips_text(mcus: tuple[str, ...]) -> str:
 
 
 INDENT = 8
+NAME_MIN = 72
+"""Firmware rows: below this much room for the name, optional meta gives way."""
 """Tree: indent of groups (and of firmware, whose names line up with group names)."""
 
 
@@ -96,6 +99,36 @@ class Row(QWidget):
         layout.addWidget(self.caret)
         layout.addLayout(self.text, 1)
         layout.addLayout(self.meta)
+        self._optional: list[tuple[int, QWidget]] = []
+        """(rank, widget): meta widgets that give way when the row is narrow."""
+
+    def add_optional(self, widget: QWidget, rank: int) -> None:
+        """A meta widget, shown in place, that gives way to the name in a narrow sidebar;
+        a lower rank is hidden first."""
+        self.meta.addWidget(widget)
+        self._optional.append((rank, widget))
+        self._optional.sort(key=lambda item: item[0])
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if not self._optional:
+            return
+        layout = self.layout()
+        margins = layout.contentsMargins() if layout is not None else QMargins()
+        fixed = margins.left() + margins.right() + self.caret.width() + 8
+        shown: list[QWidget] = []
+        for i in range(self.meta.count()):
+            item = self.meta.itemAt(i)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                shown.append(widget)
+        for _, widget in self._optional:
+            widget.setVisible(True)
+        for _, widget in self._optional:
+            meta = sum(w.sizeHint().width() + 4 for w in shown if not w.isHidden())
+            if self.width() - fixed - meta >= NAME_MIN:
+                break
+            widget.setVisible(False)
 
 
 class FirmwareTree(QTreeWidget):
@@ -286,6 +319,15 @@ class Sidebar(QWidget):
     def apply_palette(self, p: Palette) -> None:
         self._search_icon.setIcon(icons.icon("search", p.fg_3))
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """A narrow sidebar shows "+ New" instead of the whole button text (a button cannot
+        elide; its text would be cut on both sides)."""
+        super().resizeEvent(event)
+        full, short = tr(f"{PLUS} New   firmware · project"), tr(f"{PLUS} New")
+        room = self.new_button.width() - 26  # padding and border
+        fits = self.new_button.fontMetrics().horizontalAdvance(full) <= room
+        self.new_button.setText(full if fits else short)
+
     def _open_new_menu(self) -> None:
         self.new_menu.popup(self.new_button.mapToGlobal(QPoint(0, self.new_button.height() + 4)))
 
@@ -330,7 +372,7 @@ class Sidebar(QWidget):
                 gkey = f"g:{project.id}:{group.name}"
                 gfolded = gkey in self._folded
                 grow = Row(INDENT, "▸" if gfolded else "▾")
-                gname = label(group.name or tr("Ungrouped"), tone="2" if group.name else "3")
+                gname = elided(group.name or tr("Ungrouped"), tone="2" if group.name else "3")
                 grow.text.addWidget(gname)
                 if not group.firmware:
                     grow.meta.addWidget(label(tr("empty"), tone="3"))
@@ -359,7 +401,7 @@ class Sidebar(QWidget):
         widget = QWidget()
         widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)  # drop highlight
         widget.setStyleSheet("background: transparent;")
-        caption = label(text)
+        caption = elided(text)  # narrow sidebar: "STANDALONE FIRMW…", not cut off
         caption.setProperty("group", "1")
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 2)
@@ -381,19 +423,21 @@ class Sidebar(QWidget):
         origin = elided(fw.origin, tone="3", mono=True)
         origin.setStyleSheet("font-size: 11px;")
         row.text.addWidget(name)
-        row.text.addWidget(origin)
+        if fw.origin:  # no second line: the name stays centred in the row
+            row.text.addWidget(origin)
         source = {Source.IDF_BUILD: ("IDF", "info"), Source.PIO_BUILD: ("PIO", "info")}.get(
             fw.source, ("ARC", "gray") if fw.source == Source.ARCHIVED else None
         )
         if source is not None:
-            row.meta.addWidget(tag(*source))
+            row.add_optional(tag(*source), 2)
         if fw.flag == FirmwareFlag.NEEDS_CONFIRMATION:
             row.meta.addWidget(tag("!", "warn"))
         elif fw.flag in (FirmwareFlag.MISSING, FirmwareFlag.BLOCKED):
             row.meta.addWidget(tag(TIMES, "bad"))
         if fw.id == self._busy_id:
             row.meta.addWidget(tag(tr("flashing"), "info"))
-        row.meta.addWidget(label(chips_text(fw.mcus), tone="3"))
+        if fw.mcus:
+            row.add_optional(label(chips_text(fw.mcus), tone="3"), 1)  # hidden before the tag
         reason = self._dimmed.get(fw.id)
         tip = fw.origin or fw.name
         row.setToolTip(

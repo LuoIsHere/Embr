@@ -382,6 +382,7 @@ TEXT: dict[str, str] = {
     "Also delete all firmware in this project": "同时删除此项目中的所有固件",
     "Search projects and firmware": "搜索项目和固件",
     "{0} New   firmware · project": "{0} 新建   固件 · 项目",
+    "{0} New": "{0} 新建",
     "fixed, add entries by hand": "固定型，手动添加条目",
     "Import ESP-IDF build…": "导入 ESP-IDF 构建…",
     "follows a build directory": "跟随一个构建目录",
