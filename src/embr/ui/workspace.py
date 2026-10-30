@@ -328,7 +328,7 @@ class EntriesTab(QWidget):
         for column, floor in _GIVE_WAY:
             if spare >= 0:
                 break
-            give = min(widths[column] - floor, -spare)
+            give = min(widths[column] - floor, -spare) if floor else widths[column]  # 0: hide
             if give > 0:
                 widths[column] -= give
                 spare += give
