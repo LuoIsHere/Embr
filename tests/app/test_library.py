@@ -10,15 +10,19 @@ from app_testkit import (
     Clock,
     build_files,
     copy_files,
+    entry_ids_under,
     find_row,
     fixed_firmware,
     idf_project,
     info,
+    multi_chip_firmware,
     seed_user_entry,
     set_target,
     write_newer,
 )
 
+from embr.app.archiving import Archiver
+from embr.app.chips import entry_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, assemble_plan
 from embr.app.library import (
@@ -29,12 +33,24 @@ from embr.app.library import (
     TrackingEntriesError,
 )
 from embr.app.tracking import Tracker
-from embr.core.firmware.entries import AddressError
+from embr.core.firmware.entries import (
+    AddressError,
+    FolderError,
+    attachment_entry,
+    entries_outside,
+)
 from embr.core.firmware.files import FileState
 from embr.core.firmware.import_idf import BuildMissingError
 from embr.core.firmware.kinds import EntryKind
-from embr.core.firmware.model import AddressSource, BuildRef, EntryOverride, Source
-from embr.core.firmware.tracking import ResolveState
+from embr.core.firmware.model import (
+    AddressSource,
+    BuildRef,
+    Entry,
+    EntryOverride,
+    Firmware,
+    Source,
+)
+from embr.core.firmware.tracking import ResolveState, entry_key
 from embr.core.project import ProjectDefaults
 
 APP = build_files("esp32s3_hello")[2]
@@ -51,12 +67,13 @@ def test_new_firmware_copies_project_defaults(library: Library) -> None:
     assert (alone.before, alone.after, alone.erase_all) == ("default-reset", "hard-reset", False)
 
 
-def test_untitled_firmware_takes_name_and_chip_from_the_first_file(library: Library) -> None:
+def test_untitled_firmware_takes_name_from_the_first_file(library: Library) -> None:
     firmware = library.create_firmware()
-    assert (firmware.name, firmware.chip) == (UNTITLED, None)
+    assert firmware.name == UNTITLED
     library.add_files(firmware.id, [APP])
     loaded = library.firmware(firmware.id)
-    assert (loaded.name, loaded.chip) == (APP.stem, "esp32s3")
+    # a fixed firmware stores no chip; its chips come from the entries (§12 item 13)
+    assert (loaded.name, loaded.chip) == (APP.stem, None)
 
 
 def test_idf_build_files_get_addresses_and_one_blank_otadata(library: Library) -> None:
@@ -142,7 +159,7 @@ def test_missing_file_is_flagged_and_can_be_relocated(
     # a library that has not checked the files yet still sees the file is gone
     assert find_row(Library(context).tree(), firmware.id).flag == FirmwareFlag.MISSING
 
-    (new,) = copy_files([APP], tmp_path / "new")
+    (new,) = copy_files([APP], tmp_path / "old" / "new")  # inside the folder (§12 item 8)
     library.relocate_entry(firmware.id, entry_id, new)
     assert library.check_files(firmware.id) == {entry_id: FileState.OK}
     assert library.flag(firmware.id) == FirmwareFlag.NONE
@@ -386,3 +403,220 @@ def test_mismatches_use_only_the_cached_resolution(context: AppContext, tmp_path
     assert tracker.cached(firmware.id) is None
     tracker.check(firmware.id)
     assert firmware.id in library.mismatches(info("esp32p4", 1, 0))
+
+
+def test_mismatches_dim_firmware_without_the_identified_chip(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    multi = multi_chip_firmware(context, tmp_path)
+    s3 = fixed_firmware(library, build_files("esp32s3_hello"), "s3")
+    found = library.mismatches(info("esp32p4", 1, 0))
+    assert multi.id not in found
+    assert s3.id in found
+
+
+# ---- MCU of entries (§12 item 13) ---------------------------------------------------------
+
+
+def _with_data(context: AppContext, firmware: Firmware, folder: Path) -> Entry:
+    """Store an attachment without MCU (a file in `folder`) in `firmware`."""
+    data = folder / "data.bin"
+    write_newer(data, b"\x5a" * 0x1000)
+    entry = attachment_entry(data, address=0x300000)
+    firmware.entries.append(entry)
+    context.firmware.save(firmware)
+    return entry
+
+
+def _stored_entry(context: AppContext, firmware_id: str, entry_id: str) -> Entry:
+    return next(e for e in context.firmware.get(firmware_id).entries if e.id == entry_id)
+
+
+def test_set_entry_chip_saves_and_clears(library: Library, context: AppContext) -> None:
+    firmware = fixed_firmware(library, build_files("esp32s3_hello"))
+    table = next(e for e in firmware.entries if e.kind == EntryKind.PARTITION_TABLE)
+
+    library.set_entry_chip(firmware.id, table.id, "esp32p4")
+    assert _stored_entry(context, firmware.id, table.id).chip == "esp32p4"
+    library.set_entry_chip(firmware.id, table.id, None)
+    assert _stored_entry(context, firmware.id, table.id).chip is None
+
+
+def _table_of(library: Library) -> tuple[str, str]:
+    firmware = fixed_firmware(library, build_files("esp32s3_hello"))
+    return firmware.id, next(e.id for e in firmware.entries if e.kind == EntryKind.PARTITION_TABLE)
+
+
+def _app_of(library: Library) -> tuple[str, str]:
+    firmware = fixed_firmware(library, [APP])
+    return firmware.id, firmware.entries[0].id
+
+
+def _tracked_table(library: Library, tmp_path: Path) -> tuple[str, str]:
+    firmware = library.import_idf(idf_project("esp32s3_hello", tmp_path / "hello"))
+    return firmware.id, entry_key(EntryKind.PARTITION_TABLE, "partition-table.bin")
+
+
+CHIP_REFUSALS: dict[str, tuple[Callable[[Library, Path], tuple[str, str]], str]] = {
+    "unknown_chip": (lambda lib, _: _table_of(lib), "esp9999"),
+    "header_names_a_chip": (lambda lib, _: _app_of(lib), "esp32p4"),
+    "tracking": (_tracked_table, "esp32p4"),
+}
+
+
+@pytest.mark.parametrize("case", list(CHIP_REFUSALS))
+def test_set_entry_chip_refuses(context: AppContext, tmp_path: Path, case: str) -> None:
+    library, _ = _tracked(context)
+    setup, chip = CHIP_REFUSALS[case]
+    firmware_id, entry_id = setup(library, tmp_path)
+    before = context.firmware.get(firmware_id)
+    with pytest.raises(ValueError):
+        library.set_entry_chip(firmware_id, entry_id, chip)
+    assert context.firmware.get(firmware_id) == before
+
+
+def test_fit_entries_unticks_entries_for_other_chips(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    firmware = multi_chip_firmware(context, tmp_path)
+    data = _with_data(context, firmware, tmp_path)
+    s3_ids = entry_ids_under(firmware, tmp_path) - {data.id}
+    before = context.firmware.get(firmware.id)
+
+    # esp32c3 is none of the firmware's chips: the whole firmware is for other boards
+    assert library.fit_entries(firmware.id, "esp32c3") == []
+    assert context.firmware.get(firmware.id) == before
+
+    unticked = library.fit_entries(firmware.id, "esp32s3")
+    assert {e.id for e in unticked} == entry_ids_under(firmware, tmp_path / "p4") | {data.id}
+    assert {e.id for e in context.firmware.get(firmware.id).entries if e.enabled} == s3_ids
+
+
+def test_choosing_the_board_chip_makes_an_entry_eligible_again(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    firmware = multi_chip_firmware(context, tmp_path)
+    data = _with_data(context, firmware, tmp_path)
+    library.fit_entries(firmware.id, "esp32s3")
+
+    library.set_entry_chip(firmware.id, data.id, "esp32s3")
+    assert not _stored_entry(context, firmware.id, data.id).enabled  # not ticked again
+    library.set_entry_enabled(firmware.id, data.id, True)
+    assert library.fit_entries(firmware.id, "esp32s3") == []
+    stored = context.firmware.get(firmware.id)
+    entry = next(e for e in stored.entries if e.id == data.id)
+    assert entry.enabled and entry_chip(context, stored, entry) == "esp32s3"
+
+
+# ---- one folder per fixed firmware (§12 item 8) -------------------------------------------
+
+
+def _folders(tmp_path: Path) -> tuple[Path, Path]:
+    """root/hello_esp32s3.bin and other/data.bin."""
+    (app,) = copy_files([APP], tmp_path / "root")
+    data = tmp_path / "other" / "data.bin"
+    write_newer(data, b"\x5a" * 0x1000)
+    return app, data
+
+
+def test_first_file_sets_the_folder_and_subfolders_fit(library: Library, tmp_path: Path) -> None:
+    app, _ = _folders(tmp_path)
+    (boot,) = copy_files([build_files("esp32s3_hello")[0]], tmp_path / "root" / "bootloader")
+    firmware = library.create_firmware("fw")
+
+    library.add_files(firmware.id, [app])
+    assert Path(library.firmware(firmware.id).folder) == app.parent
+    library.add_files(firmware.id, [boot])
+    assert len(library.firmware(firmware.id).entries) == 2
+
+
+def test_create_from_files_names_the_firmware_after_the_first_file(
+    library: Library, tmp_path: Path
+) -> None:
+    app, _ = _folders(tmp_path)
+    (table,) = copy_files([build_files("esp32s3_hello")[1]], tmp_path / "root")
+    project = library.create_project("p")
+    firmware = library.create_from_files([app, table], project.id, "board")
+    stored = library.firmware(firmware.id)
+    assert (stored.name, stored.project_id, stored.device, stored.source) == (
+        app.stem,
+        project.id,
+        "board",
+        Source.MANUAL,
+    )
+    assert (Path(stored.folder), len(stored.entries)) == (app.parent, 2)
+
+
+def _file(entry: Entry) -> Path:
+    return Path(entry.file.removeprefix("path:"))
+
+
+OUTSIDE: dict[str, Callable[[Library, Firmware, Firmware, Path], object]] = {
+    "add_files": lambda lib, fw, _, data: lib.add_files(fw.id, [data]),
+    "add_attachment": lambda lib, fw, _, data: lib.add_attachment(fw.id, data, address=0x300000),
+    "copy_entry_to": lambda lib, fw, src, _: lib.copy_entry_to(src.id, src.entries[0].id, fw.id),
+    "relocate_entry": lambda lib, fw, _, data: lib.relocate_entry(fw.id, fw.entries[0].id, data),
+    "create_from_files": lambda lib, fw, _, data: lib.create_from_files(
+        [_file(fw.entries[0]), data]
+    ),
+}
+
+
+@pytest.mark.parametrize("case", list(OUTSIDE))
+def test_file_outside_the_folder_is_refused(
+    library: Library, context: AppContext, tmp_path: Path, case: str
+) -> None:
+    app, data = _folders(tmp_path)
+    firmware = fixed_firmware(library, [app])
+    source = fixed_firmware(library, [data], "src")
+    before = sorted(context.firmware.all(), key=lambda f: f.id)
+
+    with pytest.raises(FolderError) as raised:
+        OUTSIDE[case](library, firmware, source, data)
+    assert [p.name for p in raised.value.outside] == ["data.bin"]
+    assert sorted(context.firmware.all(), key=lambda f: f.id) == before
+
+
+def test_archived_entries_fit_any_folder(context: AppContext, tmp_path: Path) -> None:
+    library, _ = _tracked(context)
+    app, data = _folders(tmp_path)
+    firmware = fixed_firmware(library, [app])
+    source = fixed_firmware(library, [data], "src")
+    archived = Archiver(context, library.tracker).archive_entry(source.id, source.entries[0].id)
+
+    library.copy_entry_to(source.id, archived.id, firmware.id)
+    stored = library.firmware(firmware.id)
+    assert stored.entries[-1].file == archived.file
+    assert entries_outside(stored) == []
+
+
+def test_relocate_folder_keeps_relative_paths(library: Library, tmp_path: Path) -> None:
+    boot, table, app = build_files("esp32s3_hello")
+    old, new = tmp_path / "old", tmp_path / "new"
+    files = [*copy_files([app, table], old), *copy_files([boot], old / "bootloader")]
+    firmware = fixed_firmware(library, files)
+    copy_files([app], new)
+    copy_files([boot], new / "bootloader")  # the table is not there
+
+    assert library.relocate_folder(firmware.id, new) == [table.name]
+    stored = library.firmware(firmware.id)
+    assert Path(stored.folder) == new.resolve()
+    assert {e.name: _file(e) for e in stored.entries} == {
+        app.name: (new / app.name).resolve(),
+        boot.name: (new / "bootloader" / boot.name).resolve(),
+        table.name: (old / table.name).resolve(),
+    }
+    with pytest.raises(ValueError):  # no folder yet
+        library.relocate_folder(library.create_firmware("empty").id, new)
+
+
+def test_folder_outlives_its_files(library: Library, tmp_path: Path) -> None:
+    app, data = _folders(tmp_path)
+    (table,) = copy_files([build_files("esp32s3_hello")[1]], tmp_path / "root")
+    firmware = fixed_firmware(library, [app, table])
+
+    for entry in firmware.entries:  # the first file's entry included
+        library.remove_entry(firmware.id, entry.id)
+    assert Path(library.firmware(firmware.id).folder) == app.parent
+    with pytest.raises(FolderError):
+        library.add_files(firmware.id, [data])

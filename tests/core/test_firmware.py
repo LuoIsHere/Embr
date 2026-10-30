@@ -66,7 +66,7 @@ def _path_entry(path: Path, kind: EntryKind, address: int) -> Entry:
 
 def test_firmware_round_trip_with_entries(store: FirmwareStore) -> None:
     fw = store.create("Custom OTA", project_id=new_id(), device="Board A")
-    fw.chip = "esp32s3"
+    fw.folder = str(APP.parent)
     fw.notes = "notes\nwith two lines"
     fw.tags = ["release"]
     fw.flash.mode, fw.flash.freq, fw.flash.size = "dio", "80m", "4MB"
@@ -93,6 +93,7 @@ def test_firmware_round_trip_with_entries(store: FirmwareStore) -> None:
         auto_added=True,
     )
     attachment.enabled = False
+    attachment.chip = "esp32s3"  # MCU chosen by hand (design doc §12 item 13)
     fw.entries = [app, attachment, otadata]
     store.save(fw)
 
@@ -118,7 +119,7 @@ def test_name_scope_and_suffixes(store: FirmwareStore) -> None:
 def test_move_changes_only_project_and_device(store: FirmwareStore) -> None:
     p, q = new_id(), new_id()
     fw = store.create("App", project_id=p, device="A", erase_all=True)
-    fw.chip, fw.notes = "esp32", "kept"
+    fw.notes = "kept"
     fw.entries = [_path_entry(APP, EntryKind.APP, 0x10000)]
     store.save(fw)
     file = store.directory / f"{fw.id}.toml"
@@ -147,10 +148,8 @@ def test_firmware_in_one_project_stay_independent(store: FirmwareStore) -> None:
     p = new_id()
     a = store.create("A", project_id=p)
     b = store.create("B", project_id=p)
-    set_param(a, "chip", "esp32")
     set_param(a, "flash_size", "16MB")
     a.entries = [_path_entry(APP, EntryKind.APP, 0x10000)]
-    set_param(b, "chip", "esp32s3")
     set_param(b, "flash_size", "4MB")
     b.entries = [_path_entry(APP, EntryKind.APP, 0x20000)]
     store.save(a)
@@ -158,12 +157,8 @@ def test_firmware_in_one_project_stay_independent(store: FirmwareStore) -> None:
 
     reopened = _reopen(store)
     ra, rb = reopened.get(a.id), reopened.get(b.id)
-    assert (ra.chip, ra.flash.size, [e.address for e in ra.entries]) == ("esp32", "16MB", [0x10000])
-    assert (rb.chip, rb.flash.size, [e.address for e in rb.entries]) == (
-        "esp32s3",
-        "4MB",
-        [0x20000],
-    )
+    assert (ra.flash.size, [e.address for e in ra.entries]) == ("16MB", [0x10000])
+    assert (rb.flash.size, [e.address for e in rb.entries]) == ("4MB", [0x20000])
 
 
 # --- editable parameters -----------------------------------------------------------------
@@ -171,8 +166,9 @@ def test_firmware_in_one_project_stay_independent(store: FirmwareStore) -> None:
 
 def test_editable_params() -> None:
     expected = {
-        Source.MANUAL: set(PARAMS),
-        Source.ARCHIVED: set(PARAMS),
+        # the chip is derived for every firmware (design doc §12 item 13)
+        Source.MANUAL: set(PARAMS) - {"chip"},
+        Source.ARCHIVED: set(PARAMS) - {"chip"},
         Source.IDF_BUILD: {"erase_all", "tags", "notes"},
         Source.PIO_BUILD: {"before", "after", "erase_all", "tags", "notes"},
     }
@@ -184,7 +180,6 @@ def test_editable_params() -> None:
 def test_set_param_on_fixed_firmware_round_trips(store: FirmwareStore) -> None:
     fw = store.create("Fixed")
     values: dict[str, object] = {
-        "chip": "esp32s3",
         "flash_mode": "qio",
         "flash_freq": "40m",
         "flash_size": "8MB",
@@ -198,7 +193,7 @@ def test_set_param_on_fixed_firmware_round_trips(store: FirmwareStore) -> None:
         set_param(fw, name, value)
     store.save(fw)
     r = _reopen(store).get(fw.id)
-    assert (r.chip, r.flash.mode, r.flash.freq, r.flash.size) == ("esp32s3", "qio", "40m", "8MB")
+    assert (r.flash.mode, r.flash.freq, r.flash.size) == ("qio", "40m", "8MB")
     assert (r.before, r.after, r.erase_all, r.tags, r.notes) == (
         "no-reset",
         "no-reset",
@@ -210,10 +205,8 @@ def test_set_param_on_fixed_firmware_round_trips(store: FirmwareStore) -> None:
 
 def test_set_param_rejects_invalid_values() -> None:
     fw = Firmware(id=new_id(), name="F", project_id=None, device="", source=Source.MANUAL)
-    fw.chip = "esp32s3"
     before = asdict(fw)
     invalid: list[tuple[str, object]] = [
-        ("chip", "esp9999"),
         ("flash_size", "3MB"),
         ("flash_mode", "fast"),
         ("before", "bogus-reset"),
@@ -228,7 +221,9 @@ def test_set_param_rejects_invalid_values() -> None:
 def test_set_param_refuses_read_only_params() -> None:
     idf = Firmware(id=new_id(), name="I", project_id=None, device="", source=Source.IDF_BUILD)
     pio = Firmware(id=new_id(), name="P", project_id=None, device="", source=Source.PIO_BUILD)
+    manual = Firmware(id=new_id(), name="M", project_id=None, device="", source=Source.MANUAL)
     for fw, name, value in [
+        (manual, "chip", "esp32"),
         (idf, "chip", "esp32"),
         (idf, "flash_size", "4MB"),
         (idf, "before", "no-reset"),
@@ -239,7 +234,26 @@ def test_set_param_refuses_read_only_params() -> None:
             set_param(fw, name, value)
     set_param(pio, "before", "no-reset")
     set_param(idf, "erase_all", True)
-    assert (pio.before, idf.erase_all, idf.chip) == ("no-reset", True, None)
+    assert (pio.before, idf.erase_all, idf.chip, manual.chip) == ("no-reset", True, None, None)
+
+
+def test_file_without_the_new_fields_loads_with_defaults(store: FirmwareStore) -> None:
+    # no migration (design doc §12 item 13): old files lack folder and entry chips, and a
+    # fixed firmware may still carry its own chip, which is ignored
+    fw = store.create("Old")
+    fw.entries = [_path_entry(APP, EntryKind.APP, 0x20000)]
+    store.save(fw)
+    file = store.directory / f"{fw.id}.toml"
+    doc = tomllib.loads(file.read_text(encoding="utf-8"))
+    doc["chip"] = "esp32s3"
+    file.write_text(tomli_w.dumps(doc), encoding="utf-8")
+
+    loaded = _reopen(store).get(fw.id)
+    assert (loaded.chip, loaded.folder, loaded.entries[0].chip) == (None, "", None)
+    assert not loaded.read_only
+    _reopen(store).save(loaded)
+    saved = tomllib.loads(file.read_text(encoding="utf-8"))
+    assert (saved["schema_version"], "chip" in saved) == (1, False)
 
 
 def test_newer_firmware_is_read_only(store: FirmwareStore) -> None:

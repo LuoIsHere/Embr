@@ -3,9 +3,11 @@
 from pathlib import Path
 
 import pytest
-from app_testkit import build_files, copy_files, find_row
+from app_testkit import build_files, copy_files, find_row, fixed_firmware, multi_chip_firmware
 
+from embr.app.context import AppContext
 from embr.app.library import Library, Tree
+from embr.core.firmware.entries import entry_from_file
 
 
 def shape(tree: Tree) -> list[tuple[str, list[tuple[str, list[str]]]]]:
@@ -62,14 +64,31 @@ def test_search(
     assert all(p.firmware_count == 2 for p in tree.projects)
 
 
-def test_origin_is_the_folder_of_the_first_enabled_file(library: Library, tmp_path: Path) -> None:
+def test_origin_is_the_folder_else_the_first_enabled_file(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    # files in two folders, as firmware made before the folder rule have them (§12 item 8)
     _, table, app = build_files("esp32s3_hello")
     (app_copy,) = copy_files([app], tmp_path / "a")
     (table_copy,) = copy_files([table], tmp_path / "b")
-    firmware = library.create_firmware("fw")
-    library.add_files(firmware.id, [app_copy, table_copy])
-    app_entry = next(e for e in library.firmware(firmware.id).entries if e.name == app.name)
-    library.set_entry_enabled(firmware.id, app_entry.id, False)
+    firmware = context.firmware.create("fw")
+    firmware.entries = [entry_from_file(app_copy), entry_from_file(table_copy)]
+    firmware.entries[0].enabled = False
+    context.firmware.save(firmware)
+    assert Path(find_row(library.tree(), firmware.id).origin) == (tmp_path / "b").resolve()
 
-    row = find_row(library.tree(), firmware.id)
-    assert Path(row.origin) == (tmp_path / "b").resolve()
+    firmware.folder = str((tmp_path / "a").resolve())
+    context.firmware.save(firmware)
+    assert Path(find_row(library.tree(), firmware.id).origin) == (tmp_path / "a").resolve()
+
+
+def test_row_lists_every_chip(library: Library, context: AppContext, tmp_path: Path) -> None:
+    multi = multi_chip_firmware(context, tmp_path)
+    single = fixed_firmware(library, build_files("esp32s3_hello"), "s3")
+    empty = library.create_firmware("empty")
+    tree = library.tree()
+    assert [find_row(tree, f.id).chips for f in (multi, single, empty)] == [
+        ("esp32p4", "esp32s3"),  # shown as "multi"
+        ("esp32s3",),
+        (),
+    ]

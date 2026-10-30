@@ -5,7 +5,15 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from app_testkit import BRIDGE, JTAG, app_revision_range, build_files, fixed_firmware
+from app_testkit import (
+    BRIDGE,
+    JTAG,
+    app_revision_range,
+    build_files,
+    copy_files,
+    fixed_firmware,
+    multi_chip_firmware,
+)
 
 from embr.app.context import AppContext
 from embr.app.flashplan import (
@@ -113,7 +121,7 @@ def test_entry_without_address_cannot_be_planned(
 ) -> None:
     unknown = tmp_path / "data.bin"
     unknown.write_bytes(bytes(range(1, 200)))
-    firmware = fixed_firmware(library, [*HELLO, unknown])
+    firmware = fixed_firmware(library, [*copy_files(HELLO, tmp_path), unknown])
     assert [e.address for e in firmware.entries if e.name == "data.bin"] == [None]
 
     with pytest.raises(PlanError):
@@ -129,10 +137,59 @@ def test_chip_without_stub_is_planned_without_it(
     data = tmp_path / "data.bin"
     data.write_bytes(b"" * 64)
     firmware = library.create_firmware("fw")
-    library.set_param(firmware.id, "chip", chip)
-    library.add_attachment(firmware.id, data, address=0x10000)
+    entry = library.add_attachment(firmware.id, data, address=0x10000)
+    library.set_entry_chip(firmware.id, entry.id, chip)  # the firmware's only chip
     firmware = library.firmware(firmware.id)
 
     assert assemble_plan(context, firmware, BRIDGE, None).stub is stub
     command = preview_command(context, firmware, BRIDGE, None).split()
     assert command and ("--no-stub" in command) is not stub
+
+
+# ---- several chips in one firmware (§12 item 13) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("chip", "addresses", "app"),
+    [
+        ("esp32s3", [0x0, 0x8000, 0x10000], "hello_esp32s3.bin"),
+        ("esp32p4", [0x2000, 0x8000, 0x10000], "hello_esp32p4_rev1.bin"),
+    ],
+)
+def test_plan_for_a_chip_takes_only_its_entries(
+    context: AppContext, tmp_path: Path, chip: str, addresses: list[int], app: str
+) -> None:
+    firmware = multi_chip_firmware(context, tmp_path)
+    plan = assemble_plan(context, firmware, BRIDGE, None, chip=chip)
+    assert (plan.chip, [e.address for e in plan.entries]) == (chip, addresses)
+    assert plan.entries[2].name == app
+    assert plan.entries[1].image_chip == chip  # the table's hand-chosen MCU
+    assert (plan.declared_flash_size, plan.partitions_end is not None) == ("2MB", True)
+
+
+def test_multi_chip_firmware_has_no_plan_before_identification(
+    context: AppContext, tmp_path: Path
+) -> None:
+    firmware = multi_chip_firmware(context, tmp_path)
+    with pytest.raises(PlanError):
+        assemble_plan(context, firmware, BRIDGE, None)
+    assert preview_command(context, firmware, None, None) == ""
+    command = preview_command(context, firmware, None, None, chip="esp32p4")
+    assert "hello_esp32p4_rev1.bin" in command and "hello_esp32s3.bin" not in command
+
+
+def test_firmware_with_files_outside_its_folder_still_plans(
+    context: AppContext, tmp_path: Path
+) -> None:
+    # made before the folder rule (§12 item 8): kept as is, still flashable
+    boot, table, app = HELLO
+    (boot_copy,) = copy_files([boot], tmp_path / "a")
+    others = copy_files([table, app], tmp_path / "b")
+    firmware = context.firmware.create("legacy")
+    firmware.entries = [entries.entry_from_file(p) for p in [boot_copy, *others]]
+    firmware.folder = str((tmp_path / "b").resolve())
+    context.firmware.save(firmware)
+
+    assert [e.name for e in entries.entries_outside(firmware)] == [boot.name]
+    plan = assemble_plan(context, firmware, BRIDGE, None)
+    assert [e.address for e in plan.entries] == [0x0, 0x8000, 0x10000]

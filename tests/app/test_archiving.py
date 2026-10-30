@@ -15,6 +15,7 @@ from app_testkit import (
 )
 
 from embr.app.archiving import Archiver
+from embr.app.chips import firmware_chips
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
@@ -52,7 +53,11 @@ def test_archive_version_copies_the_resolved_firmware(context: AppContext, tmp_p
     )
     assert archived.name.startswith(f"{source.name} (archived ")
     assert archived.notes == "release 1" and source.name in archived.archived_from
-    assert (archived.chip, archived.flash) == ("esp32s3", FlashParams("dio", "80m", "2MB"))
+    # a fixed firmware: its chips come from the entries (§12 item 13)
+    assert (firmware_chips(context, archived), archived.flash) == (
+        ("esp32s3",),
+        FlashParams("dio", "80m", "2MB"),
+    )
     entries = {e.name: e for e in archived.entries}
     assert set(entries) == {
         "bootloader.bin",

@@ -1,6 +1,8 @@
 """core/firmware/entries: adding files, address edits, partition placement, layout checks."""
 
 import hashlib
+import os
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -12,10 +14,13 @@ from embr.core.firmware.entries import (
     Problem,
     ProblemLevel,
     attachment_entry,
+    blank_otadata_entry,
     check_layout,
     copy_entry,
     enabled_partition_table,
+    entries_outside,
     entry_from_file,
+    in_folder,
     resolve_partitions,
     set_address,
 )
@@ -191,3 +196,36 @@ def test_check_layout_flash_size_and_missing_address() -> None:
     fw.entries.append(unresolved)
     missing = _refusals(check_layout(fw, 0x400000))
     assert missing and unresolved.id in missing[0].entry_ids
+
+
+# --- one folder per fixed firmware (design doc §12 item 8) -------------------------------
+
+IN_FOLDER: dict[str, tuple[Callable[[Path], str], Callable[[Path], Path], bool]] = {
+    "file": (str, lambda r: r / "a.bin", True),
+    "subfolder": (str, lambda r: r / "sub" / "a.bin", True),
+    "case": (lambda r: str(r).upper(), lambda r: r / "a.bin", True),
+    "trailing_separator": (lambda r: str(r) + os.sep, lambda r: r / "a.bin", True),
+    "dotdot_in_folder": (lambda r: str(r / "sub" / ".."), lambda r: r / "a.bin", True),
+    "dotdot_out_of_it": (str, lambda r: r / "sub" / ".." / ".." / "a.bin", False),
+    "sibling_with_same_prefix": (str, lambda r: r.parent / f"{r.name}2" / "a.bin", False),
+}
+
+
+@pytest.mark.parametrize("case", list(IN_FOLDER))
+def test_in_folder(tmp_path: Path, case: str) -> None:
+    folder, path, inside = IN_FOLDER[case]
+    root = tmp_path / "root"
+    assert in_folder(folder(root), path(root)) is inside
+
+
+def test_entries_outside_lists_only_path_entries_outside_the_folder(tmp_path: Path) -> None:
+    def entry(file: str) -> Entry:
+        return replace(entry_from_file(HELLO / "hello_esp32s3.bin"), file=file)
+
+    inside = entry(f"path:{tmp_path / 'root' / 'sub' / 'a.bin'}")
+    outside = entry(f"path:{tmp_path / 'other' / 'a.bin'}")
+    archived = entry(f"archive:{'0' * 64}")
+    fw = _firmware(inside, outside, archived, blank_otadata_entry(0xD000, 0x2000))
+    assert entries_outside(fw) == []  # no folder: firmware made before the rule
+    fw.folder = str(tmp_path / "root")
+    assert entries_outside(fw) == [outside]

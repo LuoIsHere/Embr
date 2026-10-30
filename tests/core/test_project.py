@@ -70,7 +70,6 @@ def test_delete_project_makes_firmware_standalone(stores: Stores) -> None:
     projects.add_group(project.id, "G")
     inside = projects.create_firmware(firmware, project.id, "App", device="G")
     inside.notes = "keep me"
-    inside.chip = "esp32s3"
     firmware.save(inside)
     standalone = firmware.create("App")
 
@@ -80,7 +79,7 @@ def test_delete_project_makes_firmware_standalone(stores: Stores) -> None:
         projects.get(project.id)
     moved = firmware.get(inside.id)
     assert (moved.project_id, moved.device) == (None, "")
-    assert (moved.notes, moved.chip) == ("keep me", "esp32s3")
+    assert moved.notes == "keep me"
     assert moved.name == "App (2)"
     assert firmware.get(standalone.id).name == "App"
     assert len(firmware.all()) == 2

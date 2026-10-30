@@ -4,7 +4,16 @@ import dataclasses
 from pathlib import Path
 
 import pytest
-from app_testkit import BRIDGE, JTAG, build_files, copy_files, fixed_firmware, info, snapshot
+from app_testkit import (
+    BRIDGE,
+    JTAG,
+    build_files,
+    copy_files,
+    fixed_firmware,
+    info,
+    multi_chip_firmware,
+    snapshot,
+)
 
 from embr.app.checklist import CheckItem, CheckState, can_flash, flash_ready, preflight
 from embr.app.context import AppContext
@@ -75,7 +84,6 @@ def test_matching_chip_passes_everything(
 @pytest.mark.parametrize(
     ("sample", "event", "mentions"),
     [
-        ("esp32s3_hello", info("esp32c3", 0, 4), "esp32c3"),
         # the chip matches, so the only possible refusal is the v3.x-only image range
         ("esp32p4_rev3_hello", info("esp32p4", 1, 0), ""),
         (
@@ -84,7 +92,7 @@ def test_matching_chip_passes_everything(
             "secure boot",
         ),
     ],
-    ids=["chip-mismatch", "p4-revision", "secure-boot"],
+    ids=["p4-revision", "secure-boot"],
 )
 def test_identification_refuses(
     library: Library, context: AppContext, sample: str, event: InfoEvent, mentions: str
@@ -104,6 +112,38 @@ def test_declared_size_differing_from_detected_warns(library: Library, context: 
     assert states(items).count(WARN) == 1
     assert REFUSE not in states(items)
     assert can_flash(items)
+
+
+def test_board_none_of_the_entries_are_for_is_refused(
+    library: Library, context: AppContext
+) -> None:
+    firmware = fixed_firmware(library, HELLO)
+    items = preflight(context, firmware, BRIDGE, snapshot(BRIDGE, info("esp32c3", 0, 4)))
+    refused = refusals(items)
+    assert "No entries enabled" in [i.title for i in refused]
+    assert any("esp32c3" in f"{i.title} {i.detail}".lower() for i in refused)
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (None, [PASS, PASS, PASS, LATER]),
+        (info("esp32s3", 0, 2), None),
+        (info("esp32p4", 1, 0), None),
+    ],
+    ids=["not-identified", "esp32s3", "esp32p4"],
+)
+def test_multi_chip_firmware_is_checked_per_chip(
+    context: AppContext, tmp_path: Path, event: InfoEvent | None, expected: list[CheckState] | None
+) -> None:
+    # the P4 bootloader overlaps the S3 one and there are two tables: never together
+    firmware = multi_chip_firmware(context, tmp_path)
+    identified = snapshot(BRIDGE, event) if event is not None else None
+    items = preflight(context, firmware, BRIDGE, identified)
+    if expected is not None:
+        assert states(items) == expected
+    else:
+        assert len(items) > 4 and set(states(items)) == {PASS}
 
 
 IDENTIFIED = snapshot(BRIDGE, info("esp32s3", 0, 2))

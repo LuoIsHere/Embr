@@ -14,7 +14,8 @@ from typing import Any, cast
 from embr.app.context import AppContext
 from embr.app.identify import IdentifySnapshot
 from embr.app.library import FirmwareRow, Library, Tree
-from embr.core.firmware.entries import attachment_entry
+from embr.core.firmware.entries import attachment_entry, entry_from_file
+from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.checks import SecurityState
 from embr.core.flasher.protocol import InfoEvent
@@ -69,11 +70,47 @@ def app_revision_range(sample: str) -> tuple[int, int]:
     return int(low[0]) * 100 + int(low[1]), int(high[0]) * 100 + int(high[1])
 
 
+def root_first(files: list[Path]) -> list[Path]:
+    """`files` with the shallowest first, so the firmware's folder (the folder of the first
+    file, design doc §12 item 8) holds all of them, e.g. an IDF build's bootloader/ and
+    partition_table/ files below the app."""
+    return sorted(files, key=lambda p: len(p.parts))
+
+
 def fixed_firmware(library: Library, files: list[Path], name: str = "fw") -> Firmware:
-    """Standalone fixed firmware with `files` added."""
+    """Standalone fixed firmware with `files` added (root_first())."""
     firmware = library.create_firmware(name)
-    library.add_files(firmware.id, files)
+    library.add_files(firmware.id, root_first(files))
     return library.firmware(firmware.id)
+
+
+def multi_chip_firmware(context: AppContext, folder: Path, name: str = "multi") -> Firmware:
+    """Fixed firmware holding the hello builds for esp32s3 (copied to `folder`) and esp32p4
+    (copied to folder/p4), stored directly: entries as sniffed, each partition table with
+    its chip chosen by hand, folder = `folder`. The P4 bootloader (0x2000) overlaps the S3
+    one and both tables sit at 0x8000, so only per-chip handling keeps them apart."""
+    firmware = context.firmware.create(name)
+    firmware.folder = str(folder.resolve())
+    for chip, files in (
+        ("esp32s3", copy_files(build_files("esp32s3_hello"), folder)),
+        ("esp32p4", copy_files(build_files("esp32p4_rev1_hello"), folder / "p4")),
+    ):
+        for path in files:
+            entry = entry_from_file(path)
+            if entry.kind == EntryKind.PARTITION_TABLE:
+                entry.chip = chip
+            firmware.entries.append(entry)
+    context.firmware.save(firmware)
+    return context.firmware.get(firmware.id)
+
+
+def entry_ids_under(firmware: Firmware, folder: Path) -> set[str]:
+    """Ids of the "path:" entries whose file lies in `folder` (no subfolders)."""
+    return {
+        e.id
+        for e in firmware.entries
+        if e.file.startswith("path:") and Path(e.file[5:]).parent == folder.resolve()
+    }
 
 
 def seed_user_entry(

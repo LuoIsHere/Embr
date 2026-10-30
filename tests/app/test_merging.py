@@ -1,12 +1,14 @@
 """app/merging: merge a firmware into one raw image and optionally add it to the list
 (design doc §5 stage two "合成工具")."""
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from app_testkit import IDF, Clock, build_files, write_newer
+from app_testkit import IDF, Clock, build_files, copy_files, root_first, write_newer
 
+from embr.app.chips import firmware_chips
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
@@ -26,7 +28,7 @@ def test_merge_writes_the_image_and_adds_a_firmware(context: AppContext, tmp_pat
     project = library.create_project("p")
     source = library.create_firmware("hello", project.id, "board")
     files = build_files("esp32s3_hello_v61")
-    library.add_files(source.id, files)
+    library.add_files(source.id, root_first(files))
     for name, value in (("flash_mode", "dio"), ("flash_freq", "80m"), ("flash_size", "2MB")):
         library.set_param(source.id, name, value)
     before = library.firmware(source.id)
@@ -44,8 +46,8 @@ def test_merge_writes_the_image_and_adds_a_firmware(context: AppContext, tmp_pat
         project.id,
         "board",
     )
-    assert (merged.chip, merged.flash, merged.before, merged.after) == (
-        "esp32s3",
+    assert (firmware_chips(context, merged), merged.flash, merged.before, merged.after) == (
+        ("esp32s3",),
         FlashParams("dio", "80m", "2MB"),
         before.before,
         before.after,
@@ -58,6 +60,7 @@ def test_merge_writes_the_image_and_adds_a_firmware(context: AppContext, tmp_pat
         f"path:{output.resolve()}",
     )
     assert all(f.name in entry.note for f in files)
+    assert Path(merged.folder) == output.parent.resolve()
     assert library.firmware(source.id).entries == before.entries
 
     again = tmp_path / "again.bin"
@@ -78,9 +81,18 @@ def _pad_without_flash_size(library: Library, firmware_id: str, tmp_path: Path) 
     return MergeOptions(pad_to_flash_size=True)
 
 
-REFUSED: dict[str, Callable[[Library, str, Path], MergeOptions]] = {
-    "no_chip": _no_chip,
-    "pad_without_flash_size": _pad_without_flash_size,
+def _mixed_mcu(library: Library, firmware_id: str, tmp_path: Path) -> MergeOptions:
+    s3_app = build_files("esp32s3_hello")[2]
+    p4_boot = build_files("esp32p4_rev1_hello")[0]  # at 0x2000, clear of the app
+    library.add_files(firmware_id, copy_files([s3_app, p4_boot], tmp_path / "mixed"))
+    return MergeOptions()
+
+
+# the reason is the one the dialog shows (app.chips.merge_problem(), §12 item 13)
+REFUSED: dict[str, tuple[Callable[[Library, str, Path], MergeOptions], str]] = {
+    "no_chip": (_no_chip, "data.bin has no MCU"),
+    "mixed_mcu": (_mixed_mcu, "Checked entries are for esp32p4 and esp32s3"),
+    "pad_without_flash_size": (_pad_without_flash_size, ""),
 }
 
 
@@ -88,9 +100,10 @@ REFUSED: dict[str, Callable[[Library, str, Path], MergeOptions]] = {
 def test_merge_is_refused(context: AppContext, tmp_path: Path, case: str) -> None:
     library, merger = _rig(context)
     firmware = library.create_firmware("fw")
-    options = REFUSED[case](library, firmware.id, tmp_path)
+    setup, reason = REFUSED[case]
+    options = setup(library, firmware.id, tmp_path)
     output = tmp_path / "out.bin"
-    with pytest.raises(PlanError):
+    with pytest.raises(PlanError, match=re.escape(reason)):
         merger.merge(firmware.id, output, options)
     assert not output.exists()
     assert len(context.firmware.all()) == 1

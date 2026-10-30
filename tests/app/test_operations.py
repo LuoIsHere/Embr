@@ -15,8 +15,18 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
-from app_testkit import BRIDGE, JTAG, MAC, build_files, fixed_firmware, info
+from app_testkit import (
+    BRIDGE,
+    JTAG,
+    MAC,
+    build_files,
+    entry_ids_under,
+    fixed_firmware,
+    info,
+    multi_chip_firmware,
+)
 
+from embr.app.chips import entry_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.identify import IdentifyMemory
@@ -27,7 +37,7 @@ from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams, Source
 from embr.core.flasher import runner
 from embr.core.flasher.checks import CHIP, SECURITY, CheckLevel
-from embr.core.flasher.plan import ErasePlan, IdentifyPlan, ReadPlan
+from embr.core.flasher.plan import ErasePlan, FlashPlan, IdentifyPlan, ReadPlan
 from embr.core.flasher.protocol import (
     CheckEvent,
     EntryEvent,
@@ -343,11 +353,7 @@ def test_read_flash_creates_a_dump_firmware(library: Library, context: AppContex
     assert Path(task.output).resolve().is_relative_to(context.paths.temp.resolve())
     assert outcome.firmware_id is not None
     firmware = library.firmware(outcome.firmware_id)
-    assert (firmware.name, firmware.source, firmware.chip) == (
-        "esp32s3 dump 2026-01-02 03-04",
-        Source.MANUAL,
-        "esp32s3",
-    )
+    assert (firmware.name, firmware.source) == ("esp32s3 dump 2026-01-02 03-04", Source.MANUAL)
     assert (firmware.project_id, firmware.device, firmware.flash) == (
         project.id,
         "board",
@@ -362,6 +368,7 @@ def test_read_flash_creates_a_dump_firmware(library: Library, context: AppContex
         len(data),
     )
     assert entry.enabled and entry.from_dump and context.archive.has(sha)
+    assert entry_chip(context, firmware, entry) == "esp32s3"  # the identified chip
 
     (record,) = context.history.query()
     assert (record.operation, record.result, record.firmware_id) == (
@@ -396,6 +403,77 @@ def test_refused_read_creates_no_firmware(context: AppContext) -> None:
         (),
         None,
     )
+
+
+DUMP = bytes(range(256)) * 16
+READ_OK: list[Event] = [INFO, ResultEvent(ResultStatus.OK, f"{len(DUMP)} bytes read")]
+
+
+@pytest.mark.parametrize("import_firmware", [True, False])
+def test_read_flash_writes_the_chosen_file(
+    context: AppContext, tmp_path: Path, import_firmware: bool
+) -> None:
+    output = tmp_path / "dumps" / "board.bin"
+    output.parent.mkdir()
+    output.write_bytes(b"older dump")  # replaced
+    setup = Setup(context, DumpWorker(READ_OK, DUMP))
+    setup.ops.read_flash(
+        BRIDGE, None, setup.recorder, size=len(DUMP), output=output, import_firmware=import_firmware
+    )
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert outcome.result == RecordResult.OK
+    assert output.read_bytes() == DUMP and Path(outcome.saved_to) == output
+    assert list(context.paths.temp.glob("read-*")) == []
+    sha = hashlib.sha256(DUMP).hexdigest()
+    (record,) = context.history.query()
+    assert [(e.size, e.sha256) for e in record.entries] == [(len(DUMP), sha)]
+    assert record.firmware_id == outcome.firmware_id
+    if import_firmware:
+        assert outcome.firmware_id is not None and context.archive.has(sha)
+    else:
+        assert (outcome.firmware_id, context.firmware.all()) == (None, [])
+        assert not context.archive.has(sha)
+
+
+@pytest.mark.parametrize("case", ["read_failed", "output_unwritable"])
+def test_failed_read_leaves_no_file(context: AppContext, tmp_path: Path, case: str) -> None:
+    if case == "read_failed":
+        events: list[Event] = [INFO, ErrorEvent("connection lost", "trace")]
+        output = tmp_path / "board.bin"
+    else:
+        events = READ_OK
+        (tmp_path / "taken").write_bytes(b"a file, not a folder")
+        output = tmp_path / "taken" / "board.bin"
+    setup = Setup(context, DumpWorker(events, DUMP))
+    setup.ops.read_flash(BRIDGE, None, setup.recorder, size=len(DUMP), output=output)
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert (outcome.result, outcome.firmware_id) == (RecordResult.FAILED, None)
+    assert outcome.message
+    assert not output.exists()
+    assert context.firmware.all() == []
+    assert list(context.paths.temp.glob("read-*")) == []
+    (record,) = context.history.query()
+    assert (record.result, record.entries) == (RecordResult.FAILED, ())
+
+
+def test_flash_writes_only_the_identified_chips_entries(
+    context: AppContext, tmp_path: Path
+) -> None:
+    firmware = multi_chip_firmware(context, tmp_path)
+    before = context.firmware.get(firmware.id)
+    board = info("esp32p4", 1, 0)
+    setup = Setup(context, FakeWorker([board, ResultEvent(ResultStatus.OK, "done")]))
+    setup.memory.record(BRIDGE, board, datetime.datetime.now())
+
+    assert setup.flash(firmware.id).result == RecordResult.OK
+    (plan,) = setup.worker.tasks
+    assert isinstance(plan, FlashPlan) and plan.chip == "esp32p4"
+    p4 = entry_ids_under(before, tmp_path / "p4")
+    p4_files = {Path(e.file.removeprefix("path:")) for e in before.entries if e.id in p4}
+    assert {Path(e.path) for e in plan.entries} == p4_files
+    assert context.firmware.get(firmware.id) == before  # the chip is not written back
 
 
 def _log_lines(path: Path) -> list[str]:
