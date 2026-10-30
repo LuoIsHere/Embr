@@ -71,3 +71,11 @@ class EventLogger(TemplateLogger):
         if self._line:
             self._send(LogEvent(LogLevel.INFO, self._line))
             self._line = ""
+
+
+def install(send: Callable[[Event], None], cursor: EntryCursor) -> None:
+    """Route esptool's global logger to an EventLogger. esptool 5.3.1's log.set_logger()
+    only swaps the class of the global `log` object and keeps its old instance attributes,
+    so the EventLogger state must end up on that object too: afterwards every esptool
+    message, note, warning, error, stage marker and progress callback becomes an event."""
+    raise NotImplementedError

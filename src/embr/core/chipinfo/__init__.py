@@ -104,6 +104,12 @@ def usb_otg_chip(vid: int, pid: int) -> ChipInfo | None:
     return next((c for c in supported_chips() if c.usb_otg and c.image_chip_id == pid), None)
 
 
+def has_stub(chip: str) -> bool:
+    """Whether the bundled esptool ships a flasher stub for the chip (esptool 5.3.1 has
+    none for ESP32-H21). Raises UnknownChipError."""
+    raise NotImplementedError
+
+
 def flash_map_ranges(chip: str) -> tuple[tuple[int, int], ...]:
     """Address ranges [start, end) that the chip maps to flash through its cache (IROM and
     DROM). An image segment loaded inside one of them is executed or read from flash."""

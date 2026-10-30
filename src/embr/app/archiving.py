@@ -20,6 +20,15 @@ _ARCHIVE = "archive:"
 _PATH = "path:"
 
 
+@dataclasses.dataclass(frozen=True)
+class ArchiveUsage:
+    file: ArchiveFile
+    firmware_ids: tuple[str, ...]
+    """Ids of the firmware whose entries or user entries refer to the file, ordered by
+    firmware name; empty when
+    nothing refers to it (Clean archive deletes exactly those)."""
+
+
 class Archiver:
     def __init__(
         self,
@@ -99,6 +108,11 @@ class Archiver:
         self._ctx.firmware.save(firmware)
         self._tracker.invalidate(firmware_id)
         return entry
+
+    def usage(self) -> list[ArchiveUsage]:
+        """Every indexed archive file with the firmware referring to it, in the archive
+        index order (what the Clean archive dialog shows before deleting anything)."""
+        raise NotImplementedError
 
     def unreferenced(self) -> list[ArchiveFile]:
         """Archive files no firmware refers to (entries and user entries of all firmware)."""

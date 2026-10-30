@@ -121,6 +121,15 @@ def can_flash(items: list[CheckItem]) -> bool:
     return all(item.state != CheckState.REFUSE for item in items)
 
 
+def flash_ready(
+    items: list[CheckItem], snapshot: IdentifySnapshot | None, port: PortInfo | None
+) -> bool:
+    """Whether the Flash button may be pressed (design doc §12 item 5): a port is selected,
+    the last identification is a snapshot of that port (same device name), and no item
+    refuses. The flash job still identifies the chip again in its own connection."""
+    raise NotImplementedError
+
+
 _TITLES = {
     CHIP: "Chip",
     REVISION: "Chip revision",

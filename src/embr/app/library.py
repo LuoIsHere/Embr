@@ -2,10 +2,11 @@
 
 Every change is saved before the method returns. Entry operations on fixed firmware
 (manual, archived) change its entries. On tracking firmware: address, enabled state and
-note of a derived entry (id = tracking.entry_key()) go to entry_overrides; added files and
-attachments become user_entries; removing, relocating or copying into a derived entry raises
-ValueError; user entries behave like fixed entries. Every change to a tracking firmware
-invalidates its tracker status.
+note of a derived entry (id = tracking.entry_key()) go to entry_overrides; adding files,
+attachments or copied entries raises TrackingEntriesError (entries come from the build
+only, design doc §12 item 16); removing, relocating or copying into a derived entry raises
+ValueError; user entries added before that rule still flash and can be removed. Every
+change to a tracking firmware invalidates its tracker status.
 """
 
 import dataclasses
@@ -53,6 +54,7 @@ from embr.core.firmware.model import (
 )
 from embr.core.firmware.store import default_name_from_files
 from embr.core.firmware.tracking import EntryMark, ResolveState
+from embr.core.flasher.protocol import InfoEvent
 from embr.core.project import Project, ProjectDefaults
 from embr.core.storage.ids import unique_name
 
@@ -68,6 +70,18 @@ class FirmwareFlag(StrEnum):
     """Tag with the multiplication sign: an entry file (or the build directory) is gone."""
     BLOCKED = "blocked"
     """Same tag: the build is incomplete or its target was switched without a rebuild."""
+
+
+class TrackingEntriesError(ValueError):
+    """Entries of tracking firmware come from the build; nothing can be added to it."""
+
+
+class AlreadyTrackedError(PlanError):
+    """The build directory is already followed by another tracking firmware."""
+
+    def __init__(self, message: str, firmware_id: str) -> None:
+        super().__init__(message)
+        self.firmware_id = firmware_id
 
 
 @dataclass(frozen=True)
@@ -299,7 +313,9 @@ class Library:
         import_idf.default_firmware_name(), made unique), project and group as given (a
         project copies only erase_all from its defaults); resolved at once and the first
         resolution accepted as last_resolved. import_idf errors propagate; PlanError when
-        the build cannot be resolved (incomplete, target switched), nothing is created."""
+        the build cannot be resolved (incomplete, target switched), nothing is created;
+        AlreadyTrackedError when tracking_firmware_for() finds a firmware already following
+        the same directory, nothing is created."""
         build = read_build(build_dir)
         stem = name.strip() or default_firmware_name(build)
         if project_id is None:
@@ -315,6 +331,22 @@ class Library:
             self.delete_firmware(firmware.id)
             raise PlanError(f"{build.build_dir}: " + "; ".join(status.problems))
         return self._ctx.firmware.get(firmware.id)
+
+    def tracking_firmware_for(self, build_dir: Path) -> Firmware | None:
+        """The IDF tracking firmware that follows `build_dir`, or None. Paths are compared
+        after resolving them (absolute, `..` removed) and ignoring case and a trailing
+        separator, as Windows does."""
+        raise NotImplementedError
+
+    def mismatches(self, info: InfoEvent) -> dict[str, str]:
+        """Firmware that do not fit the identified chip, by id, with the reason: a different
+        chip (firmware chip or an enabled entry's image chip), or an enabled entry whose
+        image revision range excludes the chip's revision (same rule as the flash check,
+        checks.revision_incompatibility()). Tracking firmware are judged by the tracker's
+        cached resolution (not resolved here; skipped when never resolved). Image headers
+        are read at most once per file content. Firmware without a chip and without ESP
+        images fit any chip."""
+        raise NotImplementedError
 
     def set_param(self, firmware_id: str, name: str, value: object) -> Firmware:
         """firmware.model.set_param() and save; its errors propagate."""
@@ -332,8 +364,8 @@ class Library:
         otadata entry exists, a blank otadata entry is added too. Entries placed by
         partition are re-resolved. A firmware still named UNTITLED with no entries takes
         the first file's name (without extension); a firmware without a chip takes the chip
-        of the first ESP image added. Returns the new entries. Tracking firmware: user
-        entries, addressed with the build's partition table; nothing else changes."""
+        of the first ESP image added. Returns the new entries. Tracking firmware:
+        TrackingEntriesError, nothing changes."""
         firmware = self._ctx.firmware.get(firmware_id)
         if firmware.source.tracking:
             table = self._build_table(firmware_id)
@@ -377,7 +409,8 @@ class Library:
     ) -> Entry:
         """Attachment placed by address or by partition (exactly one). By partition: the
         address is resolved from the enabled partition table; a missing partition or a file
-        larger than it is reported by the checklist, not raised."""
+        larger than it is reported by the checklist, not raised. Tracking firmware:
+        TrackingEntriesError."""
         firmware = self._ctx.firmware.get(firmware_id)
         entry = attachment_entry(path, address=address, partition=partition)
         if firmware.source.tracking:
@@ -445,8 +478,8 @@ class Library:
             self._save_entries(firmware)
 
     def copy_entry_to(self, firmware_id: str, entry_id: str, target_id: str) -> Entry:
-        """Copy an entry (same file, address, note) into another firmware (a tracking
-        target gets it as a user entry)."""
+        """Copy an entry (same file, address, note) into another firmware. A tracking target
+        raises TrackingEntriesError."""
         source = self._ctx.firmware.get(firmware_id)
         entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
         target = self._ctx.firmware.get(target_id)
