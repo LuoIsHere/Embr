@@ -15,6 +15,7 @@ from embr.core.firmware.import_idf import (
     BuildMissingError,
     EncryptedBuildError,
     IdfBuildError,
+    build_dir_below,
     configured_target,
     default_firmware_name,
     normalize_arg,
@@ -126,3 +127,20 @@ def test_configured_target(tmp_path: Path) -> None:
     assert configured_target(other) is None
     assert configured_target(tmp_path / "missing") is None
     assert configured_target(None) is None
+
+
+@pytest.mark.parametrize(
+    ("layout", "expected"),
+    [
+        (["build/flasher_args.json"], "build"),
+        (["flasher_args.json", "build/flasher_args.json"], None),
+        ([], None),
+        (["app/build/flasher_args.json"], None),  # never searches two levels down
+    ],
+    ids=["project_folder", "build_folder", "neither", "two_levels"],
+)
+def test_build_dir_below(tmp_path: Path, layout: list[str], expected: str | None) -> None:
+    for rel in layout:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("{}", encoding="utf-8")
+    assert build_dir_below(tmp_path) == (tmp_path / expected if expected else None)

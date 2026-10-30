@@ -11,9 +11,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+from embr.app.context import AppContext
 from embr.app.identify import IdentifySnapshot
 from embr.app.library import FirmwareRow, Library, Tree
-from embr.core.firmware.model import Firmware
+from embr.core.firmware.entries import attachment_entry
+from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.checks import SecurityState
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.serial import ConnectionType, PortInfo
@@ -72,6 +74,19 @@ def fixed_firmware(library: Library, files: list[Path], name: str = "fw") -> Fir
     firmware = library.create_firmware(name)
     library.add_files(firmware.id, files)
     return library.firmware(firmware.id)
+
+
+def seed_user_entry(
+    library: Library, context: AppContext, firmware_id: str, path: Path, address: int
+) -> Entry:
+    """An attachment stored as a user entry of a tracking firmware, as data from before
+    design doc §12 item 16 has it (Library no longer adds them)."""
+    firmware = context.firmware.get(firmware_id)
+    entry = attachment_entry(path, address=address)
+    firmware.user_entries.append(entry)
+    context.firmware.save(firmware)
+    library.tracker.invalidate(firmware_id)
+    return entry
 
 
 def info(

@@ -4,7 +4,15 @@
 from pathlib import Path
 
 import pytest
-from app_testkit import Clock, build_files, fixed_firmware, idf_project, move_app, write_newer
+from app_testkit import (
+    Clock,
+    build_files,
+    fixed_firmware,
+    idf_project,
+    move_app,
+    seed_user_entry,
+    write_newer,
+)
 
 from embr.app.archiving import Archiver
 from embr.app.context import AppContext
@@ -31,7 +39,7 @@ def test_archive_version_copies_the_resolved_firmware(context: AppContext, tmp_p
     library.set_entry_note(source.id, APP, "main app")
     data = tmp_path / "data.bin"
     write_newer(data, b"\x5a" * 0x1000)
-    library.add_attachment(source.id, data, address=0x300000)
+    seed_user_entry(library, context, source.id, data, 0x300000)  # legacy user entry
     before = context.firmware.get(source.id)
     files = {p: p.read_bytes() for p in [*build.rglob("*.bin"), data]}
 
@@ -108,3 +116,21 @@ def test_clean_deletes_only_unreferenced_files(context: AppContext) -> None:
     archiver.clean([orphan.sha256, app.sha256])
     assert not context.archive.has(orphan.sha256)
     assert context.archive.has(app.sha256)
+
+
+def test_usage_lists_every_archive_file_with_its_firmware(context: AppContext) -> None:
+    library, archiver = _rig(context)
+    second = fixed_firmware(library, build_files("esp32s3_hello"), "b")
+    app = next(e for e in second.entries if e.kind == EntryKind.APP)
+    archiver.archive_entry(second.id, app.id)
+    first = library.create_firmware("a")
+    library.copy_entry_to(second.id, app.id, first.id)  # same archive file
+    orphan = context.archive.add(b"old build", original_name="old.bin")
+
+    usage = archiver.usage()
+
+    assert [(u.file.sha256, u.firmware_ids) for u in usage] == [
+        (app.sha256, (first.id, second.id)),  # by firmware name
+        (orphan.sha256, ()),
+    ]
+    assert [u.file for u in usage if not u.firmware_ids] == archiver.unreferenced()

@@ -3,8 +3,10 @@
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from embr_testkit import WORKER_TIMEOUT, idf_entries, missing_port, run_worker
@@ -17,11 +19,14 @@ from embr.core.flasher.protocol import (
     Event,
     InfoEvent,
     LogEvent,
+    LogLevel,
+    ProgressEvent,
     ResultEvent,
     ResultStatus,
     Task,
     encode_task,
 )
+from embr.core.flasher.worker.logger import EntryCursor, install
 from embr.core.serial import ConnectionType
 
 
@@ -109,3 +114,46 @@ def test_worker_ignores_user_esptool_config(tmp_path: Path) -> None:
     marked = [line for line in proc.stdout.splitlines() if line.startswith("DEFAULT_TIMEOUT=")]
     assert len(marked) == 1, (proc.stdout, proc.stderr)
     assert float(marked[0].removeprefix("DEFAULT_TIMEOUT=")) == 3.0
+
+
+@pytest.fixture
+def esptool_log() -> Iterator[Any]:
+    """esptool's global logger, put back as it was afterwards (class and attributes)."""
+    import esptool.logger
+
+    log: Any = esptool.logger.log
+    saved_class, saved_dict = log.__class__, dict(log.__dict__)
+    yield log
+    log.__class__ = saved_class
+    log.__dict__.clear()
+    log.__dict__.update(saved_dict)
+
+
+def test_installed_logger_turns_esptool_output_into_events(esptool_log: Any) -> None:
+    # esptool 5.3.1's set_logger() keeps the global object's attributes (design doc §12.1)
+    events: list[Event] = []
+    cursor = EntryCursor()
+    install(events.append, cursor)
+    cursor.index, cursor.address = 1, 0x10000  # the worker moves the cursor afterwards
+
+    esptool_log.print("Connecting", end="")
+    esptool_log.print("...", "done")
+    esptool_log.print("partial", end="")
+    esptool_log.note("n")
+    esptool_log.warning("w")
+    esptool_log.error("e")
+    esptool_log.stage()
+    esptool_log.stage(finish=True)
+    esptool_log.progress_bar(50, 100, prefix="Writing")
+
+    assert events == [
+        LogEvent(LogLevel.INFO, "Connecting... done"),
+        LogEvent(LogLevel.INFO, "partial"),
+        LogEvent(LogLevel.NOTE, "n"),
+        LogEvent(LogLevel.WARNING, "w"),
+        LogEvent(LogLevel.ERROR, "e"),
+        LogEvent(LogLevel.STAGE, "begin"),
+        LogEvent(LogLevel.STAGE, "end"),
+        ProgressEvent(1, 0x10000, 50, 100, "Writing"),
+    ]
+    assert cursor.progressed

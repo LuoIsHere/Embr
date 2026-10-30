@@ -119,3 +119,20 @@ def test_entry_without_address_cannot_be_planned(
     with pytest.raises(PlanError):
         assemble_plan(context, firmware, BRIDGE, None)
     assert preview_command(context, firmware, BRIDGE, None) == ""
+
+
+@pytest.mark.parametrize(("chip", "stub"), [("esp32h21", False), ("esp32s3", True)])
+def test_chip_without_stub_is_planned_without_it(
+    library: Library, context: AppContext, tmp_path: Path, chip: str, stub: bool
+) -> None:
+    # esptool 5.3.1 has no flasher stub for ESP32-H21 (design doc §12.1)
+    data = tmp_path / "data.bin"
+    data.write_bytes(b"" * 64)
+    firmware = library.create_firmware("fw")
+    library.set_param(firmware.id, "chip", chip)
+    library.add_attachment(firmware.id, data, address=0x10000)
+    firmware = library.firmware(firmware.id)
+
+    assert assemble_plan(context, firmware, BRIDGE, None).stub is stub
+    command = preview_command(context, firmware, BRIDGE, None).split()
+    assert command and ("--no-stub" in command) is not stub

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from embr_testkit import chip_defs
-from esp_pylib.constants import ESPRESSIF_VID, USB_JTAG_SERIAL_PID
+from esptool.loader import ESPLoader
 
 from embr.core.serial import (
     BAUD_SECTION,
@@ -20,6 +20,9 @@ from embr.core.serial import (
     remember_baud,
 )
 from embr.core.storage.settings import Settings
+
+ESPRESSIF_VID = ESPLoader.ESPRESSIF_VID
+USB_JTAG_SERIAL_PID = ESPLoader.USB_JTAG_SERIAL_PID
 
 
 def test_usb_serial_jtag() -> None:

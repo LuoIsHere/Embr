@@ -1,15 +1,18 @@
 """app/checklist: the checks shown before pressing Flash (design doc §4, §6.1)."""
 
+import dataclasses
 from pathlib import Path
 
 import pytest
 from app_testkit import BRIDGE, JTAG, build_files, copy_files, fixed_firmware, info, snapshot
 
-from embr.app.checklist import CheckItem, CheckState, can_flash, preflight
+from embr.app.checklist import CheckItem, CheckState, can_flash, flash_ready, preflight
 from embr.app.context import AppContext
+from embr.app.identify import IdentifySnapshot
 from embr.app.library import Library
 from embr.core.flasher.checks import SecurityState
 from embr.core.flasher.protocol import InfoEvent
+from embr.core.serial import PortInfo
 
 PASS, WARN, REFUSE, LATER = CheckState.PASS, CheckState.WARN, CheckState.REFUSE, CheckState.LATER
 HELLO = build_files("esp32s3_hello")
@@ -101,3 +104,25 @@ def test_declared_size_differing_from_detected_warns(library: Library, context: 
     assert states(items).count(WARN) == 1
     assert REFUSE not in states(items)
     assert can_flash(items)
+
+
+IDENTIFIED = snapshot(BRIDGE, info("esp32s3", 0, 2))
+FINE = [CheckItem(PASS, "a"), CheckItem(WARN, "b"), CheckItem(LATER, "c")]
+
+
+@pytest.mark.parametrize(
+    ("items", "identified", "port", "ready"),
+    [
+        (FINE, IDENTIFIED, BRIDGE, True),
+        (FINE, IDENTIFIED, None, False),
+        (FINE, None, BRIDGE, False),
+        (FINE, IDENTIFIED, dataclasses.replace(BRIDGE, device="COM4"), False),
+        ([*FINE, CheckItem(REFUSE, "d")], IDENTIFIED, BRIDGE, False),
+    ],
+    ids=["ready", "no_port", "not_identified", "other_port", "refused"],
+)
+def test_flash_ready(
+    items: list[CheckItem], identified: IdentifySnapshot | None, port: PortInfo | None, ready: bool
+) -> None:
+    # Flash needs an identification of the selected port and no refusal (§12 item 5)
+    assert flash_ready(items, identified, port) is ready

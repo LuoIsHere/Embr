@@ -4,9 +4,26 @@ import ast
 
 import pytest
 from embr_testkit import REPO, chip_defs
-from esp_pylib.constants import ESPRESSIF_VID, USB_JTAG_SERIAL_PID
+from esptool.loader import ESPLoader
 
 from embr.core import chipinfo
+
+ESPRESSIF_VID = ESPLoader.ESPRESSIF_VID
+USB_JTAG_SERIAL_PID = ESPLoader.USB_JTAG_SERIAL_PID
+# esptool 5.6.0's USB_SERIAL_JTAG_SUPPORTED / USB_OTG_SUPPORTED; 5.3.1 has no such flags
+USB_SERIAL_JTAG = {
+    "esp32c3",
+    "esp32c5",
+    "esp32c6",
+    "esp32c61",
+    "esp32h2",
+    "esp32h21",
+    "esp32h4",
+    "esp32s3",
+    "esp32p4",
+    "esp32s31",
+}
+USB_OTG = {"esp32s2", "esp32s3", "esp32p4", "esp32s31", "esp32e22"}
 
 
 def test_chips_match_esptool() -> None:
@@ -19,12 +36,12 @@ def test_chips_match_esptool() -> None:
         assert chip.bootloader_offset == defn.BOOTLOADER_FLASH_OFFSET
         assert sorted(chip.flash_sizes) == sorted(defn.FLASH_SIZES)
         assert sorted(chip.flash_freqs) == sorted(defn.FLASH_FREQUENCY)
-        assert chip.usb_otg is bool(defn.USB_OTG_SUPPORTED)
-        assert chip.usb_serial_jtag is bool(defn.USB_SERIAL_JTAG_SUPPORTED)
+        assert chip.usb_otg is (name in USB_OTG)
+        assert chip.usb_serial_jtag is (name in USB_SERIAL_JTAG)
         assert chipinfo.chip_for_image_id(defn.IMAGE_CHIP_ID) == chip
         assert chipinfo.chip_for_display_name(defn.CHIP_NAME) == chip
         otg = chipinfo.usb_otg_chip(ESPRESSIF_VID, defn.IMAGE_CHIP_ID)
-        assert otg == (chip if defn.USB_OTG_SUPPORTED else None)
+        assert otg == (chip if name in USB_OTG else None)
     offsets = sorted({int(d.BOOTLOADER_FLASH_OFFSET) for d in defs.values()})
     assert chipinfo.bootloader_offsets() == tuple(offsets)
     assert chipinfo.espressif_vid() == ESPRESSIF_VID
@@ -35,8 +52,19 @@ def test_esp8266_and_unknown_chips() -> None:
     for name in ("esp8266", "esp32x"):
         with pytest.raises(chipinfo.UnknownChipError):
             chipinfo.get_chip(name)
+        with pytest.raises(chipinfo.UnknownChipError):
+            chipinfo.has_stub(name)
     assert chipinfo.chip_for_image_id(0xFFFF) is None
     assert chipinfo.chip_for_display_name("ESP8266") is None
+
+
+@pytest.mark.parametrize(
+    ("chip", "stub"),
+    [("esp32h21", False), ("esp32", True), ("esp32s3", True), ("esp32p4", True), ("esp32c3", True)],
+)
+def test_has_stub(chip: str, stub: bool) -> None:
+    # esptool 5.3.1 ships no flasher stub for ESP32-H21 (design doc §12.1)
+    assert chipinfo.has_stub(chip) is stub
 
 
 def test_header_code_names() -> None:
