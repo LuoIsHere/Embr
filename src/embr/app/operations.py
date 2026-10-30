@@ -19,8 +19,9 @@ from typing import Protocol
 
 import esptool
 
+from embr.app.chips import for_chip
 from embr.app.context import AppContext
-from embr.app.flashplan import PlanError, assemble_plan
+from embr.app.flashplan import PlanError, assemble_plan, plan_chip
 from embr.app.identify import IdentifyMemory
 from embr.app.tracking import Tracker
 from embr.core.firmware.files import FileState, entry_state
@@ -202,19 +203,18 @@ class Operations:
         BusyError while a job runs; flashplan.PlanError propagates."""
         self._ensure_idle()
         firmware = self._tracker.verify_for_flash(firmware_id, shown_digest)
-        enabled = [e for e in firmware.entries if e.enabled]
+        snapshot = self._memory.snapshot
+        identified = (
+            snapshot.info.chip if snapshot and snapshot.port.device == port.device else None
+        )
+        chip = plan_chip(self._ctx, firmware, identified)
+        if chip is None:
+            raise PlanError(f"{firmware.name}: identify the board to choose which entries to flash")
+        enabled = [e for e in for_chip(self._ctx, firmware, chip).entries if e.enabled]
         bad = [e.name for e in enabled if entry_state(e, self._ctx.paths.archive) != FileState.OK]
         if bad:
             raise PlanError(f"{', '.join(bad)}: file missing or changed since it was recorded")
-        if firmware.chip is None:
-            snapshot = self._memory.snapshot
-            if snapshot is None:
-                raise PlanError(f"{firmware.name} has no chip; identify the board first")
-            stored = self._ctx.firmware.get(firmware_id)
-            firmware.chip = stored.chip = snapshot.info.chip
-            self._ctx.firmware.save(stored)
-            self._tracker.invalidate(firmware_id)
-        plan = assemble_plan(self._ctx, firmware, port, baud)
+        plan = assemble_plan(self._ctx, firmware, port, baud, chip=chip)
         record_id = new_id()
         start = self._clock()
         segment = self._ctx.logs.open_segment(
@@ -449,7 +449,6 @@ class Operations:
             dump = self._ctx.projects.create_firmware(
                 self._ctx.firmware, project_id, name, device=device
             )
-        dump.chip = info.chip
         dump.notes = (
             f"Read from flash on {plan.port} ({info.chip} {info.revision}, MAC {info.mac}). "
             "May contain Wi-Fi credentials and other secrets stored in NVS."
@@ -466,6 +465,7 @@ class Operations:
                 auto_address=plan.address,
                 address_source=AddressSource.AUTO,
                 from_dump=True,
+                chip=info.chip,
             )
         ]
         self._ctx.firmware.save(dump)

@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from embr.app.chips import firmware_chips, for_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, declared_flash_size, plan_entries
 from embr.app.identify import IdentifySnapshot
@@ -82,11 +83,23 @@ def preflight(
        secure boot is on)
     Entries are taken per chip (design doc §12 item 13): once identified, items 1, 2 and 4
     look only at the entries for the identified chip (app.chips.for_chip()), so "No entries
-    enabled" also covers a board none of the entries are for; before that, item 1 checks
-    each chip's entries separately and item 2 all enabled entries."""
+    enabled" also covers entries without an MCU; before that, and when the whole firmware is
+    for other chips (then the Chip item is the one refusal), item 1 checks each chip's
+    entries separately and item 2 all enabled entries."""
     items = [_build(status)] if status is not None and firmware.source.tracking else []
-    items += _layout(context, firmware, identified)
-    items.append(_files(context, firmware))
+    chips = firmware_chips(context, firmware)
+    # the identified chip, unless the whole firmware is for other chips (one Chip refusal)
+    chip = identified.info.chip if identified is not None else None
+    if chip is not None and chips and chip not in chips:
+        chip = None
+    if chip is not None:
+        views = [for_chip(context, firmware, chip)]
+    elif len(chips) > 1:
+        views = [for_chip(context, firmware, c) for c in chips]
+    else:
+        views = [firmware]
+    items += _layout(context, views, identified)
+    items.append(_files(context, views[0] if chip else firmware, chip))
     items.append(_reset(firmware, port))
     if identified is None:
         items.append(
@@ -99,19 +112,26 @@ def preflight(
     if info.security.secure_download_mode:  # nothing else could be read from the chip
         return items + [_item(c) for c in check_security(info.security)]
     state = ChipState(info.chip, info.major, info.minor, info.flash_size, info.security)
+    view = for_chip(context, firmware, info.chip)
     try:
-        entries = plan_entries(context, firmware, write_files=False)
+        entries = plan_entries(context, firmware, write_files=False, chip=info.chip)
     except PlanError:  # reported by the layout item
         entries = []
-    if firmware.chip is None:
-        items.append(CheckItem(CheckState.WARN, "Chip taken from the identified board", info.chip))
+    if chips and info.chip not in chips:
+        items.append(
+            CheckItem(
+                CheckState.REFUSE,
+                "Chip",
+                f"the firmware is for {', '.join(chips)}, the board is {info.chip}",
+            )
+        )
     else:
-        chip = check_chip(info.chip, firmware.chip, entries)
+        chip = check_chip(info.chip, None, entries)
         items.append(_item(chip))
         if chip.level == CheckLevel.PASS:
             items.append(_item(check_revisions(state, entries)))
-    table, _ = _table(context, firmware)
-    declared = declared_flash_size(context, firmware)
+    table, _ = _table(context, view)
+    declared = declared_flash_size(context, view)
     end = table.end if table else None
     items += [_item(c) for c in check_capacity(state, declared, entries, end)]
     items += [_item(c) for c in check_security(info.security)]
@@ -160,23 +180,30 @@ def _table(context: AppContext, firmware: Firmware) -> tuple[PartitionTable | No
 
 
 def _layout(
-    context: AppContext, firmware: Firmware, identified: IdentifySnapshot | None
+    context: AppContext, views: list[Firmware], identified: IdentifySnapshot | None
 ) -> list[CheckItem]:
-    probe = copy.deepcopy(firmware)  # resolving partitions must not touch the shown firmware
-    table, problems = _table(context, probe)
-    if table is not None:
-        problems += resolve_partitions(probe, table)
+    """Layout problems of each view (one per chip), each problem listed once."""
     size = identified.info.flash_size if identified else None
-    problems += check_layout(probe, _size_bytes(size) if size else None)
+    problems: list[Problem] = []
+    for view in views:
+        probe = copy.deepcopy(view)  # resolving partitions must not touch the shown firmware
+        table, found = _table(context, probe)
+        if table is not None:
+            found += resolve_partitions(probe, table)
+        found += check_layout(probe, _size_bytes(size) if size else None)
+        problems += [p for p in found if p not in problems]
     if not problems:
         return [CheckItem(CheckState.PASS, "No address overlap")]
     return [CheckItem(CheckState(p.level.value), "Entry layout", p.message) for p in problems]
 
 
-def _files(context: AppContext, firmware: Firmware) -> CheckItem:
+def _files(context: AppContext, firmware: Firmware, chip: str | None) -> CheckItem:
     enabled = [e for e in firmware.entries if e.enabled]
     if not enabled:
-        return CheckItem(CheckState.REFUSE, "No entries enabled", "enable at least one entry")
+        which = f" for {chip}" if chip else ""
+        return CheckItem(
+            CheckState.REFUSE, "No entries enabled", f"enable at least one entry{which}"
+        )
     states = {e.name: entry_state(e, context.paths.archive) for e in enabled}
     missing = [n for n, s in states.items() if s == FileState.MISSING]
     changed = [n for n, s in states.items() if s == FileState.CHANGED]

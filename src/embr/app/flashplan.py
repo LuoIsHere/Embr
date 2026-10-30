@@ -2,15 +2,13 @@
 (design doc §7.2). The worker call and the equivalent command line come from the same plan.
 """
 
-import hashlib
 from pathlib import Path
 
+from embr.app.chips import entry_chip, firmware_chips, for_chip, image_header
 from embr.app.context import AppContext
 from embr.core import chipinfo
 from embr.core.firmware.entries import enabled_partition_table, sorted_entries
 from embr.core.firmware.files import read_entry
-from embr.core.firmware.image_header import ImageHeader, read_image_header
-from embr.core.firmware.image_sniff import sniff
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.plan import (
@@ -41,7 +39,10 @@ def plan_entries(
     MCU is `chip` (app.chips.entry_chip()), and PlanEntry.image_chip is the entry's MCU, so
     the worker refuses a hand-chosen chip that differs from the board. Raises PlanError."""
     planned: list[PlanEntry] = []
-    for entry in sorted_entries([e for e in firmware.entries if e.enabled]):
+    enabled = [e for e in firmware.entries if e.enabled]
+    if chip is not None:
+        enabled = [e for e in enabled if entry_chip(context, firmware, e) == chip]
+    for entry in sorted_entries(enabled):
         if entry.address is None:
             raise PlanError(f"{entry.name} has no address")
         path = entry_path(context, entry)
@@ -55,7 +56,7 @@ def plan_entries(
                 name=entry.name,
                 sha256=entry.sha256,
                 size=entry.size,
-                image_chip=header.chip if header else None,
+                image_chip=chip or (header.chip if header else None),
                 min_rev_full=header.min_rev_full if header else None,
                 max_rev_full=header.max_rev_full if header else None,
                 legacy_min_rev=header.legacy_min_rev if header else None,
@@ -79,26 +80,28 @@ def assemble_plan(
     firmware, declared flash size from the firmware ("keep"/"detect": the bootloader image
     header of that chip), partitions_end from that chip's enabled partition table. PlanError
     when there is no chip to plan for (several chips, or none, and nothing identified)."""
-    if firmware.chip is None:
-        raise PlanError(f"{firmware.name} has no chip; identify the board first")
-    entries = plan_entries(context, firmware, write_files=write_files)
+    chip = plan_chip(context, firmware, chip)
+    if chip is None:
+        raise PlanError(f"{firmware.name}: identify the board to choose which entries to flash")
+    entries = plan_entries(context, firmware, write_files=write_files, chip=chip)
+    view = for_chip(context, firmware, chip)
     try:
-        table, _ = enabled_partition_table(firmware, lambda e: read_entry(e, context.paths.archive))
+        table, _ = enabled_partition_table(view, lambda e: read_entry(e, context.paths.archive))
     except OSError:  # the files check reports the missing table
         table = None
     flash = firmware.flash
     return build_flash_plan(
         port=port.device,
         connection=port.connection,
-        chip=firmware.chip,
+        chip=chip,
         entries=entries,
         before=firmware.before,
         after=firmware.after,
         baud=baud,
-        stub=firmware.stub and chipinfo.has_stub(firmware.chip),
+        stub=firmware.stub and chipinfo.has_stub(chip),
         flash=FlashSettings(mode=flash.mode, freq=flash.freq, size=flash.size),
         erase_all=firmware.erase_all,
-        declared_flash_size=declared_flash_size(context, firmware),
+        declared_flash_size=declared_flash_size(context, view),
         partitions_end=table.end if table else None,
     )
 
@@ -117,9 +120,18 @@ def preview_command(
     if port is None:
         port = PortInfo(PREVIEW_PORT, None, None, None, "", ConnectionType.UART_BRIDGE, None)
     try:
-        return command_line(assemble_plan(context, firmware, port, baud, write_files=False))
+        plan = assemble_plan(context, firmware, port, baud, chip=chip, write_files=False)
+        return command_line(plan)
     except (PlanError, ValueError):
         return ""
+
+
+def plan_chip(context: AppContext, firmware: Firmware, identified: str | None) -> str | None:
+    """The chip a plan is made for: the identified chip, else the firmware's only chip."""
+    if identified is not None:
+        return identified
+    chips = firmware_chips(context, firmware)
+    return chips[0] if len(chips) == 1 else None
 
 
 def entry_path(context: AppContext, entry: Entry) -> Path:
@@ -143,26 +155,3 @@ def declared_flash_size(context: AppContext, firmware: Firmware) -> str | None:
             if header is not None:
                 return header.flash_size
     return None
-
-
-def image_header(context: AppContext, entry: Entry) -> ImageHeader | None:
-    """Header of a bootloader, app or merged entry (for merged images, its bootloader).
-    Cached by content hash; None for other kinds and for unreadable files."""
-    if entry.kind not in (EntryKind.BOOTLOADER, EntryKind.APP, EntryKind.MERGED):
-        return None
-    if entry.sha256 in _headers:
-        return _headers[entry.sha256]
-    try:
-        data = read_entry(entry, context.paths.archive)
-    except OSError:
-        return None
-    if entry.kind == EntryKind.MERGED:
-        header = sniff(data, entry.name).header
-    else:
-        header = read_image_header(data)
-    if hashlib.sha256(data).hexdigest() == entry.sha256:  # cache only the recorded content
-        _headers[entry.sha256] = header
-    return header
-
-
-_headers: dict[str, ImageHeader | None] = {}

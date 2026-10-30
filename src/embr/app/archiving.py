@@ -7,6 +7,7 @@ import datetime
 from collections.abc import Callable
 from pathlib import Path
 
+from embr.app.chips import image_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.tracking import Tracker
@@ -71,7 +72,6 @@ class Archiver:
             after=resolved.after,
             erase_all=resolved.erase_all,
         )
-        created.chip = resolved.chip
         created.flash = dataclasses.replace(resolved.flash)
         created.tags = list(resolved.tags)
         created.notes = notes
@@ -79,6 +79,9 @@ class Archiver:
         if resolved.build_ref is not None:
             origin += f", from {resolved.build_ref.path}"
         created.archived_from = origin
+        for entry in archived:  # a tracking firmware's chip stays with files that name none
+            if entry.chip is None and image_chip(self._ctx, entry) is None:
+                entry.chip = resolved.chip
         created.entries = archived
         self._ctx.firmware.save(created)
         return created

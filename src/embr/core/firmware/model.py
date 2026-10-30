@@ -141,12 +141,13 @@ PARAMS = (
 
 
 class ReadOnlyFieldError(ValueError):
-    """The parameter is derived from the build output for this firmware."""
+    """The parameter is derived (from the build output, or the chip from the entries)."""
 
 
 def editable_params(firmware: Firmware) -> frozenset[str]:
-    """Fixed (manual, archived): all PARAMS. IDF tracking: erase_all, tags, notes.
-    PIO tracking: before, after, erase_all, tags, notes."""
+    """Fixed (manual, archived): all PARAMS but chip, which comes from the entries
+    (design doc §12 item 13). IDF tracking: erase_all, tags, notes. PIO tracking: before,
+    after, erase_all, tags, notes."""
     if firmware.source == Source.IDF_BUILD:
         return _IDF_PARAMS
     if firmware.source == Source.PIO_BUILD:
@@ -156,10 +157,12 @@ def editable_params(firmware: Firmware) -> frozenset[str]:
 
 def set_param(firmware: Firmware, name: str, value: object) -> None:
     """Change one parameter. ReadOnlyFieldError if not editable for this firmware;
-    ValueError for an invalid value (unknown chip, flash setting the chip does not support,
-    unknown reset mode, wrong type)."""
+    ValueError for an invalid value (flash setting the chip does not support, unknown
+    reset mode, wrong type)."""
     if name not in PARAMS:
         raise ValueError(f"unknown parameter {name!r}")
+    if name == "chip":
+        raise ReadOnlyFieldError("the chip comes from the entries (MCU column)")
     if name not in editable_params(firmware):
         raise ReadOnlyFieldError(f"{name} is derived from the build output")
     if name in ("erase_all",):
@@ -176,12 +179,6 @@ def set_param(firmware: Firmware, name: str, value: object) -> None:
         raise ValueError(f"{name} must be a string")
     elif name == "notes":
         firmware.notes = value
-    elif name == "chip":
-        try:
-            chipinfo.get_chip(value)
-        except chipinfo.UnknownChipError:
-            raise ValueError(f"unknown chip {value!r}") from None
-        firmware.chip = value
     elif name == "before":
         if value not in BEFORE_MODES:
             raise ValueError(f"unknown reset mode {value!r}")
@@ -204,7 +201,7 @@ def set_param(firmware: Firmware, name: str, value: object) -> None:
         firmware.flash.size = value
 
 
-_FIXED_PARAMS = frozenset(PARAMS)
+_FIXED_PARAMS = frozenset(PARAMS) - {"chip"}
 
 
 _IDF_PARAMS = frozenset({"erase_all", "tags", "notes"})

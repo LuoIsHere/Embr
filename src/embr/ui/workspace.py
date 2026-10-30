@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from embr.app.flashplan import image_header
+from embr.app.chips import image_header
 from embr.app.library import FirmwareFlag
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo

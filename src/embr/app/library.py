@@ -17,10 +17,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from embr.app.chips import firmware_chips
+from embr.app.chips import chip_choosable, entry_chip, firmware_chips, for_chip, image_header
 from embr.app.context import AppContext
-from embr.app.flashplan import PlanError, image_header
+from embr.app.flashplan import PlanError
 from embr.app.tracking import Tracker
+from embr.core import chipinfo
 from embr.core.firmware import model
 from embr.core.firmware.entries import (
     attachment_entry,
@@ -42,7 +43,6 @@ from embr.core.firmware.files import (
 from embr.core.firmware.image_sniff import (
     blank_otadata,
     parse_partition_table,
-    sniff,
 )
 from embr.core.firmware.import_idf import IdfBuild, default_firmware_name, read_build
 from embr.core.firmware.kinds import EntryKind
@@ -288,7 +288,6 @@ class Library:
             after=source.after,
             erase_all=source.erase_all,
         )
-        copy.chip = source.chip
         copy.notes = source.notes
         copy.tags = list(source.tags)
         copy.flash = dataclasses.replace(source.flash)
@@ -433,9 +432,6 @@ class Library:
             taken = [f.name for f in self._ctx.firmware.in_scope(firmware.project_id)]
             stem = default_name_from_files([p.name for p in paths])
             firmware.name = unique_name(stem, [n for n in taken if n != firmware.name])
-        if firmware.chip is None:
-            chips = (sniff(self._read(e), e.name).chip for e in added)
-            firmware.chip = next((c for c in chips if c is not None), None)
         self._save_entries(firmware)
         return added
 
@@ -492,7 +488,18 @@ class Library:
         """Choose the MCU of an entry whose file names no chip (None clears the choice).
         ValueError for an unknown chip, for an entry whose image header names a chip, and
         for tracking firmware (app.chips.chip_choosable())."""
-        raise NotImplementedError
+        firmware = self._ctx.firmware.get(firmware_id)
+        entry = _own_entry(firmware, entry_id)
+        if entry is None or not chip_choosable(self._ctx, firmware, entry):
+            raise ValueError(f"{firmware.name}: the MCU of this entry comes from its file")
+        if chip is not None:
+            try:
+                chipinfo.get_chip(chip)
+            except chipinfo.UnknownChipError:
+                raise ValueError(f"unknown chip {chip!r}") from None
+        entry.chip = chip
+        self._save_entries(firmware)
+        return entry
 
     def fit_entries(self, firmware_id: str, chip: str) -> list[Entry]:
         """After a board with `chip` was identified (design doc §12 item 13): untick and
@@ -500,7 +507,17 @@ class Library:
         Nothing changes when `chip` is not among the firmware's chips (the whole firmware is
         for other boards: the sidebar dims it, the checklist refuses), nor for tracking
         firmware. Returns the entries that were unticked."""
-        raise NotImplementedError
+        firmware = self._ctx.firmware.get(firmware_id)
+        if firmware.source.tracking or chip not in firmware_chips(self._ctx, firmware):
+            return []
+        unticked = [
+            e for e in firmware.entries if e.enabled and entry_chip(self._ctx, firmware, e) != chip
+        ]
+        for entry in unticked:
+            entry.enabled = False
+        if unticked:
+            self._save_entries(firmware)
+        return unticked
 
     def set_entry_note(self, firmware_id: str, entry_id: str, note: str) -> Entry:
         firmware = self._ctx.firmware.get(firmware_id)
@@ -592,13 +609,17 @@ class Library:
         self._tracker.invalidate(firmware.id)
 
     def _save_entries(self, firmware: Firmware) -> None:
-        """Re-resolve entries placed by partition, then save."""
-        try:
-            table, _ = enabled_partition_table(firmware, self._read)
-        except OSError:  # the table file is missing; the checklist reports it
-            table = None
-        if table is not None:
-            resolve_partitions(firmware, table)
+        """Re-resolve entries placed by partition (against the table of their own chip),
+        then save."""
+        chips = firmware_chips(self._ctx, firmware)
+        views = [for_chip(self._ctx, firmware, c) for c in chips] if len(chips) > 1 else [firmware]
+        for view in views:
+            try:
+                table, _ = enabled_partition_table(view, self._read)
+            except OSError:  # the table file is missing; the checklist reports it
+                table = None
+            if table is not None:
+                resolve_partitions(view, table)
         self._save(firmware)
 
     def _save_override(self, firmware: Firmware, key: str) -> None:
@@ -612,15 +633,14 @@ class Library:
         return dataclasses.replace(_entry(resolved, entry_id))
 
     def _mismatch(self, firmware: Firmware, state: ChipState) -> str | None:
-        if firmware.chip is not None and firmware.chip != state.chip:
-            return f"firmware is for {firmware.chip}, the board is {state.chip}"
+        chips = firmware_chips(self._ctx, firmware)
+        if chips and state.chip not in chips:
+            return f"firmware is for {', '.join(chips)}, the board is {state.chip}"
+        if state.major < 0:  # secure download mode: the revision was not read
+            return None
         for entry in sorted_entries([e for e in firmware.entries if e.enabled]):
             header = image_header(self._ctx, entry)
-            if header is None:
-                continue
-            if header.chip is not None and header.chip != state.chip:
-                return f"{entry.name} is for {header.chip}, the board is {state.chip}"
-            if state.major < 0:  # secure download mode: the revision was not read
+            if header is None or header.chip != state.chip:  # other chips are left out
                 continue
             planned = PlanEntry(
                 address=entry.address or 0,
