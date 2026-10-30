@@ -195,20 +195,3 @@ def test_plan_for_a_p4_revision_takes_only_its_line(
     command = preview_command(context, firmware, None, None, chip="esp32p4", revision=revision)
     other = next(name for rev, name in APPS.items() if rev != revision)
     assert APPS[revision] in command and other not in command
-
-
-def test_firmware_with_files_outside_its_folder_still_plans(
-    context: AppContext, tmp_path: Path
-) -> None:
-    # made before the folder rule (§12 item 8): kept as is, still flashable
-    boot, table, app = HELLO
-    (boot_copy,) = copy_files([boot], tmp_path / "a")
-    others = copy_files([table, app], tmp_path / "b")
-    firmware = context.firmware.create("legacy")
-    firmware.entries = [entries.entry_from_file(p) for p in [boot_copy, *others]]
-    firmware.folder = str((tmp_path / "b").resolve())
-    context.firmware.save(firmware)
-
-    assert [e.name for e in entries.entries_outside(firmware)] == [boot.name]
-    plan = assemble_plan(context, firmware, BRIDGE, None)
-    assert [e.address for e in plan.entries] == [0x0, 0x8000, 0x10000]

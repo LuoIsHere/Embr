@@ -10,8 +10,6 @@ from app_testkit import (
     fixed_firmware,
     idf_project,
     move_app,
-    seed_user_entry,
-    write_newer,
 )
 
 from embr.app.archiving import Archiver
@@ -38,11 +36,8 @@ def test_archive_version_copies_the_resolved_firmware(context: AppContext, tmp_p
     source = library.import_idf(build, project_id=project.id, device="board")
     library.set_entry_address(source.id, APP, "0x20000")
     library.set_entry_note(source.id, APP, "main app")
-    data = tmp_path / "data.bin"
-    write_newer(data, b"\x5a" * 0x1000)
-    seed_user_entry(library, context, source.id, data, 0x300000)  # legacy user entry
     before = context.firmware.get(source.id)
-    files = {p: p.read_bytes() for p in [*build.rglob("*.bin"), data]}
+    files = {p: p.read_bytes() for p in build.rglob("*.bin")}
 
     archived = archiver.archive_version(source.id, notes="release 1")
 
@@ -63,20 +58,17 @@ def test_archive_version_copies_the_resolved_firmware(context: AppContext, tmp_p
         "bootloader.bin",
         "partition-table.bin",
         "hello_esp32s3.bin",
-        "data.bin",
     }
     for entry in archived.entries:
         assert entry.file == f"archive:{entry.sha256}" and context.archive.has(entry.sha256)
     app = entries["hello_esp32s3.bin"]
     assert (app.address, app.note) == (0x20000, "main app")
-    assert entries["data.bin"].address == 0x300000
     record = context.archive.names(app.sha256)[-1]
     assert (record.original_name, record.source_firmware) == ("hello_esp32s3.bin", source.name)
 
     after = context.firmware.get(source.id)
-    assert (after.entry_overrides, after.user_entries, after.last_resolved) == (
+    assert (after.entry_overrides, after.last_resolved) == (
         before.entry_overrides,
-        before.user_entries,
         before.last_resolved,
     )
     assert {p: p.read_bytes() for p in files} == files

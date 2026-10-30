@@ -14,10 +14,10 @@ from typing import Any, cast
 from embr.app.context import AppContext
 from embr.app.identify import IdentifySnapshot
 from embr.app.library import FirmwareRow, Library, Tree
-from embr.core.firmware.entries import attachment_entry, entry_from_file
+from embr.core.firmware.entries import entry_from_file
 from embr.core.firmware.image_header import NO_MAX_REVISION
 from embr.core.firmware.kinds import EntryKind
-from embr.core.firmware.model import Entry, Firmware
+from embr.core.firmware.model import Firmware
 from embr.core.flasher.checks import SecurityState
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.serial import ConnectionType, PortInfo
@@ -142,19 +142,6 @@ def entry_ids_under(firmware: Firmware, folder: Path) -> set[str]:
         for e in firmware.entries
         if e.file.startswith("path:") and Path(e.file[5:]).parent == folder.resolve()
     }
-
-
-def seed_user_entry(
-    library: Library, context: AppContext, firmware_id: str, path: Path, address: int
-) -> Entry:
-    """An attachment stored as a user entry of a tracking firmware, as data from before
-    design doc §12 item 16 has it (Library no longer adds them)."""
-    firmware = context.firmware.get(firmware_id)
-    entry = attachment_entry(path, address=address)
-    firmware.user_entries.append(entry)
-    context.firmware.save(firmware)
-    library.tracker.invalidate(firmware_id)
-    return entry
 
 
 def info(

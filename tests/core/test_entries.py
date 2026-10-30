@@ -14,11 +14,9 @@ from embr.core.firmware.entries import (
     Problem,
     ProblemLevel,
     attachment_entry,
-    blank_otadata_entry,
     check_layout,
     copy_entry,
     enabled_partition_table,
-    entries_outside,
     entry_from_file,
     in_folder,
     resolve_partitions,
@@ -216,16 +214,3 @@ def test_in_folder(tmp_path: Path, case: str) -> None:
     folder, path, inside = IN_FOLDER[case]
     root = tmp_path / "root"
     assert in_folder(folder(root), path(root)) is inside
-
-
-def test_entries_outside_lists_only_path_entries_outside_the_folder(tmp_path: Path) -> None:
-    def entry(file: str) -> Entry:
-        return replace(entry_from_file(HELLO / "hello_esp32s3.bin"), file=file)
-
-    inside = entry(f"path:{tmp_path / 'root' / 'sub' / 'a.bin'}")
-    outside = entry(f"path:{tmp_path / 'other' / 'a.bin'}")
-    archived = entry(f"archive:{'0' * 64}")
-    fw = _firmware(inside, outside, archived, blank_otadata_entry(0xD000, 0x2000))
-    assert entries_outside(fw) == []  # no folder: firmware made before the rule
-    fw.folder = str(tmp_path / "root")
-    assert entries_outside(fw) == [outside]

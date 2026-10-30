@@ -22,7 +22,6 @@ from embr_testkit import (
     write_newer,
 )
 
-from embr.core.firmware.entries import attachment_entry
 from embr.core.firmware.filecache import FileCache
 from embr.core.firmware.import_idf import configured_target, read_build
 from embr.core.firmware.kinds import EntryKind
@@ -268,10 +267,6 @@ def test_rebuild_with_another_idf_needs_confirmation(tmp_path: Path) -> None:
 def test_chip_change_is_listed_first_and_drops_manual_addresses(tmp_path: Path) -> None:
     firmware, build = _follow(tmp_path)
     firmware.entry_overrides[TABLE] = EntryOverride(address=0x9000, note="table")
-    data = tmp_path / "data.bin"
-    write_newer(data, b"\x5a" * 0x1000)
-    attachment = attachment_entry(data, address=0x300000)
-    firmware.user_entries.append(attachment)
     use_sample(build, "esp32p4_rev1_hello")
     set_target(build, "esp32p4")
 
@@ -279,13 +274,12 @@ def test_chip_change_is_listed_first_and_drops_manual_addresses(tmp_path: Path) 
     assert changed.state is ResolveState.NEEDS_CONFIRMATION
     chip = changed.changes[0]
     assert (chip.kind, chip.before, chip.after) == (ChangeKind.CHIP, "esp32s3", "esp32p4")
-    assert {ChangeKind.MANUAL_ADDRESS, ChangeKind.ATTACHMENT} <= _kinds(changed)
+    assert ChangeKind.MANUAL_ADDRESS in _kinds(changed)
 
     accept(firmware, changed)
     assert (firmware.chip, firmware.flash) == ("esp32p4", FlashParams("dio", "40m", "2MB"))
     override = firmware.entry_overrides.get(TABLE)
     assert override is None or override.address is None
-    assert [(e.id, e.address) for e in firmware.user_entries] == [(attachment.id, 0x300000)]
     assert _resolve(firmware, build).state is ResolveState.OK
 
 

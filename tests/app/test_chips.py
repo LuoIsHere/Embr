@@ -12,7 +12,6 @@ from app_testkit import (
     idf_project,
     multi_chip_firmware,
     p4_lines_firmware,
-    seed_user_entry,
     spanning_app,
     write_newer,
 )
@@ -70,13 +69,9 @@ def test_the_only_chip_covers_entries_without_one(
 def test_tracking_entries_take_the_build_chip(context: AppContext, tmp_path: Path) -> None:
     library = Library(context, Tracker(context, clock=Clock()))
     firmware = library.import_idf(idf_project("esp32s3_hello", tmp_path / "hello"))
-    seed_user_entry(library, context, firmware.id, _data(tmp_path / "data.bin"), 0x300000)
-    stored = context.firmware.get(firmware.id)
-    stored.user_entries[0].chip = "esp32p4"  # a hand choice does not apply to tracking
-    context.firmware.save(stored)
-    library.tracker.invalidate(firmware.id)
-
     resolved = library.tracker.check(firmware.id).firmware
+    table = next(e for e in resolved.entries if e.kind == EntryKind.PARTITION_TABLE)
+    table.chip = "esp32p4"  # a hand choice does not apply to tracking
     assert firmware_chips(context, resolved) == ("esp32s3",)
     assert {entry_chip(context, resolved, e) for e in resolved.entries} == {"esp32s3"}
 

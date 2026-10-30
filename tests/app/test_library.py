@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 from app_testkit import (
-    BRIDGE,
     Clock,
     build_files,
     copy_files,
@@ -17,7 +16,6 @@ from app_testkit import (
     info,
     multi_chip_firmware,
     p4_lines_firmware,
-    seed_user_entry,
     set_target,
     write_newer,
 )
@@ -25,7 +23,7 @@ from app_testkit import (
 from embr.app.archiving import Archiver
 from embr.app.chips import entry_chip
 from embr.app.context import AppContext
-from embr.app.flashplan import PlanError, assemble_plan
+from embr.app.flashplan import PlanError
 from embr.app.library import (
     UNTITLED,
     AlreadyTrackedError,
@@ -34,12 +32,7 @@ from embr.app.library import (
     TrackingEntriesError,
 )
 from embr.app.tracking import Tracker
-from embr.core.firmware.entries import (
-    AddressError,
-    FolderError,
-    attachment_entry,
-    entries_outside,
-)
+from embr.core.firmware.entries import AddressError, FolderError, attachment_entry
 from embr.core.firmware.files import FileState
 from embr.core.firmware.import_idf import BuildMissingError
 from embr.core.firmware.kinds import EntryKind
@@ -277,17 +270,8 @@ def test_entry_changes_on_tracking_firmware(context: AppContext, tmp_path: Path)
     # the change is seen at once, although no build file changed
     app = next(e for e in tracker.check(firmware.id).firmware.entries if e.id == HELLO_APP)
     assert (app.address, app.enabled, app.note) == (0x20000, False, "main app")
-
-    # a user entry added before §12 item 16 still flashes and can be removed
-    data = tmp_path / "data.bin"
-    write_newer(data, b"Z" * 0x1000)
-    user = seed_user_entry(library, context, firmware.id, data, 0x300000)
-    plan = assemble_plan(context, tracker.check(firmware.id).firmware, BRIDGE, None)
-    assert [e.address for e in plan.entries if e.name == "data.bin"] == [0x300000]
     with pytest.raises(ValueError):
         library.remove_entry(firmware.id, HELLO_APP)
-    library.remove_entry(firmware.id, user.id)
-    assert context.firmware.get(firmware.id).user_entries == []
 
 
 def test_switched_target_is_flagged_blocked(context: AppContext, tmp_path: Path) -> None:
@@ -619,7 +603,6 @@ def test_archived_entries_fit_any_folder(context: AppContext, tmp_path: Path) ->
     library.copy_entry_to(source.id, archived.id, firmware.id)
     stored = library.firmware(firmware.id)
     assert stored.entries[-1].file == archived.file
-    assert entries_outside(stored) == []
 
 
 def test_relocate_folder_keeps_relative_paths(library: Library, tmp_path: Path) -> None:

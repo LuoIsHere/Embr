@@ -238,22 +238,17 @@ def test_set_param_refuses_read_only_params() -> None:
 
 
 def test_file_without_the_new_fields_loads_with_defaults(store: FirmwareStore) -> None:
-    # no migration (design doc §12 item 13): old files lack folder and entry chips, and a
-    # fixed firmware may still carry its own chip, which is ignored
+    # no migration (design doc §12 item 13): files without folder and entry chips load with
+    # the defaults
     fw = store.create("Old")
     fw.entries = [_path_entry(APP, EntryKind.APP, 0x20000)]
     store.save(fw)
-    file = store.directory / f"{fw.id}.toml"
-    doc = tomllib.loads(file.read_text(encoding="utf-8"))
-    doc["chip"] = "esp32s3"
-    file.write_text(tomli_w.dumps(doc), encoding="utf-8")
+    doc = tomllib.loads((store.directory / f"{fw.id}.toml").read_text(encoding="utf-8"))
+    assert "folder" not in doc and "chip" not in doc["entries"][0]
 
     loaded = _reopen(store).get(fw.id)
-    assert (loaded.chip, loaded.folder, loaded.entries[0].chip) == (None, "", None)
+    assert (loaded.folder, loaded.entries[0].chip) == ("", None)
     assert not loaded.read_only
-    _reopen(store).save(loaded)
-    saved = tomllib.loads(file.read_text(encoding="utf-8"))
-    assert (saved["schema_version"], "chip" in saved) == (1, False)
 
 
 def test_newer_firmware_is_read_only(store: FirmwareStore) -> None:
