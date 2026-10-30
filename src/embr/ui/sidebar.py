@@ -91,7 +91,7 @@ class Row(QWidget):
         self.meta.setContentsMargins(0, 0, 0, 0)
         self.meta.setSpacing(4)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4 + indent, 3, 6, 3)
+        layout.setContentsMargins(4 + indent, 5, 6, 5)
         layout.setSpacing(4)
         layout.addWidget(self.caret)
         layout.addLayout(self.text, 1)
@@ -379,7 +379,7 @@ class Sidebar(QWidget):
         row = Row(indent)
         name = elided(fw.name)
         origin = elided(fw.origin, tone="3", mono=True)
-        origin.setStyleSheet("font-size: 10px;")
+        origin.setStyleSheet("font-size: 11px;")
         row.text.addWidget(name)
         row.text.addWidget(origin)
         source = {Source.IDF_BUILD: ("IDF", "info"), Source.PIO_BUILD: ("PIO", "info")}.get(

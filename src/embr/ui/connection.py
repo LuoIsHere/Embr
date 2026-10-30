@@ -55,6 +55,9 @@ class HintLabel(QLabel):
     def __init__(self) -> None:
         super().__init__()
         self.setWordWrap(True)
+        # contents margins, not style-sheet padding: a wrapped label's height for its width
+        # leaves the padding out, so the text would touch the coloured box
+        self.setContentsMargins(9, 7, 9, 7)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tr("Click to dismiss"))
 
@@ -91,6 +94,11 @@ class ConnectionPanel(QWidget):
         # ---- port, baud, identify ----
         self.port = QComboBox()
         self.baud = QComboBox()
+        for combo in (self.port, self.baud):  # narrow panel: elide instead of widening it
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(8)
         self.identify = button(tr("Connect && identify"))
         board_hint = tr("Available after Connect & identify on this port")
         self.erase = button(tr("Erase flash…"))
@@ -133,6 +141,7 @@ class ConnectionPanel(QWidget):
         top_layout.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(top)
         # ---- action: hint, erase option, flash ----
@@ -429,10 +438,13 @@ def _check(item: CheckItem, state_text: str) -> QHBoxLayout:
     text.setSpacing(1)
     title = label(tr(item.title), tone="2", wrap=True)
     title.setStyleSheet("font-size: 12px;")
+    # the first line sits level with the pill: same height, text centred in it
+    title.setMinimumHeight(pill.sizeHint().height())
+    title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     text.addWidget(title)
     if item.detail:
         detail = label(tr(item.detail), tone="3", wrap=True)
-        detail.setStyleSheet("font-size: 11px;")
+        detail.setStyleSheet("font-size: 12px;")
         text.addWidget(detail)
     row.addLayout(text, 1)
     return row

@@ -63,7 +63,7 @@ class Dialog(QDialog):
         self.check: Callable[[], bool] = lambda: True
         """Input check run by validate()."""
         heading = QLabel(title)
-        heading.setStyleSheet("font-size: 14px; font-weight: 600;")
+        heading.setStyleSheet("font-size: 15px; font-weight: 600;")
         self.ok = button(ok, "danger-small" if danger else "accent-small")
         self.cancel = button(tr("Cancel"))
         self.ok.setDefault(True)

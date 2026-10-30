@@ -150,6 +150,9 @@ class Header(QWidget):
         self.row.addWidget(label(crumb(self._owner, firmware), tone="3"))
         name = QLabel(firmware.name)
         name.setProperty("heading", "1")
+        # the larger font sits low in its box: lift it so its baseline meets the crumb's
+        # and its text is level with the tags
+        name.setContentsMargins(0, 0, 0, HEADING_LIFT)
         self.row.addWidget(name)
         for mcu in firmware_mcus(self._owner.context, firmware):
             self.row.addWidget(tag(mcu.label, "gray"))
@@ -181,6 +184,9 @@ class Header(QWidget):
         self.row.addWidget(label(tr("Project"), tone="3"))
         name = QLabel(project.name)
         name.setProperty("heading", "1")
+        # the larger font sits low in its box: lift it so its baseline meets the crumb's
+        # and its text is level with the tags
+        name.setContentsMargins(0, 0, 0, HEADING_LIFT)
         self.row.addWidget(name)
         self.row.addWidget(tag(tr(f"{count} firmware"), "gray"))
         self.row.addWidget(tag(tr(f"{len(project.devices)} groups"), "gray"))
@@ -216,6 +222,10 @@ class Banner(QFrame):
 
 
 NOTE_MIN_WIDTH = 120
+ROW_PX = 36
+HEADING_LIFT = 5
+"""Bottom margin that lifts the header's name (twice the lift, as it is centred)."""
+"""Height of an entries row."""
 _DRAGGABLE = (1, 2, 3, 4, 5, 6)
 """Address to Image requires; Note takes what is left."""
 _MIN_COLUMN = 40
@@ -258,12 +268,13 @@ class EntriesTab(QWidget):
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
         self.table.viewport().installEventFilter(self)  # refit columns, see eventFilter()
+        self.table.setWordWrap(False)  # one line per row; long text is elided
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
-        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.verticalHeader().setDefaultSectionSize(ROW_PX)
         header = self.table.horizontalHeader()
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -293,7 +304,7 @@ class EntriesTab(QWidget):
         )
         add_row = QFrame()
         add_row.setObjectName("addrow")
-        add_row.setFixedHeight(40)
+        add_row.setFixedHeight(44)
         row_layout = QHBoxLayout(add_row)
         row_layout.setContentsMargins(6, 0, 6, 0)
         row_layout.addWidget(self.add_button, 1)
@@ -343,7 +354,7 @@ class EntriesTab(QWidget):
         self.merge_button.setEnabled(any(e.enabled for e in firmware.entries))
         header_height = self.table.horizontalHeader().sizeHint().height()
         self._fit_columns()
-        self.table.setFixedHeight(header_height + 30 * len(rows) + 2)
+        self.table.setFixedHeight(header_height + ROW_PX * len(rows) + 2)
         if typing is not None:
             self._restore_typing(*typing)
 
@@ -513,6 +524,7 @@ class EntriesTab(QWidget):
         ):
             item = QTableWidgetItem(text)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item.setForeground(QColor(color))
             self.table.setItem(row, column, item)
         note = QLineEdit(entry.note)
@@ -1184,7 +1196,7 @@ class NotesEdit(QPlainTextEdit):
         self.setProperty("kind", "notes")
         self.setPlaceholderText(placeholder)
         self.setMaximumWidth(420)
-        self.setFixedHeight(64)
+        self.setFixedHeight(76)
         self._initial = text
 
     def focusOutEvent(self, event: object) -> None:  # type: ignore[override]

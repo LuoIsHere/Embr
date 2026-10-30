@@ -83,7 +83,7 @@ class TopBar(QWidget):
         layout.addWidget(self.logo)
         layout.addSpacing(4)
         for widget in (self.menu_button, self.sidebar_button):
-            widget.setFixedSize(26, 26)
+            widget.setFixedSize(28, 28)
             layout.addWidget(widget)
         layout.addSpacing(4)
         layout.addWidget(self.brand)
