@@ -77,7 +77,8 @@ def logo_pixmap(size: int) -> QPixmap:
 
 
 KEY_HEIGHT = 14
-_KEY_GAP = 3
+_KEY_PLUS = 9.0
+"""Width of the "+" drawn between two keys."""
 _KEY_TEXT = (
     '<text x="{x}" y="9.6" text-anchor="middle" font-family="Segoe UI" font-size="7.5" '
     'font-weight="600" fill="{color}" stroke="none">{label}</text>'
@@ -85,16 +86,21 @@ _KEY_TEXT = (
 
 
 def keys_pixmap(keys: tuple[str, ...], color: str) -> QPixmap:
-    """Keyboard keys side by side in `color`: "Ctrl" and "Esc" as small square keys with
-    their name, "Enter" as the reverse-L key shape with a return arrow."""
+    """A key combination in `color`, keys joined by "+": "Ctrl" and "Esc" as small square
+    keys with their name, "Enter" as the reverse-L key (narrow at the top right, full width
+    at the bottom) with a return arrow in its wide part."""
     parts: list[str] = []
     x = 0.0
-    for key in keys:
+    for index, key in enumerate(keys):
+        if index:
+            mid = x + _KEY_PLUS / 2
+            parts.append(f'<path d="M{mid - 2.5} 7H{mid + 2.5}M{mid} 4.5V9.5"/>')
+            x += _KEY_PLUS
         if key == "Enter":
             width = 20.0
             parts.append(
-                f'<path d="M{x + 0.5} 0.5H{x + width - 0.5}V13.5H{x + 6.5}V7H{x + 0.5}Z"/>'
-                f'<path d="M{x + 15} 3.5V10H{x + 9.5}M{x + 11.5} 8L{x + 9.5} 10L{x + 11.5} 12"/>'
+                f'<path d="M{x + 7.5} 0.5H{x + width - 0.5}V13.5H{x + 0.5}V6.5H{x + 7.5}Z"/>'
+                f'<path d="M{x + 15} 3.5V10H{x + 5}M{x + 7} 8L{x + 5} 10L{x + 7} 12"/>'
             )
         else:
             width = 6.0 + 4.6 * len(key)
@@ -102,8 +108,8 @@ def keys_pixmap(keys: tuple[str, ...], color: str) -> QPixmap:
                 f'<rect x="{x + 0.5}" y="0.5" width="{width - 1}" height="13" rx="2.5"/>'
                 + _KEY_TEXT.format(x=x + width / 2, color=color, label=key)
             )
-        x += width + _KEY_GAP
-    width = round(x - _KEY_GAP)
+        x += width
+    width = round(x)
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {KEY_HEIGHT}" '
         f'fill="none" stroke="{color}" stroke-width="1" stroke-linejoin="round" '
