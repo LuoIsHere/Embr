@@ -35,6 +35,8 @@ def entry_to_doc(entry: Entry) -> Document:
     if entry.auto_address is not None:
         doc["auto_address"] = f"{entry.auto_address:#x}"
     doc["address_source"] = entry.address_source.value
+    if entry.chip is not None:
+        doc["chip"] = entry.chip
     doc["enabled"] = entry.enabled
     if entry.note:
         doc["note"] = entry.note
@@ -66,6 +68,7 @@ def entry_from_doc(doc: Document) -> Entry:
         note=doc_str(doc, "note"),
         from_dump=doc_bool(doc, "from_dump"),
         auto_added=doc_bool(doc, "auto_added"),
+        chip=doc_opt_str(doc, "chip"),
     )
 
 
@@ -79,7 +82,7 @@ def firmware_to_doc(fw: Firmware) -> Document:
         "tags": list(fw.tags),
         "source": fw.source.value,
     }
-    if fw.chip is not None:
+    if fw.chip is not None and fw.source.tracking:  # fixed firmware: chips of the entries
         doc["chip"] = fw.chip
     doc["flash"] = {"mode": fw.flash.mode, "freq": fw.flash.freq, "size": fw.flash.size}
     doc["reset"] = {"before": fw.before, "after": fw.after}
@@ -89,6 +92,8 @@ def firmware_to_doc(fw: Firmware) -> Document:
         if fw.build_ref.env is not None:
             ref["env"] = fw.build_ref.env
         doc["build_ref"] = ref
+    if fw.folder:
+        doc["folder"] = fw.folder
     if fw.framework_pkg:
         doc["framework_pkg"] = fw.framework_pkg
     if fw.archived_from:
@@ -111,13 +116,14 @@ def firmware_from_doc(doc: Document) -> Firmware:
     reset = doc_table(doc, "reset") or {}
     ref = doc_table(doc, "build_ref")
     overrides = doc_table(doc, "entry_overrides") or {}
+    source = Source(doc_str(doc, "source", Source.MANUAL.value))
     return Firmware(
         id=doc_str(doc, "id"),
         name=doc_str(doc, "name"),
         project_id=doc_opt_str(doc, "project_id"),
         device=doc_str(doc, "device"),
-        source=Source(doc_str(doc, "source", Source.MANUAL.value)),
-        chip=doc_opt_str(doc, "chip"),
+        source=source,
+        chip=doc_opt_str(doc, "chip") if source.tracking else None,
         notes=doc_str(doc, "notes"),
         tags=doc_strs(doc, "tags"),
         flash=FlashParams(
@@ -132,6 +138,7 @@ def firmware_from_doc(doc: Document) -> Firmware:
         build_ref=BuildRef(doc_str(ref, "path"), doc_opt_str(ref, "env"))
         if ref is not None
         else None,
+        folder=doc_str(doc, "folder"),
         framework_pkg=doc_str(doc, "framework_pkg"),
         archived_from=doc_str(doc, "archived_from"),
         user_entries=[entry_from_doc(d) for d in doc_tables(doc, "user_entries")],

@@ -75,13 +75,15 @@ def preflight(
     3. reset policy for the selected port (UART bridge without a port): PASS with the
        before / after used, WARN "adjusted to the connection" with the reasons
     4. without `identified`: one LATER item for chip, revision, flash size and security;
-       with it: chip (REFUSE on mismatch with the firmware or an entry's image chip),
-       revision (REFUSE when an entry's range excludes the chip; only when the chip
-       matches), flash size (WARN when the declared size differs from the detected one),
-       security (REFUSE when secure download mode, flash encryption or secure boot is on)
-    A firmware without a chip (no ESP image among its entries) gets a WARN chip item once
-    identified ("taken from the identified chip", design doc §4.3) and the LATER item
-    before."""
+       with it: chip (REFUSE when the identified chip is not among the firmware's chips, or
+       an entry's MCU differs), revision (REFUSE when an entry's range excludes the chip;
+       only when the chip matches), flash size (WARN when the declared size differs from
+       the detected one), security (REFUSE when secure download mode, flash encryption or
+       secure boot is on)
+    Entries are taken per chip (design doc §12 item 13): once identified, items 1, 2 and 4
+    look only at the entries for the identified chip (app.chips.for_chip()), so "No entries
+    enabled" also covers a board none of the entries are for; before that, item 1 checks
+    each chip's entries separately and item 2 all enabled entries."""
     items = [_build(status)] if status is not None and firmware.source.tracking else []
     items += _layout(context, firmware, identified)
     items.append(_files(context, firmware))

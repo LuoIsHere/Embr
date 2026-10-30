@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from embr.app.chips import firmware_chips
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, image_header
 from embr.app.tracking import Tracker
@@ -92,10 +93,12 @@ class FirmwareRow:
     id: str
     name: str
     origin: str
-    """Second sidebar line: files folder (folder of the first enabled path entry), "Archive"
-    for archived firmware, or the build directory for tracking firmware."""
+    """Second sidebar line: the firmware's folder (for firmware without one, the folder of
+    the first enabled path entry), "Archive" for archived firmware, or the build directory
+    for tracking firmware."""
     source: Source
-    chip: str | None
+    chips: tuple[str, ...]
+    """app.chips.firmware_chips(); more than one shows as "multi"."""
     flag: FirmwareFlag
     project_id: str | None
     device: str
@@ -357,13 +360,13 @@ class Library:
         )
 
     def mismatches(self, info: InfoEvent) -> dict[str, str]:
-        """Firmware that do not fit the identified chip, by id, with the reason: a different
-        chip (firmware chip or an enabled entry's image chip), or an enabled entry whose
-        image revision range excludes the chip's revision (same rule as the flash check,
-        checks.revision_incompatibility()). Tracking firmware are judged by the tracker's
-        cached resolution (not resolved here; skipped when never resolved). Image headers
-        are read at most once per file content. Firmware without a chip and without ESP
-        images fit any chip."""
+        """Firmware that do not fit the identified chip, by id, with the reason: the chip is
+        not among the firmware's chips (app.chips.firmware_chips()), or an enabled entry for
+        that chip has an image revision range that excludes the chip's revision (same rule
+        as the flash check, checks.revision_incompatibility()). Tracking firmware are judged
+        by the tracker's cached resolution (not resolved here; skipped when never resolved).
+        Image headers are read at most once per file content. Firmware without any chip fit
+        any chip."""
         state = ChipState(info.chip, info.major, info.minor, info.flash_size, info.security)
         found: dict[str, str] = {}
         for stored in self._ctx.firmware.all():
@@ -388,14 +391,25 @@ class Library:
 
     # ---- entries ----------------------------------------------------------------------
 
+    def create_from_files(
+        self, paths: Sequence[Path], project_id: str | None = None, device: str = ""
+    ) -> Firmware:
+        """New fixed firmware (as create_firmware()) holding `paths`, named after the first
+        file: files dropped on the sidebar (design doc §12 item 19). The folder rule is
+        checked first: FolderError (or OSError for an unreadable file) and nothing is
+        created."""
+        raise NotImplementedError
+
     def add_files(self, firmware_id: str, paths: Sequence[Path]) -> list[Entry]:
         """Add one entry per file, classified by image_sniff. Partition tables are added
         first so the other files get addresses from them (or from the firmware's enabled
         table). When this adds a partition table with an otadata partition and no enabled
         otadata entry exists, a blank otadata entry is added too. Entries placed by
         partition are re-resolved. A firmware still named UNTITLED with no entries takes
-        the first file's name (without extension); a firmware without a chip takes the chip
-        of the first ESP image added. Returns the new entries. Tracking firmware:
+        the first file's name (without extension). Returns the new entries. Folder rule
+        (design doc §12 item 8): a firmware without a folder takes the folder of its first
+        "path:" entry, or else of the first of `paths`; every file must be in that folder or
+        below it, otherwise FolderError and nothing changes. Tracking firmware:
         TrackingEntriesError, nothing changes."""
         firmware = self._ctx.firmware.get(firmware_id)
         _refuse_tracking(firmware)
@@ -435,8 +449,8 @@ class Library:
     ) -> Entry:
         """Attachment placed by address or by partition (exactly one). By partition: the
         address is resolved from the enabled partition table; a missing partition or a file
-        larger than it is reported by the checklist, not raised. Tracking firmware:
-        TrackingEntriesError."""
+        larger than it is reported by the checklist, not raised. The folder rule applies as
+        in add_files() (FolderError). Tracking firmware: TrackingEntriesError."""
         firmware = self._ctx.firmware.get(firmware_id)
         _refuse_tracking(firmware)
         entry = attachment_entry(path, address=address, partition=partition)
@@ -474,6 +488,20 @@ class Library:
         self._save_override(firmware, entry_id)
         return entry
 
+    def set_entry_chip(self, firmware_id: str, entry_id: str, chip: str | None) -> Entry:
+        """Choose the MCU of an entry whose file names no chip (None clears the choice).
+        ValueError for an unknown chip, for an entry whose image header names a chip, and
+        for tracking firmware (app.chips.chip_choosable())."""
+        raise NotImplementedError
+
+    def fit_entries(self, firmware_id: str, chip: str) -> list[Entry]:
+        """After a board with `chip` was identified (design doc §12 item 13): untick and
+        save every enabled entry of a fixed firmware whose MCU is another chip or none.
+        Nothing changes when `chip` is not among the firmware's chips (the whole firmware is
+        for other boards: the sidebar dims it, the checklist refuses), nor for tracking
+        firmware. Returns the entries that were unticked."""
+        raise NotImplementedError
+
     def set_entry_note(self, firmware_id: str, entry_id: str, note: str) -> Entry:
         firmware = self._ctx.firmware.get(firmware_id)
         own = _own_entry(firmware, entry_id)
@@ -489,6 +517,7 @@ class Library:
         return entry
 
     def remove_entry(self, firmware_id: str, entry_id: str) -> None:
+        """A fixed firmware left without "path:" entries loses its folder."""
         firmware = self._ctx.firmware.get(firmware_id)
         own = _own_entry(firmware, entry_id)
         if own is None:
@@ -501,8 +530,9 @@ class Library:
             self._save_entries(firmware)
 
     def copy_entry_to(self, firmware_id: str, entry_id: str, target_id: str) -> Entry:
-        """Copy an entry (same file, address, note) into another firmware. A tracking target
-        raises TrackingEntriesError."""
+        """Copy an entry (same file, address, note, chosen MCU) into another firmware. A
+        "path:" entry must fit the target's folder as in add_files() (FolderError). A
+        tracking target raises TrackingEntriesError."""
         source = self._ctx.firmware.get(firmware_id)
         entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
         target = self._ctx.firmware.get(target_id)
@@ -515,7 +545,8 @@ class Library:
         return copy
 
     def relocate_entry(self, firmware_id: str, entry_id: str, path: Path) -> Entry:
-        """Point a missing or changed "path:" entry at another file."""
+        """Point a missing or changed "path:" entry at another file. With a folder set, the
+        file must be in it (FolderError); see relocate_folder() to move them all."""
         firmware = self._ctx.firmware.get(firmware_id)
         entry = _own_entry(firmware, entry_id)
         if entry is None:
@@ -527,6 +558,14 @@ class Library:
             self._save_entries(firmware)
         self.check_files(firmware_id)
         return entry
+
+    def relocate_folder(self, firmware_id: str, folder: Path) -> list[str]:
+        """Move a fixed firmware's folder: every "path:" entry inside the old folder points
+        at the same relative path under `folder` when that file exists there, and the
+        folder becomes `folder`. Returns the names of entries left pointing at the old place
+        (no such file under `folder`). ValueError for a firmware without a folder or a
+        tracking one."""
+        raise NotImplementedError
 
     def confirm_entries(self, firmware_id: str) -> Firmware:
         """Accept the current content of every CHANGED "path:" entry (new hash and size).
@@ -605,7 +644,7 @@ class Library:
             name=firmware.name,
             origin=_origin(firmware),
             source=firmware.source,
-            chip=firmware.chip,
+            chips=firmware_chips(self._ctx, firmware),
             flag=self._cached_flag(firmware),
             project_id=firmware.project_id,
             device=firmware.device,

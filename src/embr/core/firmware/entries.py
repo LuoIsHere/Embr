@@ -22,6 +22,17 @@ class AddressError(ValueError):
     """Text that is not a hexadecimal address; the entry is left unchanged."""
 
 
+class FolderError(ValueError):
+    """Files outside the folder of a fixed firmware (design doc §12 item 8); nothing was
+    changed."""
+
+    def __init__(self, folder: str, outside: list[Path]) -> None:
+        names = ", ".join(p.name for p in outside)
+        super().__init__(f"{names}: not in the firmware's folder {folder}")
+        self.folder = folder
+        self.outside = outside
+
+
 class ProblemLevel(StrEnum):
     WARN = "warn"
     REFUSE = "refuse"
@@ -112,6 +123,19 @@ def set_address(entry: Entry, text: str) -> None:
 def copy_entry(entry: Entry) -> Entry:
     """Independent copy with a new id, for adding to another firmware."""
     return dataclasses.replace(entry, id=new_id())
+
+
+def in_folder(folder: str, path: Path) -> bool:
+    """`path` lies in `folder` or in one of its subfolders. Both are resolved (absolute,
+    `..` removed) and compared ignoring case, as Windows does."""
+    raise NotImplementedError
+
+
+def entries_outside(firmware: Firmware) -> list[Entry]:
+    """Entries with a "path:" file outside firmware.folder ("archive:" and "blank:" entries
+    never are); none while the folder is "". Firmware made before the folder rule may have
+    such entries; they still flash."""
+    raise NotImplementedError
 
 
 def sorted_entries(entries: list[Entry]) -> list[Entry]:

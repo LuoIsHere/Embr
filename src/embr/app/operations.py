@@ -95,7 +95,9 @@ class JobOutcome:
     native_usb: bool
     """The port was USB-Serial/JTAG or USB-OTG: the UI shows the manual reset hint."""
     firmware_id: str | None = None
-    """read_flash that ended OK: the dump firmware created from it."""
+    """read_flash that ended OK with import: the dump firmware created from it."""
+    saved_to: str = ""
+    """read_flash that ended OK: the file the content was written to."""
 
 
 class Listener(Protocol):
@@ -187,9 +189,10 @@ class Operations:
         """Start a flash job. Before starting: Tracker.verify_for_flash(firmware_id,
         shown_digest) (app.tracking.BuildChangedError when the firmware differs from the shown
         one or is being built, PlanError when it is not flashable; no job, no record), so a
-        tracking firmware is flashed as currently resolved; the entry files are checked
-        again; a firmware without a chip takes the identified chip (saved) or
-        flashplan.PlanError is raised when nothing is identified; the plan is assembled
+        tracking firmware is flashed as currently resolved; the plan is assembled for the
+        chip of the identification snapshot of `port` (none: the firmware's only chip;
+        app.flashplan.assemble_plan()), so only the entries for that chip are written, and
+        nothing is saved to the firmware; the files of those entries are checked again
         (blank entries written to temp/). The log segment header carries the record id.
         At the end the record is saved with the plan's reset modes, connection type, baud,
         entries (skipped as reported by EntryEvents), the chip details of the InfoEvent,
@@ -244,15 +247,23 @@ class Operations:
         size: int | None = None,
         project_id: str | None = None,
         device: str = "",
+        output: Path | None = None,
+        import_firmware: bool = True,
     ) -> None:
-        """Start a read-flash job writing to temp/. On OK the content is archived and a
-        fixed MANUAL firmware is created in the given project and group: chip from the
-        InfoEvent, one enabled MERGED entry at `address` ("archive:<sha256>", from_dump),
-        flash parameters "keep", name "<chip> dump YYYY-MM-DD HH-MM" (made unique), notes
-        saying it may contain credentials. The record (operation READ_FLASH) has one entry
-        (address, size read, sha256, kind merged) and points at that firmware; failed,
-        refused or cancelled jobs create no firmware and the record has no entry.
-        JobOutcome.firmware_id is the new firmware. BusyError while a job runs."""
+        """Start a read-flash job writing to temp/ (design doc §12 item 3). On OK the
+        content is moved to `output` (replacing an existing file; folders created), and
+        with `import_firmware` it is also archived and a fixed MANUAL firmware is created
+        in the given project and group: one enabled MERGED entry at `address`
+        ("archive:<sha256>", from_dump, MCU = the identified chip), flash parameters
+        "keep", name "<chip> dump YYYY-MM-DD HH-MM" (made unique), notes saying it may
+        contain credentials. Without `output` only the import happens; without either
+        nothing is kept but the record. The record (operation READ_FLASH) has one entry
+        (address, size read, sha256, kind merged) and points at the firmware if one was
+        created. A failed, refused or cancelled read, or an output that cannot be written
+        (the result becomes FAILED with the reason), leaves no file at `output`, creates no
+        firmware and records no entry; the temporary file is always removed.
+        JobOutcome.firmware_id is the new firmware, JobOutcome.saved_to the written file.
+        BusyError while a job runs."""
         self._ensure_idle()
         record_id = new_id()
         output = self._ctx.paths.temp / f"read-{record_id}.bin"

@@ -55,6 +55,10 @@ class Entry:
     from_dump: bool = False
     auto_added: bool = False
     """Blank otadata added automatically."""
+    chip: str | None = None
+    """MCU chosen by hand for a file that names no chip in an image header (partition
+    table, data images, non-ESP files); ignored when the header names one (design doc §12
+    item 13). See app.chips for the MCU an entry is flashed to."""
 
 
 @dataclass
@@ -90,6 +94,8 @@ class Firmware:
     """Group name inside the project; "" means ungrouped."""
     source: Source
     chip: str | None = None
+    """Tracking firmware: the chip of the build (derived). Fixed firmware: None; their chips
+    come from the entries (app.chips.firmware_chips)."""
     notes: str = ""
     tags: list[str] = field(default_factory=lambda: list[str]())
     flash: FlashParams = field(default_factory=FlashParams)
@@ -103,6 +109,9 @@ class Firmware:
     """Fixed firmware: all entries. Tracking firmware: derived entries of the last resolve
     (not stored; rebuilt by the resolver)."""
     build_ref: BuildRef | None = None
+    folder: str = ""
+    """Fixed firmware: the folder of the first file added; later "path:" entries must lie
+    in it or below it (design doc §12 item 8). "" until a file is added."""
     framework_pkg: str = ""
     archived_from: str = ""
     user_entries: list[Entry] = field(default_factory=lambda: list[Entry]())

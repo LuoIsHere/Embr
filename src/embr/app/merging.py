@@ -26,6 +26,7 @@ class MergeOptions:
     pad_to_flash_size: bool = False
     """Pad to the firmware's flash size (or the size declared in its bootloader header)."""
     add_to_list: bool = True
+    """Import the result into Embr as a firmware."""
 
 
 class Merger:
@@ -51,12 +52,14 @@ class Merger:
     def merge(self, firmware_id: str, output: Path, options: MergeOptions) -> Firmware | None:
         """Write the merged image to `output` (via a temporary file in temp/, then moved).
         With add_to_list: a new MANUAL firmware named "<source> (merged)" (made unique) in
-        the source's project and group, with the source's chip, flash parameters and reset
-        modes, one enabled MERGED entry at target_offset referencing `output`, whose note
-        lists the merged files, and notes giving the source and options; returned. Without
-        it: None. The source firmware is unchanged. PlanError when no entry is enabled, the
-        firmware is not flashable, it has no chip, or padding is asked without a known flash
-        size; core.flasher.merge.MergeError propagates."""
+        the source's project and group, with the source's flash parameters and reset modes,
+        folder = the output's folder, one enabled MERGED entry at target_offset referencing
+        `output` (MCU = the merged entries' chip), whose note lists the merged files, and
+        notes giving the source and options; returned. Without it: None. The source
+        firmware is unchanged. PlanError when no entry is enabled, the firmware is not
+        flashable, the enabled entries are not all for one MCU (app.chips.merge_problem(),
+        whose message the dialog shows while its Merge button is disabled), or padding is
+        asked without a known flash size; core.flasher.merge.MergeError propagates."""
         firmware, inputs, pad = self._inputs(firmware_id, options, write_files=True)
         assert firmware.chip is not None
         data = merge_image(
