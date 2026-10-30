@@ -49,7 +49,13 @@ from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, Tracker, TrackStatus
 from embr.core.firmware.entries import FolderError
 from embr.core.firmware.import_idf import IdfBuildError, build_dir_below
-from embr.core.firmware.import_pio import PioBuildError
+from embr.core.firmware.import_pio import (
+    PLATFORMIO_INI,
+    EnvDirError,
+    PioBuildError,
+    built_envs_below,
+    env_ref,
+)
 from embr.core.firmware.model import editable_params
 from embr.core.firmware.store import default_name_archived
 from embr.core.firmware.tracking import ResolveState
@@ -1065,7 +1071,9 @@ class EmbrWindow(FrameWindow):
         """Files or a folder dragged from Explorer onto the sidebar (design doc §12 item 19):
         on a firmware they are added; on a project, group or the standalone header a fixed
         firmware is created after its name is confirmed, or an ESP-IDF build folder opens the
-        import dialog. Anything else is refused as a whole, with a dialog saying why."""
+        import dialog, and a PlatformIO env build folder or project folder opens the
+        PlatformIO import dialog. Anything else is refused as a whole, with a dialog saying
+        why."""
         if not isinstance(node, Node):
             return
         if node.firmware_id is not None and self.is_locked(node.firmware_id):
@@ -1076,7 +1084,10 @@ class EmbrWindow(FrameWindow):
             self._drop_on_firmware(node.firmware_id, files, build, problems)
             return
         if build is not None and not problems:
-            self._import_idf(build, (node.project_id, node.device))
+            if is_pio_folder(build):
+                self._import_pio(build, (node.project_id, node.device))
+            else:
+                self._import_idf(build, (node.project_id, node.device))
             return
         if problems or not files:
             dialogs.notice(self, tr("Nothing added"), problems or [tr("No files were dropped.")])
@@ -1277,18 +1288,26 @@ def _port_unavailable(message: str) -> bool:
 
 
 def sort_drop(paths: list[Path]) -> tuple[list[Path], Path | None, list[str]]:
-    """(.bin files to add, an ESP-IDF build folder, problems) of what was dropped. A build
-    folder counts only when dropped on its own; a project folder with a build folder below
-    it stands for that build folder."""
+    """(.bin files to add, a build folder, problems) of what was dropped. A build folder is
+    an ESP-IDF build folder or a PlatformIO env build folder (checked first: an espidf env
+    folder also has flasher_args.json); it counts only when dropped on its own. A project
+    folder stands for its build folder (PlatformIO: the first built env, else the project
+    folder itself, which the import dialog explains). is_pio_folder() tells the kinds
+    apart."""
     files: list[Path] = []
     builds: list[Path] = []
     problems: list[str] = []
     for path in paths:
         name = html.escape(path.name or str(path))
         if path.is_dir():
-            build = path if (path / "flasher_args.json").is_file() else build_dir_below(path)
+            build = _pio_folder(path)
             if build is None:
-                problems.append(tr(f"<b>{name}</b>: a folder without an ESP-IDF build in it"))
+                idf = (path / "flasher_args.json").is_file()
+                build = path if idf else build_dir_below(path)
+            if build is None:
+                problems.append(
+                    tr(f"<b>{name}</b>: a folder without an ESP-IDF or PlatformIO build in it")
+                )
             else:
                 builds.append(build)
         elif not path.exists():
@@ -1314,9 +1333,28 @@ def sort_drop(paths: list[Path]) -> tuple[list[Path], Path | None, list[str]]:
             else:
                 files.append(path)
     if builds and (files or len(builds) > 1 or problems):
-        problems.append(tr("Drop an ESP-IDF build folder on its own."))
+        problems.append(tr("Drop a build folder on its own."))
     build = builds[0] if len(builds) == 1 else None
     return files, build, problems
+
+
+def is_pio_folder(path: Path) -> bool:
+    """A PlatformIO env build folder (`.pio/build/<env>`) or a project folder with
+    platformio.ini; sort_drop() gives one of these or an ESP-IDF build folder."""
+    parent = path.parent
+    in_build = parent.name.lower() == "build" and parent.parent.name.lower() == ".pio"
+    return in_build or (path / PLATFORMIO_INI).is_file()
+
+
+def _pio_folder(path: Path) -> Path | None:
+    try:
+        return env_ref(path).build_dir
+    except EnvDirError:
+        pass
+    if not (path / PLATFORMIO_INI).is_file():
+        return None
+    built = built_envs_below(path)
+    return built[0].build_dir if built else path
 
 
 def _text(exc: Exception) -> str:
