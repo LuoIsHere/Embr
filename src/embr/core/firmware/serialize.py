@@ -37,6 +37,8 @@ def entry_to_doc(entry: Entry) -> Document:
     doc["address_source"] = entry.address_source.value
     if entry.chip is not None:
         doc["chip"] = entry.chip
+    if entry.chip_line:
+        doc["chip_line"] = entry.chip_line
     doc["enabled"] = entry.enabled
     if entry.note:
         doc["note"] = entry.note
@@ -69,6 +71,7 @@ def entry_from_doc(doc: Document) -> Entry:
         from_dump=doc_bool(doc, "from_dump"),
         auto_added=doc_bool(doc, "auto_added"),
         chip=doc_opt_str(doc, "chip"),
+        chip_line=doc_str(doc, "chip_line"),
     )
 
 

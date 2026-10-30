@@ -30,14 +30,20 @@ class PlanError(ValueError):
 
 
 def plan_entries(
-    context: AppContext, firmware: Firmware, *, write_files: bool, chip: str | None = None
+    context: AppContext,
+    firmware: Firmware,
+    *,
+    write_files: bool,
+    chip: str | None = None,
+    revision: int | None = None,
 ) -> list[PlanEntry]:
     """Enabled entries by address with file paths the worker can read: "path:" as is,
     "archive:" -> data/archive/<sha256>.bin, "blank:" -> temp/blank-<size>.bin (0xFF bytes;
     written only when `write_files`, the path is the same either way). Image header
-    fields (revision range) are read from the files. With `chip`, only the entries whose
-    MCU is `chip` (app.chips.entry_chip()), and PlanEntry.image_chip is the entry's MCU, so
-    the worker refuses a hand-chosen chip that differs from the board. Raises PlanError."""
+    fields (revision range) are read from the files. With `chip`, only the entries that fit
+    a board with `chip` and `revision` (app.chips.fits()), and PlanEntry.image_chip is the
+    entry's chip, so the worker refuses a hand-chosen chip that differs from the board.
+    Raises PlanError."""
     planned: list[PlanEntry] = []
     enabled = [e for e in firmware.entries if e.enabled]
     if chip is not None:
@@ -72,10 +78,12 @@ def assemble_plan(
     baud: int | None,
     *,
     chip: str | None = None,
+    revision: int | None = None,
     write_files: bool = True,
 ) -> FlashPlan:
-    """Plan for `firmware` on `port`, for `chip` (the identified chip) or, without it, the
-    firmware's only chip: the entries for that chip (app.chips.for_chip()), reset modes
+    """Plan for `firmware` on `port`, for `chip` and `revision` (the identified board) or,
+    without a chip, the firmware's only chip: the entries that fit (app.chips.for_chip();
+    without a revision, the firmware's only MCU's line), reset modes
     adjusted to the connection type, baud ignored on native USB, flash settings from the
     firmware, declared flash size from the firmware ("keep"/"detect": the bootloader image
     header of that chip), partitions_end from that chip's enabled partition table. PlanError
@@ -112,10 +120,11 @@ def preview_command(
     port: PortInfo | None,
     baud: int | None,
     chip: str | None = None,
+    revision: int | None = None,
 ) -> str:
     """Equivalent esptool command for the command bar; writes nothing. Without a port it
-    uses PREVIEW_PORT on a UART bridge. `chip` is the identified chip, as for
-    assemble_plan(). A firmware that cannot be planned gives "" (so a multi-chip firmware
+    uses PREVIEW_PORT on a UART bridge. `chip` and `revision` are the identified board's,
+    as for assemble_plan(). A firmware that cannot be planned gives "" (so a multi-chip firmware
     shows no command until a board is identified, design doc §12 item 13)."""
     if port is None:
         port = PortInfo(PREVIEW_PORT, None, None, None, "", ConnectionType.UART_BRIDGE, None)

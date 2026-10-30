@@ -17,7 +17,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from embr.app.chips import chip_choosable, entry_chip, firmware_chips, for_chip, image_header
+from embr.app.chips import (
+    chip_choosable,
+    entry_chip,
+    firmware_chips,
+    firmware_mcus,
+    for_chip,
+    image_header,
+)
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.tracking import Tracker
@@ -100,7 +107,10 @@ class FirmwareRow:
     for tracking firmware."""
     source: Source
     chips: tuple[str, ...]
-    """app.chips.firmware_chips(); more than one shows as "multi"."""
+    """app.chips.firmware_chips()."""
+    mcus: tuple[str, ...]
+    """Labels of app.chips.firmware_mcus() ("ESP32-P4 v3"); more than one shows as
+    "multi"."""
     flag: FirmwareFlag
     project_id: str | None
     device: str
@@ -362,9 +372,9 @@ class Library:
         )
 
     def mismatches(self, info: InfoEvent) -> dict[str, str]:
-        """Firmware that do not fit the identified chip, by id, with the reason: the chip is
-        not among the firmware's chips (app.chips.firmware_chips()), or an enabled entry for
-        that chip has an image revision range that excludes the chip's revision (same rule
+        """Firmware that do not fit the identified chip, by id, with the reason: no MCU of
+        the firmware fits the chip and its revision (app.chips.fits()), or an enabled entry
+        that fits has an image revision range that excludes the chip's revision (same rule
         as the flash check, checks.revision_incompatibility()). Tracking firmware are judged
         by the tracker's cached resolution (not resolved here; skipped when never resolved).
         Image headers are read at most once per file content. Firmware without any chip fit
@@ -502,10 +512,14 @@ class Library:
         self._save_override(firmware, entry_id)
         return entry
 
-    def set_entry_chip(self, firmware_id: str, entry_id: str, chip: str | None) -> Entry:
-        """Choose the MCU of an entry whose file names no chip (None clears the choice).
-        ValueError for an unknown chip, for an entry whose image header names a chip, and
-        for tracking firmware (app.chips.chip_choosable())."""
+    def set_entry_chip(
+        self, firmware_id: str, entry_id: str, chip: str | None, line: str = ""
+    ) -> Entry:
+        """Choose the MCU of an entry whose file names no chip (None clears the choice and
+        the line). `line` is the chip's revision line (chipinfo.revision_lines(); required
+        for chips that have lines, "" for others). ValueError for an unknown chip or line,
+        for an entry whose image header names a chip, and for tracking firmware
+        (app.chips.chip_choosable())."""
         firmware = self._ctx.firmware.get(firmware_id)
         entry = _own_entry(firmware, entry_id)
         if entry is None or not chip_choosable(self._ctx, firmware, entry):
@@ -519,9 +533,10 @@ class Library:
         self._save_entries(firmware)
         return entry
 
-    def fit_entries(self, firmware_id: str, chip: str) -> list[Entry]:
-        """After a board with `chip` was identified (design doc §12 item 13): untick and
-        save every enabled entry of a fixed firmware whose MCU is another chip or none.
+    def fit_entries(self, firmware_id: str, chip: str, revision: int | None = None) -> list[Entry]:
+        """After a board with `chip` and `revision` was identified (design doc §12 item 13):
+        untick and save every enabled entry of a fixed firmware that does not fit it
+        (app.chips.fits(): another chip, another revision line, or no MCU).
         Nothing changes when `chip` is not among the firmware's chips (the whole firmware is
         for other boards: the sidebar dims it, the checklist refuses), nor for tracking
         firmware. Returns the entries that were unticked."""
@@ -706,6 +721,7 @@ class Library:
             origin=_origin(firmware),
             source=firmware.source,
             chips=firmware_chips(self._ctx, firmware),
+            mcus=tuple(m.label for m in firmware_mcus(self._ctx, firmware)),
             flag=self._cached_flag(firmware),
             project_id=firmware.project_id,
             device=firmware.device,

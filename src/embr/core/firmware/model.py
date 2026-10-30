@@ -59,6 +59,9 @@ class Entry:
     """MCU chosen by hand for a file that names no chip in an image header (partition
     table, data images, non-ESP files); ignored when the header names one (design doc §12
     item 13). See app.chips for the MCU an entry is flashed to."""
+    chip_line: str = ""
+    """Revision line chosen with `chip` (chipinfo.REVISION_LINES, e.g. "v3" for ESP32-P4);
+    "" for chips without lines."""
 
 
 @dataclass

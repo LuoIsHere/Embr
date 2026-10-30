@@ -36,6 +36,31 @@ class ChipInfo:
     usb_serial_jtag: bool
 
 
+@dataclass(frozen=True)
+class RevisionLine:
+    """A range of chip revisions that needs its own build (design doc §12 item 13)."""
+
+    name: str
+    """Stored name, e.g. "v0-v1"."""
+    label: str
+    """Shown after the chip name: "v3", or v0 and v1 joined by an en dash."""
+    low: int
+    """Lowest revision, major * 100 + minor, inclusive."""
+    high: int
+    """Highest revision, inclusive."""
+
+
+REVISION_LINES: dict[str, tuple[RevisionLine, ...]] = {
+    # ESP-IDF builds ESP32-P4 either for v3.0 and later or, with
+    # CONFIG_ESP32P4_SELECTS_REV_LESS_V3, for the revisions before it
+    "esp32p4": (
+        RevisionLine("v0-v1", "v0\u2013v1", 0, 299),
+        RevisionLine("v3", "v3", 300, 0xFFFF),
+    ),
+}
+"""Chips whose revisions are split into lines; other chips have none."""
+
+
 FLASH_MODES: tuple[str, ...] = ("qio", "qout", "dio", "dout")
 """Flash modes in header encoding order (0..3)."""
 
@@ -96,6 +121,23 @@ def get_chip(name: str) -> ChipInfo:
 def chip_for_image_id(chip_id: int) -> ChipInfo | None:
     """Chip whose image header chip ID is `chip_id`, or None."""
     return next((c for c in supported_chips() if c.image_chip_id == chip_id), None)
+
+
+def revision_lines(chip: str) -> tuple[RevisionLine, ...]:
+    """The chip's revision lines; () for chips that have none."""
+    raise NotImplementedError
+
+
+def line_for_revision(chip: str, revision: int) -> str:
+    """Name of the line holding `revision` (major * 100 + minor), "" for chips without
+    lines."""
+    raise NotImplementedError
+
+
+def line_for_range(chip: str, low: int, high: int) -> str:
+    """Name of the line holding every revision from `low` to `high` (an image header's
+    range), "" when the range spans lines or the chip has none."""
+    raise NotImplementedError
 
 
 def chip_for_display_name(display_name: str) -> ChipInfo | None:
