@@ -3,6 +3,7 @@
 import argparse
 import io
 import os
+import subprocess
 import sys
 from importlib.resources import files
 
@@ -53,6 +54,7 @@ def run_gui() -> int:
     from embr.core.storage.lock import InstanceLock
     from embr.core.storage.paths import AppPaths, clear_temp, default_root, is_writable, prepare
 
+    restart = False
     paths = AppPaths(default_root())
     if not is_writable(paths.root):
         return _fatal(NOT_WRITABLE.format(root=paths.root))
@@ -65,10 +67,13 @@ def run_gui() -> int:
         prepare(paths)
         # Qt's temporary folder and every child process (the worker) follow these
         os.environ["TMP"] = os.environ["TEMP"] = str(paths.temp)
+        from PySide6.QtCore import QLocale
         from PySide6.QtWidgets import QApplication
 
         from embr.app.context import open_context
         from embr.core.storage.database import NewerSchemaError
+        from embr.i18n import effective, set_language
+        from embr.ui.adapters.settings import stored_language
         from embr.ui.window import EmbrWindow
 
         app = QApplication(sys.argv)
@@ -77,14 +82,30 @@ def run_gui() -> int:
             context = open_context(paths)
         except NewerSchemaError as exc:
             return _fatal(NEWER_DATA.format(version=__version__, detail=exc))
+        set_language(effective(stored_language(context.settings), QLocale.system().uiLanguages()))
         try:
             window = EmbrWindow(context)
             window.show()
-            return app.exec()
+            code = app.exec()
+            restart = window.restart_requested
+            return code
         finally:
             context.close()
     finally:
         lock.release()
+        if restart:
+            _relaunch()
+
+
+def _relaunch() -> None:
+    """Start Embr again (language change, design doc §12.5): the packaged exe, or this
+    interpreter with -m embr when running from source. Called after the instance lock is
+    released."""
+    command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "embr"]
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen([*command, *sys.argv[1:]], creationflags=flags, close_fds=True)
 
 
 def _fatal(message: str) -> int:

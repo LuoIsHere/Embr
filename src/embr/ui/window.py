@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import esptool
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QLocale, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QActionGroup,
     QCloseEvent,
@@ -18,6 +18,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QMenu,
     QSplitter,
@@ -68,12 +69,13 @@ from embr.core.flasher.protocol import (
 from embr.core.history import RecordResult
 from embr.core.logs import HEADER_PREFIX
 from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
-from embr.i18n import N_, tr
+from embr.i18n import N_, SETTINGS_KEY, Language, current, effective, tr
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
 from embr.ui.adapters.jobs import JobSignals, MainThreadDispatcher
 from embr.ui.adapters.ports import PortMonitor
 from embr.ui.adapters.scheme import SchemeWatcher
+from embr.ui.adapters.settings import stored_language
 from embr.ui.connection import ConnectionPanel, port_text
 from embr.ui.frame import FrameWindow
 from embr.ui.icons import app_icon
@@ -181,6 +183,10 @@ class EmbrWindow(FrameWindow):
         self._ports_pending = False
         self._scheme = SchemeWatcher(self)
         self._theme = ui_settings.load_choice(context.settings, "theme", THEMES, "system")
+        self._language = stored_language(context.settings)
+        self._language_dialog: dialogs.Dialog | None = None
+        self.restart_requested = False
+        """Set by the language dialog; main.run_gui() starts Embr again after closing."""
         self._palette = palette(self._dark())
 
         self.sidebar_panel = Sidebar()
@@ -753,6 +759,8 @@ class EmbrWindow(FrameWindow):
         self._job_firmware = None
         self._job_kind = None
         self.connection.set_running(False)
+        if self._language_dialog is not None:  # Restart was waiting for the job
+            self._language_dialog.ok.setEnabled(True)
         if self._ports_pending:
             self._apply_ports()
         if outcome.result == RecordResult.FAILED and _port_unavailable(outcome.message):
@@ -1135,10 +1143,17 @@ class EmbrWindow(FrameWindow):
         themes = menu.addMenu(tr("Theme"))
         group = QActionGroup(themes)
         for mode in THEMES:
-            action = themes.addAction(mode.capitalize(), lambda m=mode: self._set_theme(m))
+            action = themes.addAction(tr(THEME_LABELS[mode]), lambda m=mode: self._set_theme(m))
             action.setCheckable(True)
             action.setChecked(mode == self._theme)
             group.addAction(action)
+        languages = menu.addMenu(tr("Language"))
+        language_group = QActionGroup(languages)
+        for choice, text in LANGUAGE_LABELS:
+            action = languages.addAction(tr(text), lambda c=choice: self._set_language(c))
+            action.setCheckable(True)
+            action.setChecked(choice == self._language)
+            language_group.addAction(action)
         menu.addSeparator()
         menu.addAction(tr("About Embr"), lambda: dialogs.about(self, esptool.__version__))
         button = self.topbar.menu_button
@@ -1168,6 +1183,34 @@ class EmbrWindow(FrameWindow):
         self._palette = palette(self._dark())
         self._apply_palette()
         self.changed()
+
+    def _set_language(self, choice: Language) -> None:
+        """Store the choice; the interface changes after a restart (design doc §12.5). The
+        dialog offers Restart, disabled while a job runs and enabled when it ends."""
+        if choice == self._language:
+            return
+        self._language = choice
+        settings = self._context.settings
+        ui_settings.save_choice(settings, SETTINGS_KEY, choice.value)
+        settings.save()
+        if effective(choice, QLocale.system().uiLanguages()) == current():
+            return
+        dialog = dialogs.Dialog(self, tr("Language"), tr("Restart"), danger=False)
+        dialog.cancel.setText(tr("OK"))
+        dialog.text(tr("The new language is used after Embr restarts."))
+        busy = dialog.text(
+            tr("A job is running: the choice is saved; Restart becomes available when it ends.")
+        )
+        busy.setVisible(self._ops.busy)
+        dialog.ok.setEnabled(not self._ops.busy)
+        self._language_dialog = dialog
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._language_dialog = None
+        if accepted and not self._ops.busy:
+            self.restart_requested = True
+            self.close()
 
     def _apply_palette(self) -> None:
         app = QApplication.instance()
@@ -1215,6 +1258,13 @@ def _now() -> str:
 
 THEMES = ("system", "light", "dark")
 """Theme menu choices; "system" follows Windows."""
+THEME_LABELS = {"system": N_("System"), "light": N_("Light"), "dark": N_("Dark")}
+LANGUAGE_LABELS = (
+    (Language.SYSTEM, N_("System")),
+    (Language.ENGLISH, "English"),
+    (Language.ZH_CN, "简体中文"),
+)
+"""Language menu (design doc §12 item 18); each language is named in itself."""
 
 SETTLE_RECHECK_MS = 2500
 """Look again after a build was seen settling (app.tracking.SETTLE_SECONDS plus margin)."""

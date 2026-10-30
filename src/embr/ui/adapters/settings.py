@@ -5,6 +5,7 @@ import base64
 from PySide6.QtCore import QByteArray
 
 from embr.core.storage.settings import Settings
+from embr.i18n import SETTINGS_KEY, Language
 
 UI_SECTION = "ui"
 
@@ -58,3 +59,9 @@ def load_choice(settings: Settings, key: str, choices: tuple[str, ...], default:
     """The stored value when it is one of `choices`, else `default`."""
     text = settings.get(UI_SECTION, key)
     return text if text in choices else default
+
+
+def stored_language(settings: Settings) -> Language:
+    """settings.ini [ui] language; SYSTEM when absent or unknown."""
+    text = settings.get(UI_SECTION, SETTINGS_KEY)
+    return Language(text) if text in {m.value for m in Language} else Language.SYSTEM
