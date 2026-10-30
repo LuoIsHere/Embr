@@ -55,6 +55,7 @@ from embr.core.firmware.image_sniff import (
     parse_partition_table,
 )
 from embr.core.firmware.import_idf import IdfBuild, default_firmware_name, read_build
+from embr.core.firmware.import_pio import EnvRef, PioBuild
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import (
     AddressSource,
@@ -73,6 +74,9 @@ from embr.core.project import Project, ProjectDefaults
 from embr.core.storage.ids import unique_name
 
 UNTITLED = "untitled"
+PIO_SECTION = "pio"
+FRAMEWORK_PKG_KEY = "framework_pkg"
+"""settings.ini [pio] framework_pkg: the global manual framework package path."""
 """Name of a firmware created without one; replaced by the first added file's name."""
 
 
@@ -115,6 +119,33 @@ class FirmwareRow:
     project_id: str | None
     device: str
     notes: str
+
+
+@dataclass(frozen=True)
+class PioEnvChoice:
+    """One env of the project in the PIO import dialog."""
+
+    name: str
+    built: bool
+    """import_pio.is_built(); unbuilt envs are shown greyed and cannot be chosen."""
+    tracked_by: str | None
+    """Id of the firmware already following this project + env (cannot be chosen)."""
+    board: str | None
+    """From `pio project config`; None when unknown."""
+    build: PioBuild | None
+    """read_env() of a built env; None when unbuilt or unreadable."""
+    problem: str | None
+    """Why a built env could not be read."""
+
+
+@dataclass(frozen=True)
+class PioPreview:
+    picked: EnvRef
+    """The env whose build folder the user picked (checked by default)."""
+    envs: tuple[PioEnvChoice, ...]
+    """Every env of platformio.ini, in file order."""
+    config_error: str | None
+    """Why `pio project config` gave nothing (boards are then unknown); None on success."""
 
 
 @dataclass(frozen=True)
@@ -370,6 +401,50 @@ class Library:
             ),
             None,
         )
+
+    def preview_pio(self, build_dir: Path) -> PioPreview:
+        """What importing the env folder `build_dir` (`<project>/.pio/build/<env>`) and its
+        sibling envs would bring, for the import dialog. Blocking: runs
+        PioConfigs.load() (about two seconds), so call it off the UI thread. EnvDirError
+        propagates; pio problems go into config_error, env read errors into problem."""
+        raise NotImplementedError
+
+    def import_pio(
+        self,
+        project_root: Path,
+        envs: Sequence[str],
+        *,
+        project_id: str | None = None,
+        device: str = "",
+    ) -> list[Firmware]:
+        """New PIO_BUILD firmware, one per env in `envs` (design doc §12.5): named after the
+        env (made unique), build_ref = (project root, env), all in the same project and group
+        (a project copies its defaults: reset modes and erase_all, as PIO builds give no reset
+        modes, design doc §3.1), resolved at once with the first
+        resolution accepted. All or nothing: AlreadyTrackedError when tracking_firmware_for_env()
+        finds one of them followed already, PlanError (naming the env) when one cannot be
+        resolved (unbuilt, incomplete, target switched); nothing is created then. ValueError
+        for an empty `envs`."""
+        raise NotImplementedError
+
+    def tracking_firmware_for_env(self, project_root: Path, env: str) -> Firmware | None:
+        """The PIO tracking firmware following `env` of `project_root`, or None. Roots are
+        compared as tracking_firmware_for() compares build directories; env names exactly."""
+        raise NotImplementedError
+
+    def framework_pkg_default(self) -> str:
+        """settings.ini [pio] framework_pkg; "" means auto-detect."""
+        raise NotImplementedError
+
+    def set_framework_pkg_default(self, path: str) -> None:
+        """Store (stripped; "" removes the key) and re-check every PIO firmware that has no
+        path of its own."""
+        raise NotImplementedError
+
+    def set_framework_pkg(self, firmware_id: str, path: str) -> Firmware:
+        """The firmware's own framework package path (stripped; "" falls back to the global
+        default). Saved and re-checked. ValueError for a firmware that is not PIO_BUILD."""
+        raise NotImplementedError
 
     def mismatches(self, info: InfoEvent) -> dict[str, str]:
         """Firmware that do not fit the identified chip, by id, with the reason: no MCU of

@@ -1,6 +1,6 @@
 """Resolve tracking firmware against its build output (design doc §3.4).
 
-Source-agnostic: an importer (import_idf; import_pio later) describes the build as a
+Source-agnostic: an importer (import_idf, import_pio) describes the build as a
 DerivedBuild. resolve() classifies its files, applies the user's entry_overrides,
 cross-checks chips and ESP-IDF versions, and compares the result with
 last_resolved. accept() stores a resolution as the new last_resolved.
@@ -12,7 +12,7 @@ import dataclasses
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -109,11 +109,16 @@ class EntryMark(StrEnum):
 @dataclass(frozen=True)
 class DerivedFile:
     address: int
-    path: Path
-    """Absolute."""
+    path: Path | None
+    """Absolute; None for a blank (0xFF) entry of `blank_size` bytes."""
     expected: EntryKind | None = None
     """Kind the build output says the file is; a file that does not parse as that kind
     (e.g. half written) makes the build INCOMPLETE."""
+    note: str = ""
+    """Importer remark shown with the entry (Resolution.entry_notes)."""
+    blank_size: int = 0
+    """With path None: an OTADATA entry named "otadata (blank)", file "blank:", content
+    blank_size bytes of 0xFF (PIO Arduino without boot_app0.bin, design doc §5)."""
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,11 @@ class DerivedBuild:
     stub: bool
     inputs: tuple[Path, ...]
     """Files whose stat decides whether the build must be resolved again."""
+    notes: tuple[str, ...] = ()
+    """Importer remarks about the whole build (Resolution.build_notes)."""
+    problems: tuple[str, ...] = ()
+    """Importer reasons the build cannot be flashed that are not about a file (an invalid
+    manual framework package path): the resolution is INCOMPLETE with these problems."""
 
 
 @dataclass(frozen=True)
@@ -158,6 +168,10 @@ class Resolution:
     revision range, and the time)."""
     idf_version: str | None
     configured_target: str | None
+    entry_notes: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
+    """Entry id -> DerivedFile.note, for files with a note."""
+    build_notes: tuple[str, ...] = ()
+    """DerivedBuild.notes."""
 
 
 def entry_key(kind: EntryKind, file_name: str) -> str:
@@ -179,6 +193,9 @@ def resolve(
     3. configured_target set and different from the build's chip -> TARGET_SWITCHED
     4. no last_resolved -> OK (first resolve; the importer accepts it)
     5. only CONTENT changes -> UPDATED; any other change -> NEEDS_CONFIRMATION; else OK
+    build.problems make the state INCOMPLETE with those problems (step 1). Blank files
+    (DerivedFile.blank_size) become "otadata (blank)" entries that are never missing.
+    DerivedFile.note and build.notes are passed on as entry_notes and build_notes.
     A derived entry whose override sets a manual address while the derived address changed
     is NEEDS_CONFIRMATION (manual address kept). User entries are checked by name, path and
     hash like fixed entries; a changed or missing user entry is NEEDS_CONFIRMATION or
@@ -192,7 +209,7 @@ def resolve(
     # the partition table first: SPIFFS images are only recognised through it
     table_file = next((f for f in build.files if f.expected == EntryKind.PARTITION_TABLE), None)
     table = None
-    if table_file is not None:
+    if table_file is not None and table_file.path is not None:
         with contextlib.suppress(OSError):
             table = parse_partition_table(cache.head(table_file.path, PARTITION_TABLE_MAX_SIZE))
 
@@ -364,6 +381,8 @@ def _classify(
     table: PartitionTable | None,
     last_kinds: Mapping[str, str],
 ) -> _Derived:
+    if file.path is None:
+        raise NotImplementedError
     name = file.path.name
     try:
         sha = cache.sha256(file.path)

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
+from embr.app.pio import PioConfigs
 from embr.core.firmware.filecache import FileCache, Fingerprint, fingerprint
 from embr.core.firmware.files import FileState, confirm_entry
 from embr.core.firmware.import_idf import (
@@ -64,6 +65,10 @@ class TrackStatus:
     None once mark_seen() was called or when nothing was followed."""
     idf_version: str | None = None
     configured_target: str | None = None
+    entry_notes: Mapping[str, str] = dataclasses.field(default_factory=lambda: dict[str, str]())
+    """Resolution.entry_notes (e.g. boot_app0.bin moved to the otadata partition)."""
+    build_notes: tuple[str, ...] = ()
+    """Resolution.build_notes (e.g. idedata.json not used and why)."""
 
 
 class BuildChangedError(PlanError):
@@ -83,8 +88,12 @@ class Tracker:
         *,
         cache: FileCache | None = None,
         clock: Callable[[], datetime.datetime] = datetime.datetime.now,
+        pio: PioConfigs | None = None,
     ) -> None:
+        """`pio` gives PIO firmware their configured target; None creates one without an
+        on_ready callback."""
         self._ctx = context
+        self._pio = pio or PioConfigs()
         self._cache = cache or FileCache()
         self._clock = clock
         self._status: dict[str, TrackStatus] = {}
@@ -142,6 +151,10 @@ class Tracker:
         self._inputs[firmware_id] = inputs
         self._prints[firmware_id] = print_
         return status
+
+    @property
+    def pio(self) -> PioConfigs:
+        return self._pio
 
     def cached(self, firmware_id: str) -> TrackStatus | None:
         """The last status, without any file access; None before the first check."""
@@ -221,6 +234,8 @@ class Tracker:
     ) -> tuple[TrackStatus, tuple[Path, ...], Resolution | None]:
         if firmware.source == Source.IDF_BUILD:
             resolution, inputs = self._resolve_idf(firmware, now)
+        elif firmware.source == Source.PIO_BUILD:
+            resolution, inputs = self._resolve_pio(firmware, now)
         elif firmware.source.tracking:
             resolution = missing(firmware, "This firmware type cannot be resolved here")
             inputs = ()
@@ -274,6 +289,17 @@ class Tracker:
             now=now.isoformat(timespec="seconds"),
         )
         return resolution, build.inputs
+
+    def _resolve_pio(
+        self, firmware: Firmware, now: datetime.datetime
+    ) -> tuple[Resolution, tuple[Path, ...]]:
+        """import_pio.read_env() of build_ref (project root + env) with the env's config and
+        configured target from the PioConfigs cache and the manual framework package
+        (firmware.framework_pkg, else the global default, Library.framework_pkg_default()),
+        then core tracking.resolve(). Build folder gone -> MISSING; env no longer in
+        platformio.ini or an unreadable build -> INCOMPLETE. Inputs always include
+        platformio.ini, so editing it re-resolves."""
+        raise NotImplementedError
 
     def _check_fixed(
         self, firmware: Firmware, now: datetime.datetime
