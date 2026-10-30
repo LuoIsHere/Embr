@@ -230,6 +230,7 @@ QLineEdit[kind="cell"] {{ background: transparent; border: 1px solid transparent
 QLineEdit[kind="cell"]:hover, QLineEdit[kind="cell"]:focus {{ border-color: {p.line};
   background: {p.panel_2}; }}
 QLineEdit[kind="cell"][mono="1"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
+QComboBox[kind="cell"] {{ padding: 0px 3px; min-height: 22px; }}
 #tabline {{ border-bottom: 1px solid {p.line_2}; }}
 QLineEdit[kind="mono"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
 QComboBox:disabled {{ color: {p.fg_3}; background: {p.panel_2}; }}

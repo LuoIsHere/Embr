@@ -206,8 +206,8 @@ class Banner(QFrame):
 
 NOTE_MIN_WIDTH = 120
 """Entry table: the Note column never gets narrower than this."""
-MCU_WIDTH = 118
-"""Entry table: the MCU column (fits "auto (ESP32-C61)")."""
+MCU_WIDEST = "auto (ESP32-C61)"
+"""Entry table: the longest MCU choice; the MCU column is sized to show it whole."""
 _GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80))
 """Entry table columns that shrink, in this order and down to these widths, when the
 window is too narrow for all of them (0: the column is hidden)."""
@@ -245,7 +245,6 @@ class EntriesTab(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)  # sized by _fit_columns()
         self.table.setColumnWidth(0, 28)
         self.table.setColumnWidth(1, 104)
-        self.table.setColumnWidth(2, MCU_WIDTH)
         self.table.itemChanged.connect(self._toggled)
         self.add_button = button(f"{PLUS} Add entry (or drop bin files here)", "addrow")
         self.add_menu = QMenu(self)
@@ -320,7 +319,8 @@ class EntriesTab(QWidget):
         if self._firmware is None:
             return
         header = self.table.horizontalHeader()
-        widths = {0: 28, 1: 104, 2: MCU_WIDTH, 3: self._name_width()}
+        mcu = self.table.fontMetrics().horizontalAdvance(MCU_WIDEST) + 34  # frame, arrow
+        widths = {0: 28, 1: 104, 2: mcu, 3: self._name_width()}
         for column in (4, 5, 6):
             content = self.table.sizeHintForColumn(column)
             widths[column] = max(header.sectionSizeHint(column), content)
@@ -435,6 +435,7 @@ class EntriesTab(QWidget):
             shown = label(chip_name(mcu) if mcu else "—", tone=dim or "2")
             return _cell(shown)
         combo = QComboBox()
+        combo.setProperty("kind", "cell")
         auto = self._chips[0] if len(self._chips) == 1 and not entry.chip else None
         combo.addItem(f"auto ({chip_name(auto)})" if auto else "—", "")
         for chip in chipinfo.supported_chips():
@@ -449,7 +450,7 @@ class EntriesTab(QWidget):
             self._set_chip(e, w)
 
         combo.activated.connect(chosen)
-        return _cell(combo)
+        return _cell(combo, left=0)  # its text starts where the read-only names start
 
     def _name_cell(self, entry: Entry, mark: EntryMark | None, dim: str | None) -> QWidget:
         widget = QWidget()
@@ -1200,10 +1201,10 @@ def _left(widget: QWidget) -> QWidget:
     return box
 
 
-def _cell(widget: QWidget) -> QWidget:
+def _cell(widget: QWidget, left: int = 4) -> QWidget:
     box = QWidget()
     row = QHBoxLayout(box)
-    row.setContentsMargins(4, 0, 4, 0)
+    row.setContentsMargins(left, 0, 4, 0)
     row.addWidget(widget)
     return box
 
