@@ -29,6 +29,7 @@ from embr.app.flashplan import PlanError
 from embr.app.library import Library, PioPreview
 from embr.app.merging import MergeOptions, Merger
 from embr.app.packages import ExportCheck, default_group, default_package_name
+from embr.build import build_time
 from embr.core.firmware.import_idf import (
     IdfBuild,
     IdfBuildError,
@@ -48,6 +49,9 @@ IMPORT_LABEL = N_("Import into Embr as a firmware")
 """Read flash and merge: keep the result in the firmware list too (checked by default)."""
 REPOSITORY = "https://github.com/LuoIsHere/Embr"
 RELEASES = "https://github.com/LuoIsHere/Embr/releases"
+COPYRIGHT = "Copyright © 2026 @LuoIsHere"
+DEVELOPMENT_BUILD = N_("development build")
+"""About's build time when running from source (design doc §12 item 22)."""
 
 
 class Dialog(QDialog):
@@ -340,6 +344,9 @@ def about(parent: QWidget, esptool_version: str) -> None:
     dialog = Dialog(parent, tr("About Embr"), tr("Close"), danger=False)
     dialog.cancel.hide()
     dialog.text(tr(f"Embr {__version__} · built-in esptool {esptool_version} · GPL-3.0-or-later"))
+    dialog.text(COPYRIGHT)
+    when = build_time() or tr(DEVELOPMENT_BUILD)
+    dialog.text(tr(f"Build time: {when}"))
     for caption, url in ((N_("Repository"), REPOSITORY), (N_("Releases"), RELEASES)):
         link = QLabel(f'{tr(caption)}: <a href="{url}">{url.removeprefix("https://")}</a>')
         link.setTextFormat(Qt.TextFormat.RichText)

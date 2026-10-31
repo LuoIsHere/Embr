@@ -1,8 +1,19 @@
 # PyInstaller spec: one onedir build, one GUI-subsystem exe; `Embr.exe --worker` runs the worker.
 # Build with: uv run pyinstaller Embr.spec --noconfirm
+import datetime
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
+# the build time shown in About (embr.build); a source checkout has no build.txt
+build_file = Path("build/embr_build/build.txt")
+build_file.parent.mkdir(parents=True, exist_ok=True)
+build_file.write_text(
+    datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M UTC") + "\n", encoding="utf-8"
+)
+
 datas = [
+    (str(build_file), "embr/resources"),
     ("src/embr/resources/esptool.cfg", "embr/resources"),
     ("src/embr/resources/logo/*.svg", "embr/resources/logo"),
     ("src/embr/resources/fonts/*", "embr/resources/fonts"),  # HarmonyOS Sans + license

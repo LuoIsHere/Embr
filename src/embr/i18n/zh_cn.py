@@ -227,6 +227,8 @@ TEXT: dict[str, str] = {
     "Embr {0} · built-in esptool {1} · GPL-3.0-or-later": (
         "Embr {0} · 内置 esptool {1} · GPL-3.0-or-later"
     ),
+    "Build time: {0}": "构建时间：{0}",
+    "development build": "开发构建",
     "Repository": "代码仓库",
     "Releases": "发布页面",
     "Interface font: HarmonyOS Sans (Copyright 2021 Huawei Device Co., Ltd.), used under the HarmonyOS Sans Fonts License Agreement.": (
