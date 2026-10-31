@@ -271,10 +271,10 @@ def test_attachments_by_partition_and_by_address(
     kit.pump(100)
     if "assets_too_big.bin" in ui.entry_names(window):
         layout = [c for c in ui.checks(window) if kit.same_text(c.title, "Entry layout")]
-        if not any(
-            (c.state == "REFUSE" and "does not fit" in c.detail) or tr("does not fit") in c.detail
-            for c in layout
-        ):
+        too_big = ui.plain(
+            tr("assets_too_big.bin (0x7000 bytes) does not fit partition 'assets' (0x6000)")
+        )
+        if not any(c.state == "REFUSE" and too_big in c.detail for c in layout):
             problems.append(f"too big for 'assets' is not refused: {ui.checks(window)}")
         if window.connection.flash.isEnabled():
             problems.append("Flash enabled with an attachment larger than its partition")

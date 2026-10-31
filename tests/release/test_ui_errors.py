@@ -13,7 +13,7 @@ import release_kit as kit
 import ui_kit as ui
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit
+from PySide6.QtWidgets import QAbstractButton, QApplication, QLineEdit
 from ui_kit import watchdog  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 from embr.i18n import Language, tr
@@ -211,6 +211,37 @@ def test_damaged_and_foreign_files_as_entries(
     ui.no_problems(problems)
 
 
+def _editable(edit: QLineEdit) -> bool:
+    """A field the user can type into (enabled and not read-only)."""
+    return edit.isEnabled() and not edit.isReadOnly()
+
+
+def _move_out(driver: kit.DialogDriver) -> None:
+    ui.pick(driver, "Place in", ui.STANDALONE)
+    driver.ok()
+
+
+def _try_edit(
+    problems: list[str],
+    what: str,
+    answer: Callable[[kit.DialogDriver], None],
+    opener: Callable[[], None],
+) -> None:
+    """Open an edit of read-only data: a "Read only" notice is closed; any other dialog
+    (the edit itself) is answered with `answer` and noted (the files are compared at the
+    end, and an exception fails the test)."""
+
+    def handler(driver: kit.DialogDriver) -> None:
+        if kit.same_text(driver.title, "Read only"):
+            driver.ok()
+        else:
+            problems.append(f"{what}: opened {driver.title!r} instead of refusing")
+            answer(driver)
+
+    with kit.expect_dialog(handler, timeout=5):
+        opener()
+
+
 def _newer(path: Path) -> bytes:
     text = path.read_text(encoding="utf-8")
     assert text.startswith("schema_version = 1\n"), text[:40]
@@ -263,14 +294,22 @@ def test_newer_project_and_firmware_are_read_only(
     if window.connection.erase_all.isEnabled():
         problems.append("erase the whole flash check box enabled")
     ui.open_tab(window, "Parameters")
-    if not ui.param_edit(window, "Name").isReadOnly():
+    if _editable(ui.param_edit(window, "Name")):
         problems.append("Name editable on the Parameters tab")
     ui.open_tab(window, "Entries")
-    with ui.collect(problems, "Rename… of a read-only firmware"):
-        with kit.expect_dialog(
-            ui.type_and_ok("Name", "Renamed"), title="Rename firmware", timeout=5
-        ):
-            ui.firmware_menu(window, "Rename…\tF2")
+    # an edit is refused either by a disabled control or by a "Read only" notice; if an
+    # edit dialog opens instead, it is answered and the file must still be unchanged
+    for item, edit in (
+        ("Rename…	F2", ui.type_and_ok("Name", "Renamed")),
+        ("Move to project…", _move_out),
+        ("Delete…", ui.ok),
+    ):
+        seen: list[ui.MenuSeen] = []
+        ui.firmware_menu(window, seen=seen)
+        if not seen[0].enabled.get(ui.plain(tr(item)), True):
+            continue  # refused by a disabled menu item
+        with ui.collect(problems, f"{item} of a read-only firmware"):
+            _try_edit(problems, item, edit, lambda i=item: ui.firmware_menu(window, i))
         kit.pump(200)
     ui.click_row(window, "Current")
     export: list[str] = []
@@ -292,23 +331,31 @@ def test_newer_project_and_firmware_are_read_only(
 
     ui.click_row(window, "Future", "project")
     shown = " ".join(ui.header_texts(window) + kit.all_texts(window.project_view))
-    if tr("created by a newer Embr") not in shown:
+    hints = (
+        tr("created by a newer Embr"),
+        ui.plain(tr("This project was created by a newer version of Embr and is read-only here.")),
+    )
+    if not any(h in shown for h in hints):
         problems.append("the project overview does not say the project was created by a newer Embr")
     name = ui.overview_name(window)
-    if not name.isReadOnly():
+    if _editable(name):
         problems.append("the project name is editable")
         with ui.collect(problems, "renaming the newer project"):
             kit.type_text(name, "Future renamed", finish="return")
             kit.pump(200)
     with ui.collect(problems, "adding a group to the newer project"):
         edit = ui.new_group_edit(window)
-        if edit.isEnabled() and not edit.isReadOnly():
+        if _editable(edit):
             problems.append("groups can be added to the newer project")
             ui.add_group(window, "H")
+    delete = kit.find_all(window.project_view, QAbstractButton, "Delete project…")
+    if delete and delete[0].isEnabled():
+        with ui.collect(problems, "Delete project… of the newer project"):
+            _try_edit(problems, "Delete project…", ui.ok, lambda: kit.click(delete[0]))
     app.close()
     if firmware_file.read_bytes() != firmware_bytes:
         problems.append("the newer firmware file was rewritten")
     if project_file.read_bytes() != project_bytes:
         problems.append("the newer project file was rewritten")
     ui.no_problems(problems)
-    _ = (re, QLineEdit)
+    _ = re
