@@ -116,13 +116,11 @@ def test_program_folder_not_writable_shows_message_and_exits(
     before = kit.snapshot(program)
     listing = kit.user_folder_listing()
     with kit.deny_access(root), _launch(program, sentinels, tmp_path) as process:
-        message = process.wait_any_window()
-        assert message is not None, f"exited without a message: {process.stderr()}"
-        assert message.class_name != kit.MAIN_CLASS
-        assert _intro(embr_main.NOT_WRITABLE, language) in message.text, message.texts
-        assert str(root) in message.text
         ok = kit.translated(embr_main.OK, language)
-        assert ok in message.buttons, message.buttons
+        intro = _intro(embr_main.NOT_WRITABLE, language)
+        message = process.wait_message(intro, [ok])
+        assert message is not None, f"exited without a message: {process.stderr()}"
+        assert str(root) in message.text
         assert process.press(ok)
         assert process.wait() == 1
     assert kit.snapshot(program) == before
@@ -141,18 +139,18 @@ def test_second_instance_shows_message_and_first_keeps_running(
     with _launch(program, sentinels, tmp_path, "first") as first:
         assert first.wait_main_window() is not None, first.stderr()
         with _launch(program, sentinels, tmp_path, "second") as second:
-            message = second.wait_any_window()
-            assert message is not None, f"second exited without a message: {second.stderr()}"
-            assert message.class_name != kit.MAIN_CLASS, "a second working window opened"
-            assert _intro(embr_main.ALREADY_RUNNING, language) in message.text, message.texts
-            assert str(root) in message.text
-            assert [w.class_name for w in second.windows()] == [message.class_name]
             ok = kit.translated(embr_main.OK, language)
-            assert ok in message.buttons, message.buttons
+            intro = _intro(embr_main.ALREADY_RUNNING, language)
+            message = second.wait_message(intro, [ok])
+            assert message is not None, f"second exited without a message: {second.stderr()}"
+            assert str(root) in message.text
+            assert not any(w.class_name == kit.MAIN_CLASS for w in second.windows()), (
+                "a second working window opened"
+            )
             assert second.press(ok)
             assert second.wait() == 1
         assert first.running()
-        assert [w.class_name for w in first.windows()] == [kit.MAIN_CLASS]
+        assert first.wait_main_window(30) is not None
         assert (root / "temp" / "embr.lock").is_file()
         assert first.close() == 0, first.stderr()
     assert "Traceback" not in first.stderr() + second.stderr()

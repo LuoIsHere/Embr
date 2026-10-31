@@ -62,6 +62,7 @@ Overview of the API (details in each docstring):
 
 from __future__ import annotations
 
+import base64
 import configparser
 import contextlib
 import ctypes
@@ -1887,11 +1888,13 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $A = [System.Windows.Automation.AutomationElement]
 $pids = @(%(pids)s)
+$deep = $%(deep)s
 foreach ($p in $pids) {
   $cond = New-Object System.Windows.Automation.PropertyCondition($A::ProcessIdProperty, [int]$p)
   $wins = $A::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
   foreach ($w in $wins) {
     "W`t" + $w.Current.NativeWindowHandle + "`t" + $w.Current.ClassName + "`t" + $w.Current.Name
+    if (-not $deep -and $w.Current.ClassName -eq "EmbrWindow") { continue }
     $all = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants,
       [System.Windows.Automation.Condition]::TrueCondition)
     foreach ($e in $all) {
@@ -1910,19 +1913,22 @@ foreach ($p in $pids) {
 """
 
 _UIA_PRESS = r"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $A = [System.Windows.Automation.AutomationElement]
 $pids = @(%(pids)s)
+$deep = $%(deep)s
 foreach ($p in $pids) {
   $cond = New-Object System.Windows.Automation.PropertyCondition($A::ProcessIdProperty, [int]$p)
   $wins = $A::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
   foreach ($w in $wins) {
+    if (-not $deep -and $w.Current.ClassName -eq "EmbrWindow") { continue }
     $all = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants,
       [System.Windows.Automation.Condition]::TrueCondition)
     foreach ($e in $all) {
       if ($e.Current.ControlType.ProgrammaticName -eq "ControlType.Button" -and
-          $e.Current.Name -eq "%(name)s") {
+          $e.Current.Name -eq '%(name)s') {
         $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         "pressed"
         exit 0
@@ -1933,12 +1939,15 @@ foreach ($p in $pids) {
 """
 
 
-def _powershell(script: str, timeout: float = 30) -> str:
+def _powershell(script: str, timeout: float = 45) -> str:
     """Run a UI Automation script; "" when it does not finish in time (a UIA query can
-    stall now and then; callers poll again)."""
+    stall now and then; callers poll again). The script goes in as -EncodedCommand
+    (UTF-16LE), so Chinese texts in it survive any console code page; the scripts set
+    their output to UTF-8."""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     try:
         done = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1951,9 +1960,12 @@ def _powershell(script: str, timeout: float = 30) -> str:
     return done.stdout
 
 
-def uia_windows(pids: set[int]) -> list[UiaWindow]:
-    """Top-level windows of `pids` with their texts and buttons (UI Automation)."""
-    output = _powershell(_UIA_DUMP % {"pids": ",".join(str(p) for p in sorted(pids))})
+def uia_windows(pids: set[int], *, deep: bool = False) -> list[UiaWindow]:
+    """Top-level windows of `pids` with their texts and buttons (UI Automation). The main
+    window (EmbrWindow, hundreds of elements; walking it can take long on a busy machine)
+    is listed without its contents unless `deep`; its own dialogs are inside it."""
+    pids_text = ",".join(str(p) for p in sorted(pids))
+    output = _powershell(_UIA_DUMP % {"pids": pids_text, "deep": str(deep).lower()})
     windows: list[UiaWindow] = []
     for line in output.splitlines():
         parts = line.split("\t")
@@ -1967,9 +1979,12 @@ def uia_windows(pids: set[int]) -> list[UiaWindow]:
     return windows
 
 
-def uia_press(pids: set[int], name: str) -> bool:
-    """Invoke the button named `name` in a window of `pids`."""
-    script = _UIA_PRESS % {"pids": ",".join(str(p) for p in sorted(pids)), "name": name}
+def uia_press(pids: set[int], name: str, *, in_main: bool = False) -> bool:
+    """Invoke the button named `name` in a window of `pids` (inside the main window only
+    with `in_main`, e.g. a dialog of the main window)."""
+    quoted = name.replace("'", "''")  # a single-quoted PowerShell string
+    pids_text = ",".join(str(p) for p in sorted(pids))
+    script = _UIA_PRESS % {"pids": pids_text, "name": quoted, "deep": str(in_main).lower()}
     return "pressed" in _powershell(script)
 
 
@@ -2030,11 +2045,13 @@ class EmbrProcess:
     def running(self) -> bool:
         return self.popen.poll() is None
 
-    def windows(self) -> list[UiaWindow]:
-        """Top-level windows of our verified processes whose accessibility is ready."""
+    def windows(self, *, deep: bool = False) -> list[UiaWindow]:
+        """Top-level windows of our verified processes whose accessibility is ready (the
+        main window's contents only with `deep`, see uia_windows())."""
         if not self.running():
             return []
-        return [w for w in uia_windows(self.pids()) if not NOT_READY.match(w.class_name)]
+        found = uia_windows(self.pids(), deep=deep)
+        return [w for w in found if not NOT_READY.match(w.class_name)]
 
     def native_window(self, title: str, timeout: float = 30.0) -> NativeWindow:
         """A visible top-level window titled `title` (e.g. a Windows file dialog) of our
@@ -2076,9 +2093,43 @@ class EmbrProcess:
     def wait_any_window(self, timeout: float = 60.0) -> UiaWindow | None:
         return self.wait_for(lambda w: True, timeout)
 
-    def press(self, button: str) -> bool:
-        pids = self._current_pids()
-        return bool(pids) and uia_press(pids, button)
+    def wait_message(
+        self, contains: str, buttons: Sequence[str] = (), timeout: float = 60.0
+    ) -> UiaWindow | None:
+        """A message box (a window other than the main window) whose text contains
+        `contains` and which shows every one of `buttons`, waited for until its texts are
+        there (UI Automation fills them in a moment after the window appears, and a
+        window that is closing may still be listed). None when the process ended first."""
+
+        def wanted(window: UiaWindow) -> bool:
+            if window.class_name == MAIN_CLASS or contains not in window.text:
+                return False
+            return all(b in window.buttons for b in buttons)
+
+        deadline = time.monotonic() + timeout
+        seen: list[UiaWindow] = []
+        while time.monotonic() < deadline:
+            if not self.running():
+                return None
+            seen = self.windows()
+            found = next((w for w in seen if wanted(w)), None)
+            if found is not None:
+                return found
+            time.sleep(0.3)
+        self.kill()
+        shown = [(w.class_name, w.texts, w.buttons) for w in seen]
+        pytest.fail(f"no message with {contains!r} and {list(buttons)} in {timeout:.0f} s: {shown}")
+
+    def press(self, button: str, *, in_main: bool = False, timeout: float = 30.0) -> bool:
+        """Invoke the button named `button`; tried again until it works (a UI Automation
+        query can stall on a busy machine) or `timeout`. False when it never did."""
+        deadline = time.monotonic() + timeout
+        while self.running() and time.monotonic() < deadline:
+            pids = self._current_pids()
+            if pids and uia_press(pids, button, in_main=in_main):
+                return True
+            time.sleep(0.5)
+        return False
 
     def close(self, timeout: float = 30.0) -> int:
         """Post WM_CLOSE to every visible window of our verified processes (each window's
@@ -2174,6 +2225,15 @@ def is_valid_ini(data: bytes) -> bool:
     except (configparser.Error, UnicodeDecodeError):
         return False
     return True
+
+
+def poll_until(condition: Callable[[], bool], timeout: float, message: str) -> None:
+    """Wait without a Qt event loop (for child processes): poll every 0.2 s."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        if time.monotonic() > deadline:
+            pytest.fail(f"timed out after {timeout:.0f} s: {message}")
+        time.sleep(0.2)
 
 
 def wait_file(path: Path, timeout: float = 30.0) -> None:

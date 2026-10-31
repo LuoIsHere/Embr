@@ -136,9 +136,17 @@ def _no_traceback(process: kit.EmbrProcess) -> None:
         pytest.fail(f"crashed: {lines[-1]}")
 
 
-def _message(process: kit.EmbrProcess, timeout: float = 60.0) -> kit.UiaWindow:
-    """The startup message (any window but the main window)."""
-    window = process.wait_for(lambda w: w.class_name != kit.MAIN_CLASS, timeout)
+def _message(
+    process: kit.EmbrProcess,
+    contains: str,
+    buttons: tuple[str, ...] = (),
+    language: Language = Language.ENGLISH,
+    timeout: float = 60.0,
+) -> kit.UiaWindow:
+    """The startup message containing `contains` with `buttons` (English source texts,
+    shown in `language`), once UI Automation shows its texts."""
+    names = [kit.translated(b, language) for b in buttons]
+    window = process.wait_message(contains, names, timeout)
     if window is None:
         _no_traceback(process)
         pytest.fail(f"exited ({process.popen.returncode}) without a message")
@@ -326,11 +334,13 @@ def test_unreadable_document_at_startup_in_a_real_process(
         assert main is not None, process.stderr()
         title = kit.translated(DAMAGED_TITLE, Language.ENGLISH)
         kit.wait_until(
-            lambda: any(path.name in w.text for w in process.windows()),
+            lambda: any(path.name in w.text for w in process.windows(deep=True)),
             30,
-            message=lambda: f"no dialog naming {path.name}: {[w.texts for w in process.windows()]}",
+            message=lambda: (
+                f"no dialog naming {path.name}: {[w.texts for w in process.windows(deep=True)]}"
+            ),
         )
-        assert any(title in w.text or title == w.name for w in process.windows())
+        assert any(title in w.text for w in process.windows(deep=True))
         assert process.close() == 0
     _no_traceback(process)
     assert path.read_bytes() == damaged
@@ -385,8 +395,7 @@ def test_damaged_database_exit_changes_nothing(
     damaged = _damage_database(database, mode)
     before = _documents(root)
     with _launch(program, sentinels, tmp_path, f"db-{mode}") as process:
-        message = _message(process)
-        assert str(database) in message.text, message.texts
+        message = _message(process, str(database), ("Back up and start anew", "Exit"), language)
         intro = kit.translated(embr_main.DAMAGED_DATABASE, language).split("{detail}")[0]
         assert intro.strip() in message.text, message.texts
         buttons = {kit.translated(b, language) for b in ("Back up and start anew", "Exit")}
@@ -416,7 +425,7 @@ def test_damaged_database_backed_up_and_started_anew(
     target = tmp_path / "chosen" / "damaged-copy.sqlite"
     target.parent.mkdir()
     with _launch(program, sentinels, tmp_path, "db-backup") as process:
-        _message(process)
+        _message(process, str(database), ("Back up and start anew", "Exit"))
         _press(process, "Back up and start anew", Language.ENGLISH)
         process.answer_file_dialog(kit.translated(embr_main.BACKUP_TITLE, Language.ENGLISH), target)
         assert process.wait_main_window() is not None, process.stderr()
@@ -447,12 +456,18 @@ def test_damaged_database_cancelled_save_asks_again(
     database = root / "data" / "embr.sqlite"
     damaged = _damage_database(database, "truncated")
     with _launch(program, sentinels, tmp_path, "db-cancel") as process:
-        _message(process)
+        buttons = ("Back up and start anew", "Exit")
+        first = _message(process, str(database), buttons, Language.ZH_CN)
         _press(process, "Back up and start anew", Language.ZH_CN)
-        process.answer_file_dialog(kit.translated(embr_main.BACKUP_TITLE, Language.ZH_CN), None)
-        time.sleep(1)
-        again = _message(process)
-        assert str(database) in again.text
+        dialog = process.native_window(kit.translated(embr_main.BACKUP_TITLE, Language.ZH_CN))
+        kit.native_file_dialog_answer(dialog.hwnd, None)
+        kit.poll_until(
+            lambda: dialog.hwnd not in {w.hwnd for w in kit.top_windows(process.pids())},
+            15,
+            "the save dialog did not close",
+        )
+        again = _message(process, str(database), buttons, Language.ZH_CN)
+        assert again.hwnd != first.hwnd  # asked again: a new message box
         _press(process, "Exit", Language.ZH_CN)
         assert process.wait() == 1
     _no_traceback(process)
@@ -526,8 +541,12 @@ def test_folder_in_the_way_exit_changes_nothing(
         path, occupied = _block(root, blocker)
         before = kit.snapshot(root) if occupied else {}
         with _launch(program, sentinels, tmp_path, f"exit-{blocker}") as process:
-            message = _message(process)
-            assert _folder_line(path, occupied, language) in message.text, message.texts
+            message = _message(
+                process,
+                _folder_line(path, occupied, language),
+                ("Rename and continue", "Exit"),
+                language,
+            )
             buttons = {kit.translated(b, language) for b in ("Rename and continue", "Exit")}
             assert buttons <= set(message.buttons), message.buttons
             _press(process, "Exit", language)
@@ -562,7 +581,7 @@ def test_folder_in_the_way_renamed_and_started(
                 (root / name).write_bytes(b"taken")
                 taken.add(name)
         with _launch(program, sentinels, tmp_path, f"rename-{blocker}") as process:
-            _message(process)
+            _message(process, str(path), ("Rename and continue", "Exit"))
             _press(process, "Rename and continue", Language.ENGLISH)
             assert process.wait_main_window() is not None, process.stderr()
             assert process.close() == 0
@@ -634,7 +653,7 @@ def test_newer_document_is_read_only_and_kept(
     with _launch(program, sentinels, tmp_path, f"newer-{kind}") as process:
         assert process.wait_main_window() is not None, process.stderr()
         time.sleep(1.5)
-        assert not any(path.name in w.text for w in process.windows()), "reported as damaged"
+        assert not any(path.name in w.text for w in process.windows(deep=True)), "reported"
         assert process.close() == 0
     _no_traceback(process)
     assert path.read_bytes() == newer_bytes, "a newer document was modified"
@@ -656,11 +675,8 @@ def test_newer_database_refused_with_message_and_untouched(
     connection.close()
     original = database.read_bytes()
     with _launch(program, sentinels, tmp_path, "newer-db") as process:
-        message = _message(process)
         intro = kit.translated(embr_main.NEWER_DATA, language).split("{version}")[0]
-        assert intro.strip() in message.text, message.texts
-        ok = kit.translated(embr_main.OK, language)
-        assert ok in message.buttons, message.buttons
+        _message(process, intro.strip(), (embr_main.OK,), language)
         _press(process, "OK", language)
         assert process.wait() == 1
     _no_traceback(process)
