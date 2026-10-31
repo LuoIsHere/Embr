@@ -388,7 +388,12 @@ def type_text(edit: QLineEdit, text: str, *, replace: bool = True, finish: str =
 
 
 def pick_combo(combo: QComboBox, text: str, *, contains: bool = False) -> None:
-    """Open the combo box's list with a click and click the item showing `text`."""
+    """Select the item showing `text`: a click opens the combo box's list, then the
+    keyboard (Up / Down, Home when stuck, Return) chooses it, so the combo box emits
+    `activated` once. The keyboard is used in the list because the real mouse moving over
+    an open list (the operator using the machine) changes its current item and can swallow
+    a synthetic click; the real cursor is never moved. Returns once the list is closed and
+    the combo box shows the item."""
     _usable(combo)
     wanted = variants(text)
     texts = [_plain(combo.itemText(i)) for i in range(combo.count())]
@@ -400,23 +405,35 @@ def pick_combo(combo: QComboBox, text: str, *, contains: bool = False) -> None:
     index = hits[0]
     if combo.currentIndex() == index:
         return
-    click(combo)
     view = combo.view()
-    wait_until(view.isVisible, 5, message="combo box list did not open")
-    model_index = combo.model().index(index, combo.modelColumn(), combo.rootModelIndex())
-    view.scrollTo(model_index)
-    # the list ignores a release that comes within the double-click interval of opening
-    pump(QApplication.doubleClickInterval() + 100)
-    center = view.visualRect(model_index).center()
-    QTest.mouseMove(view.viewport(), center)  # hover makes the item current
-    pump(50)
-    QTest.mouseClick(
-        view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center
+
+    def selected() -> bool:
+        return not view.isVisible() and combo.currentIndex() == index
+
+    def shows() -> str:
+        return f"combo box shows {combo.currentText()!r}, not {text!r}; items: {texts}"
+
+    click(combo)
+    wait_until(lambda: view.isVisible() or selected(), 5, message="combo box list did not open")
+    for _ in range(2 * combo.count() + 2):
+        if not view.isVisible():
+            break
+        row = view.currentIndex().row()
+        if row == index:
+            QTest.keyClick(view, Qt.Key.Key_Return)
+            break
+        QTest.keyClick(view, Qt.Key.Key_Down if row < index else Qt.Key.Key_Up)
+        if view.currentIndex().row() == row:  # stuck (no current item, or a separator)
+            QTest.keyClick(view, Qt.Key.Key_Home)
+    else:
+        QTest.keyClick(view, Qt.Key.Key_Escape)
+        pytest.fail(f"item {text!r} cannot be reached with the keyboard; items: {texts}")
+    wait_until(
+        selected,
+        5,
+        message=lambda: "combo box list did not close" if view.isVisible() else shows(),
     )
-    wait_until(lambda: not view.isVisible(), 5, message="combo box list did not close")
     pump()
-    if combo.currentIndex() != index:
-        pytest.fail(f"combo box shows {combo.currentText()!r}, not {text!r}")
 
 
 # ---- watchers: things that appear while a click is being handled -----------------------
