@@ -155,3 +155,91 @@ def test_real_window_new_project_and_firmware_through_menus(
     assert (shown == "Connect && identify") == (language == Language.ENGLISH)
     app.close()
     assert (tmp_path / "embr" / "settings.ini").is_file()
+
+
+# ---- child-process verification: never touch an unrelated process -----------------------
+
+
+def test_process_tree_never_follows_a_reused_parent_pid() -> None:
+    """Snapshot rows through the seam: PID 100 is our root. 201 records parent 100 but is
+    older than the root, so its real parent was an earlier owner of PID 100 (a user's
+    video player, say); it and its child are excluded, as is a younger process with a
+    foreign image."""
+    rows = [
+        kit.ProcessEntry(100, 4, "python.exe"),  # our root
+        kit.ProcessEntry(101, 100, "python.exe"),  # the interpreter the launcher started
+        kit.ProcessEntry(102, 101, "python.exe"),  # a worker
+        kit.ProcessEntry(200, 100, "vlc.exe"),  # recorded parent 100, foreign image
+        kit.ProcessEntry(201, 100, "python.exe"),  # recorded parent 100, older than it
+        kit.ProcessEntry(202, 201, "python.exe"),  # child of that stale one
+        kit.ProcessEntry(203, 999, "python.exe"),  # unrelated
+        kit.ProcessEntry(204, 102, "conhost.exe"),  # not one of our images
+    ]
+    created = {100: 1000, 101: 1001, 102: 1002, 200: 1500, 201: 500, 202: 1600, 203: 1700}
+    created[204] = 1800
+    tree = kit.verified_tree(100, entries=rows, created=created.get)
+    assert {p: v.depth for p, v in tree.items()} == {100: 0, 101: 1, 102: 2}
+    gone = {**created, 100: None}
+    assert kit.verified_tree(100, entries=rows, created=gone.get) == {}
+    foreign_root = [kit.ProcessEntry(100, 4, "vlc.exe"), *rows[1:]]
+    assert kit.verified_tree(100, entries=foreign_root, created=created.get) == {}
+
+
+def test_orphan_with_stale_parent_pid_is_not_picked_up(tmp_path: Path) -> None:
+    """A real orphan: a python parent starts a sleeping child and exits, so the child's
+    recorded parent PID is stale. Asking for that dead parent's tree yields nothing; the
+    orphan is then ended through its own verified tree only."""
+    import subprocess
+    import sys
+    import time
+
+    script = (
+        "import subprocess, sys, os\n"
+        "null = subprocess.DEVNULL\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],\n"
+        "    stdin=null, stdout=null, stderr=null)\n"
+        "print(os.getpid(), child.pid, flush=True)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=True
+    )
+    parent, orphan = (int(v) for v in done.stdout.split())
+    try:
+        deadline = time.monotonic() + 10
+        while kit.creation_time(parent) is not None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        rows = {r.pid: r for r in kit.process_snapshot()}
+        assert orphan in rows and rows[orphan].parent == parent  # the stale relation exists
+        assert kit.creation_time(parent) is None
+        assert kit.verified_tree(parent) == {}
+        assert kit.process_tree(parent) == set()
+    finally:
+        tree = kit.verified_tree(orphan)
+        assert orphan in tree
+        kit.terminate_tree(tree)
+    for process in tree.values():
+        deadline = time.monotonic() + 10
+        while kit.still_running(process) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not kit.still_running(process)
+
+
+def test_embr_process_kill_ends_exactly_its_verified_processes(tmp_path: Path) -> None:
+    import sys
+
+    sentinels = kit.Sentinels(tmp_path / "sentinels")
+    with kit.EmbrProcess(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        env=sentinels.env(),
+        cwd=sentinels.folder("cwd"),
+        logs=tmp_path / "logs",
+        name="sleeper",
+    ) as process:
+        kit.wait_until(lambda: len(process.tree()) >= 2, 10, message="interpreter not started")
+        tree = process.tree()
+        rows = {r.pid: r for r in kit.process_snapshot()}
+        assert {rows[p].image.lower() for p in tree} <= kit.OUR_IMAGES
+        process.kill()
+        assert not process.running()
+    for verified in tree.values():
+        kit.wait_until(lambda v=verified: not kit.still_running(v), 10, message=f"{verified} alive")

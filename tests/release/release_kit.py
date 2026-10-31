@@ -47,12 +47,15 @@ Overview of the API (details in each docstring):
   (Ready / Skip), then runs `start` and shows the action prompt (Done / Skip, optional
   timeout or automatic completion); EMBR_RELEASE_INTERACTIVE=0 skips without a dialog
 * boards: board_port, port_present, wait_port, serial_after_reset
-* processes (Win32): source_copy (a copy of src/ whose `python -m embr` uses
-  <copy>/.run as its portable root, as a source run does), EmbrProcess (start, find its
-  windows, read their texts through UI Automation, press a message box button, close
-  with WM_CLOSE, kill the process tree), Sentinels (empty TEMP / TMP / APPDATA /
-  LOCALAPPDATA / USERPROFILE / working folders for a child), file snapshots, deny_access
-  (icacls deny ACE on one folder, removed afterwards)
+* processes (Win32): verified_tree / process_tree (only real descendants: the recorded
+  parent, created after that parent, image python / pythonw / Embr; never a process
+  whose recorded parent PID was reused), source_copy (a copy of src/ whose
+  `python -m embr` uses <copy>/.run as its portable root, as a source run does),
+  EmbrProcess (start, find its windows, read their texts through UI Automation, press a
+  message box button, close with WM_CLOSE, terminate exactly its verified processes;
+  never `taskkill /T`), Sentinels (empty TEMP / TMP / APPDATA / LOCALAPPDATA /
+  USERPROFILE / working folders for a child), file snapshots, deny_access (icacls deny
+  ACE on one folder, removed afterwards)
 * fixture builds: idf_build_copy, pio_project_copy, hello_files
 * screenshot: screenshot_all (conftest saves one for every failed test)
 """
@@ -961,15 +964,19 @@ def sidebar_names(window: Any, kind: str = "firmware") -> list[str]:
 def click_sidebar(window: Any, name: str, kind: str = "firmware") -> None:
     """Click a sidebar row (on its name, away from a project's fold caret). The real mouse
     cursor is moved there as well: the sidebar reads the cursor position to tell a click
-    on the caret from a click on the name."""
+    on the caret from a click on the name; it is put back right after the click."""
     tree = window.sidebar_panel.tree
     item = sidebar_row(window, name, kind)
     tree.scrollToItem(item)
     pump()
     rect = tree.visualItemRect(item)
     at = QPoint(rect.left() + min(rect.width() // 2, 60), rect.center().y())
+    saved = QCursor.pos()
     QCursor.setPos(tree.viewport().mapToGlobal(at))
-    click(tree.viewport(), at)
+    try:
+        click(tree.viewport(), at)
+    finally:
+        QCursor.setPos(saved)
 
 
 def sidebar_menu(window: Any, name: str, *path: str) -> None:
@@ -1582,31 +1589,170 @@ class _ProcessEntry(ctypes.Structure):
     )
 
 
-def process_tree(pid: int) -> set[int]:
-    """`pid` and all its descendants (a venv's python.exe is a launcher that starts the
-    real interpreter as a child)."""
+@dataclass(frozen=True)
+class ProcessEntry:
+    """One row of a Toolhelp process snapshot."""
+
+    pid: int
+    parent: int
+    """th32ParentProcessID: recorded when the process started and never updated; after
+    the parent ends, that PID may belong to an unrelated process (PIDs are reused)."""
+    image: str
+
+
+@dataclass(frozen=True)
+class VerifiedProcess:
+    pid: int
+    created: int
+    """Creation time (FILETIME ticks) when it was verified."""
+    depth: int
+    """0 for the root, 1 for its children, ..."""
+
+
+OUR_IMAGES = frozenset({"python.exe", "pythonw.exe", "embr.exe"})
+"""Images our processes run as: the venv launcher and the interpreter (python -m embr,
+its workers, storage_flow.py), the packaged Embr.exe and its --worker copies."""
+PROCESS_TERMINATE = 0x0001
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def process_snapshot() -> list[ProcessEntry]:
     kernel32: Any = ctypes.windll.kernel32
     kernel32.CreateToolhelp32Snapshot.restype = ctypes.wintypes.HANDLE
     snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    parents: dict[int, int] = {}
+    entries: list[ProcessEntry] = []
     try:
         entry = _ProcessEntry()
         entry.dwSize = ctypes.sizeof(_ProcessEntry)
         ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
         while ok:
-            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            row = ProcessEntry(
+                int(entry.th32ProcessID), int(entry.th32ParentProcessID), str(entry.szExeFile)
+            )
+            entries.append(row)
             ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
     finally:
         kernel32.CloseHandle(snap)
-    tree = {pid}
+    return entries
+
+
+def _open_process(pid: int, access: int) -> int:
+    kernel32: Any = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+    return int(kernel32.OpenProcess(access, False, pid) or 0)
+
+
+def _close_handle(handle: int) -> None:
+    kernel32: Any = ctypes.windll.kernel32
+    kernel32.CloseHandle(ctypes.wintypes.HANDLE(handle))
+
+
+def _handle_created(handle: int) -> int | None:
+    kernel32: Any = ctypes.windll.kernel32
+    times = [ctypes.wintypes.FILETIME() for _ in range(4)]
+    ok = kernel32.GetProcessTimes(ctypes.wintypes.HANDLE(handle), *(ctypes.byref(t) for t in times))
+    if not ok:
+        return None
+    return (int(times[0].dwHighDateTime) << 32) | int(times[0].dwLowDateTime)
+
+
+def creation_time(pid: int) -> int | None:
+    """The process's creation time; None when it cannot be opened (gone, or not ours to
+    query)."""
+    handle = _open_process(pid, PROCESS_QUERY_LIMITED_INFORMATION)
+    if not handle:
+        return None
+    try:
+        return _handle_created(handle)
+    finally:
+        _close_handle(handle)
+
+
+def verified_tree(
+    root: int,
+    *,
+    entries: Sequence[ProcessEntry] | None = None,
+    created: Callable[[int], int | None] = creation_time,
+    images: frozenset[str] = OUR_IMAGES,
+) -> dict[int, VerifiedProcess]:
+    """`root` (a process we started and still hold) and its real descendants. A process
+    counts as a child of P only when its recorded parent is P, its image is one of
+    `images`, and it was created after P's current creation time: a recorded parent PID
+    that a later process reused (the real parent ended) is then never followed. Empty
+    when `root` is gone or not one of `images`. `entries` and `created` are seams for the
+    self-tests."""
+    rows = list(entries) if entries is not None else process_snapshot()
+    root_row = next((r for r in rows if r.pid == root), None)
+    root_time = created(root)
+    if root_time is None or root_row is None or root_row.image.lower() not in images:
+        return {}
+    tree = {root: VerifiedProcess(root, root_time, 0)}
     grew = True
     while grew:
         grew = False
-        for child, parent in parents.items():
-            if parent in tree and child not in tree:
-                tree.add(child)
-                grew = True
+        for row in rows:
+            parent = tree.get(row.parent)
+            if row.pid in tree or parent is None or row.image.lower() not in images:
+                continue
+            child_time = created(row.pid)
+            if child_time is None or child_time <= parent.created:
+                continue  # older than its "parent": that PID was reused
+            tree[row.pid] = VerifiedProcess(row.pid, child_time, parent.depth + 1)
+            grew = True
     return tree
+
+
+def process_tree(pid: int) -> set[int]:
+    """PIDs of verified_tree(pid) (a venv's python.exe is a launcher that starts the real
+    interpreter as a child)."""
+    return set(verified_tree(pid))
+
+
+def still_same(process: VerifiedProcess) -> bool:
+    """The PID still belongs to the process that was verified (it may have exited while
+    a handle keeps it known; see still_running())."""
+    return creation_time(process.pid) == process.created
+
+
+STILL_ACTIVE = 259
+
+
+def still_running(process: VerifiedProcess) -> bool:
+    """The verified process exists and has not exited."""
+    handle = _open_process(process.pid, PROCESS_QUERY_LIMITED_INFORMATION)
+    if not handle:
+        return False
+    kernel32: Any = ctypes.windll.kernel32
+    try:
+        code = ctypes.wintypes.DWORD()
+        ok = kernel32.GetExitCodeProcess(ctypes.wintypes.HANDLE(handle), ctypes.byref(code))
+        return (
+            bool(ok) and _handle_created(handle) == process.created and code.value == STILL_ACTIVE
+        )
+    finally:
+        _close_handle(handle)
+
+
+def terminate(process: VerifiedProcess) -> None:
+    """TerminateProcess on exactly this process, after checking on the opened handle that
+    it is still the one that was verified."""
+    handle = _open_process(process.pid, PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION)
+    if not handle:
+        return
+    kernel32: Any = ctypes.windll.kernel32
+    try:
+        if _handle_created(handle) == process.created:
+            kernel32.TerminateProcess(ctypes.wintypes.HANDLE(handle), 1)
+    finally:
+        _close_handle(handle)
+
+
+def terminate_tree(tree: dict[int, VerifiedProcess], *, keep_root: bool = False) -> None:
+    """Terminate the verified processes, deepest first (children before parents)."""
+    for process in sorted(tree.values(), key=lambda p: -p.depth):
+        if keep_root and process.depth == 0:
+            continue
+        terminate(process)
 
 
 @dataclass(frozen=True)
@@ -1749,8 +1895,8 @@ MAIN_CLASS = "EmbrWindow"
 class EmbrProcess:
     """A child Embr process (`python -m embr` from a source_copy(), or a packaged
     Embr.exe), its output in log files, its windows via Win32 / UI Automation.
-    kill() ends the whole process tree; use as a context manager so a failing test
-    never leaves one running."""
+    Only processes that verified_tree() accepts are ever closed or terminated; kill()
+    ends them. Use as a context manager so a failing test never leaves one running."""
 
     def __init__(
         self,
@@ -1782,8 +1928,16 @@ class EmbrProcess:
     def pid(self) -> int:
         return self.popen.pid
 
+    def tree(self) -> dict[int, VerifiedProcess]:
+        """This process and its verified descendants (verified_tree())."""
+        return verified_tree(self.popen.pid) if self.running() else {}
+
     def pids(self) -> set[int]:
-        return process_tree(self.popen.pid)
+        return set(self.tree())
+
+    def _current_pids(self) -> set[int]:
+        """Verified PIDs, each re-checked right now (just before acting on its windows)."""
+        return {p.pid for p in self.tree().values() if still_same(p)}
 
     def running(self) -> bool:
         return self.popen.poll() is None
@@ -1814,12 +1968,16 @@ class EmbrProcess:
         return self.wait_for(lambda w: True, timeout)
 
     def press(self, button: str) -> bool:
-        return uia_press(self.pids(), button)
+        pids = self._current_pids()
+        return bool(pids) and uia_press(pids, button)
 
     def close(self, timeout: float = 30.0) -> int:
-        """Post WM_CLOSE to every visible window and wait for the exit code."""
-        for window in top_windows(self.pids()):
-            post_close(window.hwnd)
+        """Post WM_CLOSE to every visible window of our verified processes (each window's
+        owner re-checked just before) and wait for the exit code."""
+        tree = self.tree()
+        for window in top_windows(set(tree)):
+            if still_same(tree[window.pid]):
+                post_close(window.hwnd)
         return self.wait(timeout)
 
     def wait(self, timeout: float = 30.0) -> int:
@@ -1830,12 +1988,12 @@ class EmbrProcess:
             pytest.fail(f"process did not exit within {timeout:.0f} s")
 
     def kill(self) -> None:
+        """Terminate exactly our verified processes: the descendants deepest first, then
+        the root through our own Popen handle. Never a tree kill by PID relation."""
         if self.running():
-            subprocess.run(
-                ["taskkill", "/T", "/F", "/PID", str(self.popen.pid)],
-                capture_output=True,
-                check=False,
-            )
+            terminate_tree(self.tree(), keep_root=True)
+            with contextlib.suppress(OSError):
+                self.popen.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 self.popen.wait(10)
         for handle in (self._out, self._err):
