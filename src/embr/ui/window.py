@@ -490,6 +490,8 @@ class EmbrWindow(FrameWindow):
         selection = self._selection
         try:
             if selection is not None and selection[0] == "firmware":
+                # the tracker's cached status outlives a deleted or damaged firmware file
+                self._library.firmware(selection[1])
                 self._fit_entries(selection[1])
                 status = self._library.tracker.check(selection[1])
                 self._show_status(status)

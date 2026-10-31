@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QDropEvent,
     QFont,
     QFontMetrics,
+    QFontMetricsF,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -148,12 +149,11 @@ class Header(QWidget):
         firmware = status.firmware
         clear_layout(self.row)
         self.menu_button.show()
-        self.row.addWidget(label(crumb(self._owner, firmware), tone="3"))
+        path = label(crumb(self._owner, firmware), tone="3")
+        self.row.addWidget(path)
         name = QLabel(firmware.name)
         name.setProperty("heading", "1")
-        # the larger font sits low in its box: lift it so its baseline meets the crumb's
-        # and its text is level with the tags
-        name.setContentsMargins(0, 0, 0, HEADING_LIFT)
+        lift_to_baseline(name, path)
         self.row.addWidget(name)
         for mcu in firmware_mcus(self._owner.context, firmware):
             self.row.addWidget(tag(mcu.label, "gray"))
@@ -182,18 +182,29 @@ class Header(QWidget):
         clear_layout(self.row)
         project = owner.library.project(project_id)
         count = len(owner.library.project_firmware(project_id))
-        self.row.addWidget(label(tr("Project"), tone="3"))
+        caption = label(tr("Project"), tone="3")
+        self.row.addWidget(caption)
         name = QLabel(project.name)
         name.setProperty("heading", "1")
-        # the larger font sits low in its box: lift it so its baseline meets the crumb's
-        # and its text is level with the tags
-        name.setContentsMargins(0, 0, 0, HEADING_LIFT)
+        lift_to_baseline(name, caption)
         self.row.addWidget(name)
         self.row.addWidget(tag(tr(f"{count} firmware"), "gray"))
         self.row.addWidget(tag(tr(f"{len(project.devices)} groups"), "gray"))
         self.menu_button.hide()
         self.notes.setText(project.notes or tr("no note — edit below"))
         self.notes.setToolTip(project.notes or tr("No note yet."))
+
+
+def lift_to_baseline(heading: QLabel, reference: QLabel) -> None:
+    """Put the baseline of `heading` (a larger font) on that of `reference`, both centred
+    in the same row: a bottom margin of twice the difference of their baselines' offsets
+    from the text centre (a margin moves centred text by half of it). Computed from the
+    fonts as styled, so it holds for any font, size and hinting."""
+    heading.ensurePolished()
+    reference.ensurePolished()
+    big, small = QFontMetricsF(heading.font()), QFontMetricsF(reference.font())
+    offset = (big.ascent() - big.height() / 2) - (small.ascent() - small.height() / 2)
+    heading.setContentsMargins(0, 0, 0, max(0, round(2 * offset)))
 
 
 class Banner(QFrame):
@@ -224,8 +235,6 @@ class Banner(QFrame):
 
 NOTE_MIN_WIDTH = 120
 ROW_PX = 36
-HEADING_LIFT = 5
-"""Bottom margin that lifts the header's name (twice the lift, as it is centred)."""
 """Height of an entries row."""
 _DRAGGABLE = (1, 2, 3, 4, 5, 6)
 """Address to Image requires; Note takes what is left."""
