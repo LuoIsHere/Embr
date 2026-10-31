@@ -575,8 +575,6 @@ class EntriesTab(QWidget):
         layout.setSpacing(4)
         name = elided(entry.name, tone=dim)
         layout.addWidget(name, 1)
-        if entry.file.startswith("archive:"):
-            layout.addWidget(tag(tr("archived"), "gray"))
         if mark is not None:
             layout.addWidget(tag(*MARK_TAGS[mark]))
         if entry.auto_added:
