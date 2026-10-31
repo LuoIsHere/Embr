@@ -961,6 +961,27 @@ def sidebar_names(window: Any, kind: str = "firmware") -> list[str]:
     return [shown for _, n, shown in sidebar_rows(window) if n and n.kind == kind]
 
 
+def standalone_names(window: Any) -> list[str]:
+    """Firmware rows below the STANDALONE FIRMWARE header."""
+    rows = sidebar_rows(window)
+    start = next(
+        (i for i, (_, n, _) in enumerate(rows) if n and n.kind == "header" and n.drop),
+        len(rows),
+    )
+    return [shown for _, n, shown in rows[start:] if n and n.kind == "firmware"]
+
+
+def assert_no_dialog(title: str, seconds: float = 1.5) -> None:
+    """Keep the event loop running for `seconds`; fail if a dialog titled `title` shows."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        for dialog in _dialog_stack():
+            if _plain(dialog.windowTitle()) in variants(title):
+                dialog.reject()
+                pytest.fail(f"dialog {title!r} shown again")
+        QTest.qWait(50)
+
+
 def click_sidebar(window: Any, name: str, kind: str = "firmware") -> None:
     """Click a sidebar row (on its name, away from a project's fold caret). The real mouse
     cursor is moved there as well: the sidebar reads the cursor position to tell a click
@@ -1448,12 +1469,16 @@ class Sentinels:
         env.update(extra or {})
         return env
 
-    def leftovers(self) -> list[str]:
+    def leftovers(self, *, shell_dialog: bool = False) -> list[str]:
         """Everything that appeared in any sentinel folder, except the display driver's
         shader caches (DRIVER_CACHES: written by the GPU driver for every window that
-        draws through Direct3D / OpenGL, not by Embr)."""
+        draws through Direct3D / OpenGL, not by Embr). shell_dialog: the run opened a
+        native Windows file dialog, whose shell writes its icon caches (SHELL_CACHES)."""
         found = [f"{name}/{rel}" for name in self.NAMES for rel in snapshot(self.folder(name))]
-        return [f for f in found if not DRIVER_CACHES.match(f)]
+        found = [f for f in found if not DRIVER_CACHES.match(f)]
+        if shell_dialog:
+            found = [f for f in found if not SHELL_CACHES.match(f)]
+        return found
 
     def driver_caches(self) -> list[str]:
         """What leftovers() left out."""
@@ -1470,6 +1495,12 @@ DRIVER_CACHES = re.compile(
 )
 """Sentinel paths the GPU driver writes (shader caches) for any program that opens a
 window; seen on the release machine as home/AppData/LocalLow/NVIDIA/DXCache."""
+SHELL_CACHES = re.compile(
+    r"^(home/appdata/local|localappdata)(/microsoft(/windows(/(explorer|caches)(/.*)?)?)?)?$",
+    re.IGNORECASE,
+)
+"""What the Windows shell writes behind a native file dialog (Explorer icon caches,
+Windows/Caches); seen on the release machine."""
 
 
 def real_user_folders() -> list[Path]:
@@ -1541,9 +1572,11 @@ def current_user_sid() -> str:
 
 
 @contextlib.contextmanager
-def deny_access(folder: Path, rights: str = "(OI)(CI)(W,D,DC)") -> Generator[None]:
-    """Add a deny ACE for the current user on `folder` only (icacls), e.g. "(W,D,DC)" no
-    writing / deleting, "(OI)(CI)(RD,X)" no listing; removed afterwards."""
+def deny_access(folder: Path, rights: str = "(OI)(CI)(WD,AD,WEA,WA,DE,DC)") -> Generator[None]:
+    """Add a deny ACE for the current user on `folder` only (icacls), removed afterwards.
+    The default denies writing and deleting with specific rights; never deny "W" (generic
+    write includes SYNCHRONIZE, so reading files would be denied too). "(RD)" denies
+    listing the folder."""
     sid = current_user_sid()
     subprocess.run(
         ["icacls", str(folder), "/deny", f"*{sid}:{rights}"],
@@ -1786,6 +1819,52 @@ def post_close(hwnd: int) -> None:
     user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
 
 
+WM_SETTEXT = 0x000C
+BM_CLICK = 0x00F5
+IDOK = 1
+IDCANCEL = 2
+FILE_NAME_EDIT = 1001
+"""Control id of the file-name box in the Windows file dialogs."""
+
+
+def _child_controls(hwnd: int, control_id: int, class_name: str) -> list[int]:
+    user32: Any = ctypes.windll.user32
+    found: list[int] = []
+    proto = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+
+    def visit(child: int, _: int) -> bool:
+        buffer = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(child, buffer, 64)
+        if user32.GetDlgCtrlID(child) == control_id and buffer.value == class_name:
+            found.append(int(child))
+        return True
+
+    user32.EnumChildWindows(hwnd, proto(visit), 0)
+    return found
+
+
+def native_file_dialog_answer(dialog: int, path: Path | None) -> None:
+    """Answer a Windows Open / Save dialog (hwnd `dialog`): type `path` into its file-name
+    box and press its OK button (Save / Open), or press Cancel for None. Its UI Automation
+    tree does not expose these controls, so they are reached as Win32 controls by id."""
+    user32: Any = ctypes.windll.user32
+    if path is None:
+        user32.PostMessageW(user32.GetDlgItem(dialog, IDCANCEL), BM_CLICK, 0, 0)
+        return
+    edits = _child_controls(dialog, FILE_NAME_EDIT, "Edit")
+    if not edits:
+        pytest.fail("no file-name box in the file dialog")
+    text = ctypes.create_unicode_buffer(str(path))
+    user32.SendMessageW.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.UINT,
+        ctypes.wintypes.WPARAM,
+        ctypes.wintypes.LPARAM,
+    ]
+    user32.SendMessageW(edits[0], WM_SETTEXT, 0, ctypes.cast(text, ctypes.c_void_p).value)
+    user32.PostMessageW(user32.GetDlgItem(dialog, IDOK), BM_CLICK, 0, 0)
+
+
 @dataclass
 class UiaWindow:
     """A top-level window as UI Automation sees it (Qt exposes its widgets there)."""
@@ -1854,16 +1933,21 @@ foreach ($p in $pids) {
 """
 
 
-def _powershell(script: str, timeout: float = 60) -> str:
-    done = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        check=False,
-    )
+def _powershell(script: str, timeout: float = 30) -> str:
+    """Run a UI Automation script; "" when it does not finish in time (a UIA query can
+    stall now and then; callers poll again)."""
+    try:
+        done = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
     return done.stdout
 
 
@@ -1890,6 +1974,9 @@ def uia_press(pids: set[int], name: str) -> bool:
 
 
 MAIN_CLASS = "EmbrWindow"
+NOT_READY = re.compile(r"^Qt\d+QWindow")
+"""A Qt window seen by its Win32 class: its accessibility is not set up yet (its class
+and texts follow a moment later)."""
 
 
 class EmbrProcess:
@@ -1908,6 +1995,7 @@ class EmbrProcess:
         name: str = "embr",
     ) -> None:
         logs.mkdir(parents=True, exist_ok=True)
+        name = re.sub(r"[^\w.-]+", "-", name)
         self.stdout_path = logs / f"{name}.stdout.txt"
         self.stderr_path = logs / f"{name}.stderr.txt"
         self._out = self.stdout_path.open("wb")
@@ -1943,7 +2031,28 @@ class EmbrProcess:
         return self.popen.poll() is None
 
     def windows(self) -> list[UiaWindow]:
-        return uia_windows(self.pids()) if self.running() else []
+        """Top-level windows of our verified processes whose accessibility is ready."""
+        if not self.running():
+            return []
+        return [w for w in uia_windows(self.pids()) if not NOT_READY.match(w.class_name)]
+
+    def native_window(self, title: str, timeout: float = 30.0) -> NativeWindow:
+        """A visible top-level window titled `title` (e.g. a Windows file dialog) of our
+        verified processes."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            tree = self.tree()
+            for window in top_windows(set(tree)):
+                if window.title == title and still_same(tree[window.pid]):
+                    return window
+            if not self.running():
+                break
+            time.sleep(0.3)
+        pytest.fail(f"no window {title!r} within {timeout:.0f} s; stderr:\n{self.stderr()}")
+
+    def answer_file_dialog(self, title: str, path: Path | None, timeout: float = 30.0) -> None:
+        """Answer the native file dialog titled `title` (path, or None to cancel)."""
+        native_file_dialog_answer(self.native_window(title, timeout).hwnd, path)
 
     def wait_for(
         self, predicate: Callable[[UiaWindow], bool], timeout: float = 60.0
@@ -1973,12 +2082,17 @@ class EmbrProcess:
 
     def close(self, timeout: float = 30.0) -> int:
         """Post WM_CLOSE to every visible window of our verified processes (each window's
-        owner re-checked just before) and wait for the exit code."""
-        tree = self.tree()
-        for window in top_windows(set(tree)):
-            if still_same(tree[window.pid]):
-                post_close(window.hwnd)
-        return self.wait(timeout)
+        owner re-checked just before), again every 2 s (a modal dialog closes first, then
+        the window behind it), and wait for the exit code."""
+        deadline = time.monotonic() + timeout
+        while self.running() and time.monotonic() < deadline:
+            tree = self.tree()
+            for window in top_windows(set(tree)):
+                if still_same(tree[window.pid]):
+                    post_close(window.hwnd)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self.popen.wait(2)
+        return self.wait(max(1.0, deadline - time.monotonic()))
 
     def wait(self, timeout: float = 30.0) -> int:
         try:
@@ -2017,6 +2131,30 @@ class EmbrProcess:
         self.kill()
         self._out.close()
         self._err.close()
+
+
+def store_language(root: Path, language: Any) -> None:
+    """Write the Language choice (embr.i18n.Language) into root/settings.ini, as the
+    Language menu does."""
+    from embr.core.storage.settings import Settings
+    from embr.i18n import SETTINGS_KEY
+    from embr.ui.adapters import settings as ui_settings
+
+    settings = Settings(root / "settings.ini", root / "data" / "backup")
+    ui_settings.save_choice(settings, SETTINGS_KEY, str(language.value))
+    settings.save()
+
+
+def translated(text: str, language: Any) -> str:
+    """embr.i18n.tr(text) in `language` (the current language is restored)."""
+    from embr.i18n import current, set_language, tr
+
+    saved = current()
+    set_language(language)
+    try:
+        return tr(text)
+    finally:
+        set_language(saved)
 
 
 def _decode(data: bytes) -> str:

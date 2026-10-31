@@ -19,12 +19,19 @@ from pathlib import Path
 import pytest
 import release_kit as kit
 
+from embr import main as embr_main
 from embr.app.context import open_context
 from embr.app.library import Library
 from embr.core.storage.paths import AppPaths, prepare
+from embr.i18n import Language
 
-NOT_WRITABLE = "is not writable"
-ALREADY_RUNNING = "Embr is already running from this folder"
+LANGUAGES = [Language.ENGLISH, Language.ZH_CN]
+"""Startup messages follow the language stored in settings.ini (design doc §12.8)."""
+
+
+def _intro(message: str, language: Language) -> str:
+    """The message's text before its first placeholder, in `language`."""
+    return kit.translated(message, language).split("{", 1)[0].strip()
 
 
 @pytest.fixture
@@ -99,29 +106,37 @@ def test_startup_clears_temp_and_keeps_logs_and_data(
     _assert_clean(sentinels, listing)
 
 
+@pytest.mark.parametrize("language", LANGUAGES)
 def test_program_folder_not_writable_shows_message_and_exits(
-    program: Path, sentinels: kit.Sentinels, tmp_path: Path
+    program: Path, sentinels: kit.Sentinels, tmp_path: Path, language: Language
 ) -> None:
     root = program / ".run"
     root.mkdir()
+    kit.store_language(root, language)
     before = kit.snapshot(program)
     listing = kit.user_folder_listing()
     with kit.deny_access(root), _launch(program, sentinels, tmp_path) as process:
         message = process.wait_any_window()
         assert message is not None, f"exited without a message: {process.stderr()}"
         assert message.class_name != kit.MAIN_CLASS
-        assert NOT_WRITABLE in message.text and str(root) in message.text, message.texts
-        assert process.press("OK") or process.close() is not None
+        assert _intro(embr_main.NOT_WRITABLE, language) in message.text, message.texts
+        assert str(root) in message.text
+        ok = kit.translated(embr_main.OK, language)
+        assert ok in message.buttons, message.buttons
+        assert process.press(ok)
         assert process.wait() == 1
     assert kit.snapshot(program) == before
     assert "Traceback" not in process.stderr()
     _assert_clean(sentinels, listing)
 
 
+@pytest.mark.parametrize("language", LANGUAGES)
 def test_second_instance_shows_message_and_first_keeps_running(
-    program: Path, sentinels: kit.Sentinels, tmp_path: Path
+    program: Path, sentinels: kit.Sentinels, tmp_path: Path, language: Language
 ) -> None:
     root = program / ".run"
+    root.mkdir()
+    kit.store_language(root, language)
     listing = kit.user_folder_listing()
     with _launch(program, sentinels, tmp_path, "first") as first:
         assert first.wait_main_window() is not None, first.stderr()
@@ -129,9 +144,12 @@ def test_second_instance_shows_message_and_first_keeps_running(
             message = second.wait_any_window()
             assert message is not None, f"second exited without a message: {second.stderr()}"
             assert message.class_name != kit.MAIN_CLASS, "a second working window opened"
-            assert ALREADY_RUNNING in message.text and str(root) in message.text
+            assert _intro(embr_main.ALREADY_RUNNING, language) in message.text, message.texts
+            assert str(root) in message.text
             assert [w.class_name for w in second.windows()] == [message.class_name]
-            assert second.press("OK")
+            ok = kit.translated(embr_main.OK, language)
+            assert ok in message.buttons, message.buttons
+            assert second.press(ok)
             assert second.wait() == 1
         assert first.running()
         assert [w.class_name for w in first.windows()] == [kit.MAIN_CLASS]

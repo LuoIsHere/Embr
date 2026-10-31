@@ -1,42 +1,56 @@
-"""Corrupted and foreign data, at startup (real `python -m embr` processes) and while the
-real window runs.
+"""Damaged and foreign data (design doc §12.8 and §7.6): real `python -m embr` processes
+for what happens before the window opens, the real window for what it shows.
 
-Documented behaviour (src/embr/core/storage, firmware/store.py, project, files.py,
-app/checklist.py, main.py) is asserted as written:
+Specified behaviour asserted here:
 
-* settings.ini that is not valid INI: copied to data/backup/<timestamp>/, Embr starts
-  with no settings;
-* an empty embr.sqlite counts as missing (a new database is made);
-* a project / firmware TOML with a higher schema_version: read-only, never modified;
-* embr.sqlite with a higher user_version: "written by a newer version" message, exit 1,
-  file untouched;
-* an archive file that is gone: the check "File missing" refuses the flash; one whose
-  bytes changed: "Needs confirmation" refuses it.
-
-Where the behaviour is not documented (garbage, empty or truncated project / firmware
-TOML and embr.sqlite; temp/ or logs/ replaced by a file or unreadable; a file corrupted
-while Embr runs) the minimum requirement is asserted: no crash (no Python traceback, the
-process shows a window), no silent loss of the other projects and firmware (their files
-are byte-identical afterwards), a message to the user naming the damaged file or folder,
-nothing written outside the program folder.
+* a project or firmware .toml that cannot be read (garbage, empty, truncated, bad
+  values), at startup or found while running, is left out and everything else works; a
+  dialog "Files that cannot be read" lists each file (name, folder, reason); a copy of
+  each is kept in data/backup/<timestamp>/damaged/<name> (one per identical content, also
+  across restarts); the original is not changed; firmware whose project file cannot be
+  read are shown standalone and stay usable; a selected firmware whose file breaks while
+  running behaves like a deleted one; each file is reported once per session;
+* a damaged embr.sqlite (garbage, truncated, failing PRAGMA quick_check): a warning names
+  the file and the reason, buttons "Back up and start anew" / "Exit". Exit: exit code 1,
+  nothing changed. Back up: a save dialog for the copy (the native Windows dialog, driven
+  as Win32 controls), then the damaged file and its -journal / -wal / -shm are removed
+  and Embr starts with an empty database; cancelling the save dialog asks again;
+* temp/, logs/ or a data/ folder occupied by a file, or temp/ not listable: a warning
+  names each path, buttons "Rename and continue" / "Exit". Exit: code 1, nothing changed.
+  Rename: what is in the way becomes "<name>.<YYYYmmdd-HHMMSS>" (-2, -3 when taken), new
+  folders are created, Embr starts, nothing is deleted;
+* startup messages follow the language stored in settings.ini (English and Chinese);
+* settings.ini that is not valid INI is backed up and Embr starts with no settings; an
+  empty embr.sqlite counts as missing; newer project / firmware files are read-only and
+  never changed; a newer embr.sqlite is refused untouched;
+* an archive file that is gone refuses the flash ("File missing"), one whose bytes
+  changed too ("Needs confirmation");
+* logs/ losing write access while running is reported when a job starts.
 """
 
+import re
 import shutil
+import sqlite3
+import subprocess
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 import release_kit as kit
 
+from embr import main as embr_main
 from embr.app.archiving import Archiver
 from embr.app.context import open_context
 from embr.app.library import Library
 from embr.app.tracking import Tracker
 from embr.core.storage.paths import AppPaths, prepare
+from embr.i18n import Language
 
-NEWER_DATA = "written by a newer version of Embr"
+DAMAGED_TITLE = "Files that cannot be read"
+LANGUAGES = [Language.ENGLISH, Language.ZH_CN]
 
 
 @dataclass(frozen=True)
@@ -85,7 +99,7 @@ def template(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path, S
     ) as process:
         assert process.wait_main_window() is not None, process.stderr()
         assert process.close() == 0
-    assert (paths.settings).is_file()
+    assert paths.settings.is_file()
     yield program, Seed(kept.id, victim.id, kept_fw.id, victim_fw.id, archived.id, alone.id, sha)
 
 
@@ -97,141 +111,510 @@ def _copy(template: tuple[Path, Seed], tmp_path: Path) -> tuple[Path, Seed]:
 
 
 def _documents(root: Path) -> dict[str, bytes]:
-    found = {
+    return {
         p.relative_to(root).as_posix(): p.read_bytes()
         for folder in ("data/projects", "data/firmwares", "data/archive")
         for p in (root / folder).glob("*")
         if p.is_file()
     }
-    return found
 
 
-@dataclass
-class Outcome:
-    main_window: kit.UiaWindow | None
-    message: kit.UiaWindow | None
-    returncode: int
-    stderr: str
-
-    @property
-    def shown(self) -> str:
-        windows = [w for w in (self.main_window, self.message) if w is not None]
-        return "\n".join(w.text for w in windows)
+def _launch(program: Path, sentinels: kit.Sentinels, tmp_path: Path, name: str) -> kit.EmbrProcess:
+    return kit.EmbrProcess.source(
+        program,
+        env=sentinels.env(),
+        cwd=sentinels.folder("cwd"),
+        logs=tmp_path / "process-logs",
+        name=name,
+    )
 
 
-def _start(program: Path, sentinels: kit.Sentinels, tmp_path: Path) -> Outcome:
-    """Start Embr, take what it shows (its main window, or a message), close it."""
-    with kit.EmbrProcess.source(
-        program, env=sentinels.env(), cwd=sentinels.folder("cwd"), logs=tmp_path / "logs"
-    ) as process:
-        window = process.wait_any_window(60)
-        if window is None:
-            return Outcome(None, None, process.wait(), process.stderr())
-        if window.class_name == kit.MAIN_CLASS:
-            time.sleep(1.5)  # let the first refresh fill the window
-            main = next((w for w in process.windows() if w.class_name == kit.MAIN_CLASS), window)
-            others = [w for w in process.windows() if w.class_name != kit.MAIN_CLASS]
-            code = process.close()
-            return Outcome(main, others[0] if others else None, code, process.stderr())
-        if not process.press("OK"):
-            process.close()
-        return Outcome(None, window, process.wait(), process.stderr())
+def _no_traceback(process: kit.EmbrProcess) -> None:
+    text = process.stderr()
+    if "Traceback" in text:
+        lines = [line for line in text.strip().splitlines() if line.strip()]
+        pytest.fail(f"crashed: {lines[-1]}")
 
 
-def _assert_minimum(
-    outcome: Outcome, before: dict[str, bytes], root: Path, damaged: str, mention: str
-) -> None:
-    """No crash, a window shown, the undamaged documents byte-identical, a message that
-    names `mention`."""
-    if "Traceback" in outcome.stderr:
-        lines = [line for line in outcome.stderr.strip().splitlines() if line.strip()]
-        where = [line.strip() for line in lines if line.strip().startswith('File "')][-3:]
-        pytest.fail(f"crashed (exit {outcome.returncode}): {lines[-1]}\n" + "\n".join(where))
-    assert outcome.main_window or outcome.message, f"no window (exit {outcome.returncode})"
-    after = _documents(root)
-    lost = [rel for rel, data in before.items() if rel != damaged and after.get(rel) != data]
-    assert lost == [], f"other data changed or lost: {lost}"
-    assert mention in outcome.shown, f"no message naming {mention!r}; shown:\n{outcome.shown}"
+def _message(process: kit.EmbrProcess, timeout: float = 60.0) -> kit.UiaWindow:
+    """The startup message (any window but the main window)."""
+    window = process.wait_for(lambda w: w.class_name != kit.MAIN_CLASS, timeout)
+    if window is None:
+        _no_traceback(process)
+        pytest.fail(f"exited ({process.popen.returncode}) without a message")
+    return window
 
 
-def _damage(path: Path, mode: str) -> None:
-    data = path.read_bytes()
+def _press(process: kit.EmbrProcess, button: str, language: Language) -> None:
+    text = kit.translated(button, language)
+    assert process.press(text), f"no button {text!r}: {[w.buttons for w in process.windows()]}"
+
+
+# ---- project and firmware files ---------------------------------------------------------
+
+DOCUMENT_MODES = ["garbage", "empty", "truncated", "bad-values"]
+
+
+def _damage_document(path: Path, kind: str, mode: str) -> bytes:
+    text = path.read_text(encoding="utf-8")
     if mode == "garbage":
-        path.write_bytes(b"\x00\xff\xfe garbage \x81[[[ = = \x00" * 8)
+        data = b"\x00\xff\xfe garbage \x81[[[ = = \x00" * 8
     elif mode == "empty":
-        path.write_bytes(b"")
+        data = b""
     elif mode == "truncated":
-        path.write_bytes(data[: len(data) // 2])
-    else:
-        raise ValueError(mode)
+        data = text.encode()[: len(text) // 2]
+    elif kind == "project":  # bad values: a schema_version that is not a number
+        data = text.replace("schema_version = 1\n", 'schema_version = "one"\n', 1).encode()
+    else:  # bad values: a source Embr does not know
+        data = re.sub(r'(?m)^source = ".*"$', 'source = "bogus"', text, count=1).encode()
+    assert data != text.encode()
+    path.write_bytes(data)
+    return data
 
 
-MODES = ["garbage", "empty", "truncated"]
+def _reason_ok(shown: str, kind: str, mode: str, language: Language) -> bool:
+    english = {
+        "garbage": "not UTF-8 text",
+        "empty": "empty, or not an Embr project or firmware file",
+        "truncated": "not valid TOML (",
+        "bad-values": "empty, or not an Embr project or firmware file"
+        if kind == "project"
+        else "bogus",
+    }[mode]
+    if mode == "truncated":
+        wanted = kit.translated("not valid TOML ({0})", language).split("{0}")[0]
+        return wanted in shown
+    return kit.translated(english, language) in shown
 
 
-@pytest.mark.parametrize("mode", MODES)
+def _damaged_copies(root: Path, name: str) -> list[Path]:
+    return sorted((root / "data" / "backup").glob(f"*/damaged/{name}"))
+
+
+def _victim_path(root: Path, seed: Seed, kind: str) -> Path:
+    if kind == "project":
+        return root / "data" / "projects" / f"{seed.victim_project}.toml"
+    return root / "data" / "firmwares" / f"{seed.victim_firmware}.toml"
+
+
+def _record_dialog(texts: list[str]) -> Callable[[kit.DialogDriver], None]:
+    def handler(driver: kit.DialogDriver) -> None:
+        texts.append(driver.text())
+        driver.ok()  # Close
+
+    return handler
+
+
+def _assert_usable(window: object, name: str) -> None:
+    kit.click_sidebar(window, name)
+    kit.wait_until(
+        lambda: any(kit.same_text(t, "Files match") for t in kit.check_texts(window)),
+        10,
+        message=lambda: f"{name}: {kit.check_texts(window)}",
+    )
+
+
+@pytest.mark.parametrize("mode", DOCUMENT_MODES)
 @pytest.mark.parametrize("kind", ["project", "firmware"])
-def test_damaged_document_at_startup(
+def test_unreadable_document_at_startup_is_left_out_and_reported(
     template: tuple[Path, Seed],
     tmp_path: Path,
-    sentinels: kit.Sentinels,
+    embr: Callable[..., kit.EmbrApp],
     kind: str,
     mode: str,
 ) -> None:
     program, seed = _copy(template, tmp_path)
     root = program / ".run"
-    if kind == "project":
-        damaged = f"data/projects/{seed.victim_project}.toml"
-    else:
-        damaged = f"data/firmwares/{seed.victim_firmware}.toml"
+    path = _victim_path(root, seed, kind)
     before = _documents(root)
-    _damage(root / damaged, mode)
-    outcome = _start(program, sentinels, tmp_path)
-    _assert_minimum(outcome, before, root, damaged, Path(damaged).name)
+    damaged = _damage_document(path, kind, mode)
+    language = Language.ZH_CN if mode == "garbage" else Language.ENGLISH
+    texts: list[str] = []
+    with kit.expect_dialog(_record_dialog(texts), title=DAMAGED_TITLE):
+        app = embr(root, language)
+    window = app.window
+    shown = texts[0]
+    assert path.name in shown and str(path.parent) in shown, shown
+    assert _reason_ok(shown, kind, mode, language), shown
+    copies = _damaged_copies(root, path.name)
+    assert [c.read_bytes() for c in copies] == [damaged]
+    assert str(copies[0].parent) in shown  # "A copy of each is kept in ..."
+    assert path.read_bytes() == damaged, "the damaged original was changed"
+    assert f"[data] {path} cannot be read" in kit.log_text(window)
+    if kind == "project":
+        assert kit.sidebar_names(window, "project") == ["Kept project"]
+        assert "Victim firmware" in kit.standalone_names(window)
+        _assert_usable(window, "Victim firmware")
+    else:
+        assert "Victim firmware" not in kit.sidebar_names(window)
+    _assert_usable(window, "Kept firmware")
+    _assert_usable(window, "Standalone firmware")
+    kit.click_sidebar(window, "Archived")
+    kit.assert_no_dialog(DAMAGED_TITLE)  # once per session
+    after = _documents(root)
+    rel = path.relative_to(root).as_posix()
+    assert {k: v for k, v in after.items() if k != rel} == {
+        k: v for k, v in before.items() if k != rel
+    }
+
+    # a new session reports it again, but keeps no second copy of the same content
+    app.close()
+    texts.clear()
+    with kit.expect_dialog(_record_dialog(texts), title=DAMAGED_TITLE):
+        embr(root, language)
+    assert path.name in texts[0]
+    assert len(_damaged_copies(root, path.name)) == 1
+    assert path.read_bytes() == damaged
+
+
+def test_firmware_damaged_while_selected_behaves_like_deleted(
+    template: tuple[Path, Seed], tmp_path: Path, embr: Callable[..., kit.EmbrApp]
+) -> None:
+    program, seed = _copy(template, tmp_path)
+    root = program / ".run"
+    app = embr(root, Language.ENGLISH)
+    window = app.window
+    kit.click_sidebar(window, "Victim firmware")
+    assert window.pages.currentWidget() is window.firmware_view
+    path = _victim_path(root, seed, "firmware")
+    damaged = _damage_document(path, "firmware", "garbage")
+    texts: list[str] = []
+    with kit.expect_dialog(_record_dialog(texts), title=DAMAGED_TITLE):
+        kit.click_sidebar(window, "Victim firmware")  # still listed until the refresh
+    assert path.name in texts[0]
+    assert "Victim firmware" not in kit.sidebar_names(window)
+    assert window.pages.currentWidget() is window.empty_view
+    assert path.read_bytes() == damaged
+    assert len(_damaged_copies(root, path.name)) == 1
+    _assert_usable(window, "Kept firmware")
+    kit.assert_no_dialog(DAMAGED_TITLE)
+
+
+def test_project_damaged_while_running_moves_its_firmware_to_standalone(
+    template: tuple[Path, Seed], tmp_path: Path, embr: Callable[..., kit.EmbrApp]
+) -> None:
+    program, seed = _copy(template, tmp_path)
+    root = program / ".run"
+    app = embr(root, Language.ZH_CN)
+    window = app.window
+    kit.click_sidebar(window, "Victim firmware")
+    path = _victim_path(root, seed, "project")
+    damaged = _damage_document(path, "project", "truncated")
+    texts: list[str] = []
+    with kit.expect_dialog(_record_dialog(texts), title=DAMAGED_TITLE):
+        kit.click_sidebar(window, "Kept firmware")
+    assert path.name in texts[0]
+    assert kit.sidebar_names(window, "project") == ["Kept project"]
+    assert "Victim firmware" in kit.standalone_names(window)
+    _assert_usable(window, "Victim firmware")
+    kit.click_sidebar(window, "Standalone firmware")
+    kit.assert_no_dialog(DAMAGED_TITLE)
+    assert path.read_bytes() == damaged
+
+
+def test_unreadable_document_at_startup_in_a_real_process(
+    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels
+) -> None:
+    """The same through `python -m embr`: no crash, the main window with the dialog."""
+    program, seed = _copy(template, tmp_path)
+    root = program / ".run"
+    kit.store_language(root, Language.ENGLISH)
+    path = _victim_path(root, seed, "firmware")
+    damaged = _damage_document(path, "firmware", "garbage")
+    with _launch(program, sentinels, tmp_path, "damaged-firmware") as process:
+        main = process.wait_main_window()
+        assert main is not None, process.stderr()
+        title = kit.translated(DAMAGED_TITLE, Language.ENGLISH)
+        kit.wait_until(
+            lambda: any(path.name in w.text for w in process.windows()),
+            30,
+            message=lambda: f"no dialog naming {path.name}: {[w.texts for w in process.windows()]}",
+        )
+        assert any(title in w.text or title == w.name for w in process.windows())
+        assert process.close() == 0
+    _no_traceback(process)
+    assert path.read_bytes() == damaged
     assert sentinels.leftovers() == []
 
 
-@pytest.mark.parametrize("mode", MODES)
+# ---- embr.sqlite ------------------------------------------------------------------------
+
+
+def _damage_database(database: Path, mode: str) -> bytes:
+    data = database.read_bytes()
+    if mode == "garbage":
+        bad = b"garbage" * 200
+    elif mode == "truncated":
+        bad = data[: len(data) // 2]
+    else:  # quick_check: a valid header, a broken b-tree page (page 3's type byte)
+        page = int.from_bytes(data[16:18], "big")
+        changed = bytearray(data)
+        changed[2 * page] = 0x55
+        bad = bytes(changed)
+    database.write_bytes(bad)
+    if mode == "quick_check":  # the file opens; only the integrity check finds it
+        probe = sqlite3.connect(f"file:{database.as_posix()}?mode=ro", uri=True)
+        try:
+            assert probe.execute("PRAGMA user_version").fetchone() == (2,)
+            assert probe.execute("PRAGMA quick_check").fetchone() != ("ok",)
+        finally:
+            probe.close()
+    return bad
+
+
+@pytest.mark.parametrize(
+    ("mode", "language"),
+    [
+        ("garbage", Language.ENGLISH),
+        ("truncated", Language.ENGLISH),
+        ("quick_check", Language.ENGLISH),
+        ("garbage", Language.ZH_CN),
+    ],
+)
+def test_damaged_database_exit_changes_nothing(
+    template: tuple[Path, Seed],
+    tmp_path: Path,
+    sentinels: kit.Sentinels,
+    mode: str,
+    language: Language,
+) -> None:
+    program, _ = _copy(template, tmp_path)
+    root = program / ".run"
+    kit.store_language(root, language)
+    database = root / "data" / "embr.sqlite"
+    damaged = _damage_database(database, mode)
+    before = _documents(root)
+    with _launch(program, sentinels, tmp_path, f"db-{mode}") as process:
+        message = _message(process)
+        assert str(database) in message.text, message.texts
+        intro = kit.translated(embr_main.DAMAGED_DATABASE, language).split("{detail}")[0]
+        assert intro.strip() in message.text, message.texts
+        buttons = {kit.translated(b, language) for b in ("Back up and start anew", "Exit")}
+        assert buttons <= set(message.buttons), message.buttons
+        assert not any(w.class_name == kit.MAIN_CLASS for w in process.windows())
+        _press(process, "Exit", language)
+        assert process.wait() == 1
+    _no_traceback(process)
+    assert database.read_bytes() == damaged
+    assert _documents(root) == before
+    assert list((root / "data" / "backup").rglob("embr.sqlite*")) == []
+    assert sentinels.leftovers() == []
+
+
+def test_damaged_database_backed_up_and_started_anew(
+    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels
+) -> None:
+    program, _ = _copy(template, tmp_path)
+    root = program / ".run"
+    kit.store_language(root, Language.ENGLISH)
+    database = root / "data" / "embr.sqlite"
+    damaged = _damage_database(database, "garbage")
+    extras = {suffix: f"{suffix} content".encode() for suffix in ("-journal", "-wal", "-shm")}
+    for suffix, content in extras.items():
+        database.with_name(database.name + suffix).write_bytes(content)
+    before = _documents(root)
+    target = tmp_path / "chosen" / "damaged-copy.sqlite"
+    target.parent.mkdir()
+    with _launch(program, sentinels, tmp_path, "db-backup") as process:
+        _message(process)
+        _press(process, "Back up and start anew", Language.ENGLISH)
+        process.answer_file_dialog(kit.translated(embr_main.BACKUP_TITLE, Language.ENGLISH), target)
+        assert process.wait_main_window() is not None, process.stderr()
+        assert process.close() == 0
+    _no_traceback(process)
+    assert target.read_bytes() == damaged
+    for suffix in ("-journal", "-wal"):
+        assert target.with_name(target.name + suffix).read_bytes() == extras[suffix]
+    for suffix in ("-journal", "-wal", "-shm"):
+        assert not database.with_name(database.name + suffix).exists(), suffix
+    connection = sqlite3.connect(database)
+    try:
+        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute("PRAGMA quick_check").fetchone() == ("ok",)
+        assert connection.execute("SELECT COUNT(*) FROM archive_files").fetchone() == (0,)
+    finally:
+        connection.close()
+    assert _documents(root) == before  # projects, firmware and archived files are kept
+    assert sentinels.leftovers(shell_dialog=True) == []
+
+
+def test_damaged_database_cancelled_save_asks_again(
+    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels
+) -> None:
+    program, _ = _copy(template, tmp_path)
+    root = program / ".run"
+    kit.store_language(root, Language.ZH_CN)
+    database = root / "data" / "embr.sqlite"
+    damaged = _damage_database(database, "truncated")
+    with _launch(program, sentinels, tmp_path, "db-cancel") as process:
+        _message(process)
+        _press(process, "Back up and start anew", Language.ZH_CN)
+        process.answer_file_dialog(kit.translated(embr_main.BACKUP_TITLE, Language.ZH_CN), None)
+        time.sleep(1)
+        again = _message(process)
+        assert str(database) in again.text
+        _press(process, "Exit", Language.ZH_CN)
+        assert process.wait() == 1
+    _no_traceback(process)
+    assert database.read_bytes() == damaged
+    assert sentinels.leftovers(shell_dialog=True) == []
+
+
+def test_empty_database_counts_as_missing(
+    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels
+) -> None:
+    program, _ = _copy(template, tmp_path)
+    root = program / ".run"
+    (root / "data" / "embr.sqlite").write_bytes(b"")
+    before = _documents(root)
+    with _launch(program, sentinels, tmp_path, "db-empty") as process:
+        assert process.wait_main_window() is not None, process.stderr()
+        assert process.close() == 0
+    _no_traceback(process)
+    assert _documents(root) == before
+
+
+# ---- folders in the way -----------------------------------------------------------------
+
+BLOCKERS = ["temp", "logs", "data/projects", "temp-unlistable"]
+STAMP = re.compile(r"\.\d{8}-\d{6}(-\d+)?$")
+
+
+def _block(root: Path, blocker: str) -> tuple[Path, bool]:
+    """(the path in the way, occupied by a file)."""
+    if blocker == "temp-unlistable":
+        folder = root / "temp"
+        (folder / "left-over.bin").write_bytes(b"kept")
+        sid = kit.current_user_sid()
+        subprocess.run(
+            ["icacls", str(folder), "/deny", f"*{sid}:(RD)"], capture_output=True, check=True
+        )
+        return folder, False
+    path = root / blocker
+    shutil.rmtree(path)
+    path.write_bytes(b"a file in the way")
+    return path, True
+
+
+def _unblock(root: Path) -> None:
+    """Remove the deny ACE from temp/ and any renamed temp.* (cleanup)."""
+    sid = kit.current_user_sid()
+    for folder in [root / "temp", *root.glob("temp.*")]:
+        if folder.is_dir():
+            subprocess.run(["icacls", str(folder), "/remove:d", f"*{sid}"], capture_output=True)
+
+
+def _folder_line(path: Path, occupied: bool, language: Language) -> str:
+    if occupied:
+        return kit.translated(embr_main.OCCUPIED, language).format(path=path)
+    return kit.translated(embr_main.UNREADABLE, language).split("{detail}")[0].format(path=path)
+
+
+@pytest.mark.parametrize("blocker", BLOCKERS)
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_folder_in_the_way_exit_changes_nothing(
+    template: tuple[Path, Seed],
+    tmp_path: Path,
+    sentinels: kit.Sentinels,
+    blocker: str,
+    language: Language,
+) -> None:
+    program, _ = _copy(template, tmp_path)
+    root = program / ".run"
+    kit.store_language(root, language)
+    try:
+        path, occupied = _block(root, blocker)
+        before = kit.snapshot(root) if occupied else {}
+        with _launch(program, sentinels, tmp_path, f"exit-{blocker}") as process:
+            message = _message(process)
+            assert _folder_line(path, occupied, language) in message.text, message.texts
+            buttons = {kit.translated(b, language) for b in ("Rename and continue", "Exit")}
+            assert buttons <= set(message.buttons), message.buttons
+            _press(process, "Exit", language)
+            assert process.wait() == 1
+        _no_traceback(process)
+        if occupied:
+            assert path.read_bytes() == b"a file in the way"
+            assert kit.snapshot(root) == before
+        assert not list(root.glob(f"{path.name}.*"))
+    finally:
+        _unblock(root)
+    if not occupied:
+        assert (path / "left-over.bin").read_bytes() == b"kept"
+    assert sentinels.leftovers() == []
+
+
+@pytest.mark.parametrize("blocker", BLOCKERS)
+def test_folder_in_the_way_renamed_and_started(
+    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels, blocker: str
+) -> None:
+    program, _ = _copy(template, tmp_path)
+    root = program / ".run"
+    kit.store_language(root, Language.ENGLISH)
+    documents = _documents(root)
+    taken: set[str] = set()
+    try:
+        path, occupied = _block(root, blocker)
+        if blocker == "logs":  # the plain "<name>.<stamp>" is taken: -2 must be added
+            now = datetime.now()
+            for second in range(40):
+                name = f"logs.{now + timedelta(seconds=second):%Y%m%d-%H%M%S}"
+                (root / name).write_bytes(b"taken")
+                taken.add(name)
+        with _launch(program, sentinels, tmp_path, f"rename-{blocker}") as process:
+            _message(process)
+            _press(process, "Rename and continue", Language.ENGLISH)
+            assert process.wait_main_window() is not None, process.stderr()
+            assert process.close() == 0
+        _no_traceback(process)
+        renamed = [p for p in path.parent.glob(f"{path.name}.*") if p.name not in taken]
+        assert len(renamed) == 1, [p.name for p in path.parent.iterdir()]
+        assert STAMP.search(renamed[0].name), renamed[0].name
+        if blocker == "logs":
+            assert renamed[0].name.endswith("-2") and renamed[0].name[:-2] in taken
+        assert path.is_dir()
+        if occupied:
+            assert renamed[0].read_bytes() == b"a file in the way"
+    finally:
+        _unblock(root)
+    if not occupied:
+        assert (renamed[0] / "left-over.bin").read_bytes() == b"kept"
+    for name in taken:
+        assert (root / name).read_bytes() == b"taken"
+    kept = {k: v for k, v in documents.items() if not k.startswith(f"{blocker}/")}
+    assert {k: v for k, v in _documents(root).items() if not k.startswith(f"{blocker}/")} == kept
+    assert sentinels.leftovers() == []
+
+
+# ---- settings, newer data, startup messages in both languages ----------------------------
+
+
+@pytest.mark.parametrize("mode", ["garbage", "empty", "truncated"])
 def test_damaged_settings_at_startup(
     template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels, mode: str
 ) -> None:
     program, _ = _copy(template, tmp_path)
     root = program / ".run"
     before = _documents(root)
-    _damage(root / "settings.ini", mode)
-    damaged = (root / "settings.ini").read_bytes()
-    outcome = _start(program, sentinels, tmp_path)
-    assert "Traceback" not in outcome.stderr, outcome.stderr[-3000:]
-    assert outcome.main_window is not None, f"did not start: {outcome.shown}"
-    assert outcome.returncode == 0
+    settings = root / "settings.ini"
+    data = settings.read_bytes()
+    damaged = {
+        "garbage": b"\x00\xff\xfe garbage \x81[[[ = = \x00" * 8,
+        "empty": b"",
+        "truncated": data[: len(data) // 2],
+    }[mode]
+    settings.write_bytes(damaged)
+    with _launch(program, sentinels, tmp_path, f"settings-{mode}") as process:
+        assert process.wait_main_window() is not None, process.stderr()
+        assert process.close() == 0
+    _no_traceback(process)
     assert _documents(root) == before
-    backups = [p for p in (root / "data" / "backup").rglob("settings.ini")]
+    backups = list((root / "data" / "backup").rglob("settings.ini"))
     if kit.is_valid_ini(damaged):
         assert backups == []
-    else:  # documented: copied to backup/<timestamp>/, Embr starts with no settings
+    else:  # copied to backup/<timestamp>/, Embr starts with no settings
         assert [b.read_bytes() for b in backups] == [damaged]
-    assert kit.is_valid_ini((root / "settings.ini").read_bytes())  # rewritten on close
-    assert sentinels.leftovers() == []
-
-
-@pytest.mark.parametrize("mode", MODES)
-def test_damaged_database_at_startup(
-    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels, mode: str
-) -> None:
-    program, _ = _copy(template, tmp_path)
-    root = program / ".run"
-    before = _documents(root)
-    database = root / "data" / "embr.sqlite"
-    _damage(database, mode)
-    damaged = database.read_bytes()
-    outcome = _start(program, sentinels, tmp_path)
-    if mode == "empty":  # documented: an empty file counts as no database
-        assert outcome.main_window is not None and outcome.returncode == 0, outcome.stderr
-        assert _documents(root) == before
-    else:
-        _assert_minimum(outcome, before, root, "", "embr.sqlite")
-        if outcome.main_window is None:  # refused: the damaged file must be kept as it was
-            assert database.read_bytes() == damaged
+    assert kit.is_valid_ini(settings.read_bytes())  # rewritten on close
     assert sentinels.leftovers() == []
 
 
@@ -241,80 +624,52 @@ def test_newer_document_is_read_only_and_kept(
 ) -> None:
     program, seed = _copy(template, tmp_path)
     root = program / ".run"
-    if kind == "project":
-        path = root / "data" / "projects" / f"{seed.victim_project}.toml"
-    else:
-        path = root / "data" / "firmwares" / f"{seed.victim_firmware}.toml"
+    path = _victim_path(root, seed, kind)
     text = path.read_text(encoding="utf-8")
     assert text.startswith("schema_version = 1\n")
-    newer = text.replace("schema_version = 1\n", "schema_version = 99\n", 1).encode()
-    path.write_bytes(newer + b'future_field = "from a newer Embr"\n')
-    newer = path.read_bytes()
+    newer = text.replace("schema_version = 1\n", "schema_version = 99\n", 1)
+    path.write_bytes(newer.encode() + b'future_field = "from a newer Embr"\n')
+    newer_bytes = path.read_bytes()
     before = _documents(root)
-    outcome = _start(program, sentinels, tmp_path)
-    assert "Traceback" not in outcome.stderr, outcome.stderr[-3000:]
-    assert outcome.main_window is not None and outcome.returncode == 0
-    assert path.read_bytes() == newer, "a newer document was modified"
+    with _launch(program, sentinels, tmp_path, f"newer-{kind}") as process:
+        assert process.wait_main_window() is not None, process.stderr()
+        time.sleep(1.5)
+        assert not any(path.name in w.text for w in process.windows()), "reported as damaged"
+        assert process.close() == 0
+    _no_traceback(process)
+    assert path.read_bytes() == newer_bytes, "a newer document was modified"
     assert _documents(root) == before
     assert sentinels.leftovers() == []
 
 
+@pytest.mark.parametrize("language", LANGUAGES)
 def test_newer_database_refused_with_message_and_untouched(
-    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels
+    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels, language: Language
 ) -> None:
-    import sqlite3
-
     program, _ = _copy(template, tmp_path)
-    database = program / ".run" / "data" / "embr.sqlite"
+    root = program / ".run"
+    kit.store_language(root, language)
+    database = root / "data" / "embr.sqlite"
     connection = sqlite3.connect(database)
     connection.execute("PRAGMA user_version = 99")
     connection.commit()
     connection.close()
     original = database.read_bytes()
-    outcome = _start(program, sentinels, tmp_path)
-    assert outcome.main_window is None, "opened data of a newer Embr"
-    assert outcome.message is not None and NEWER_DATA in outcome.message.text, outcome.shown
-    assert outcome.returncode == 1
+    with _launch(program, sentinels, tmp_path, "newer-db") as process:
+        message = _message(process)
+        intro = kit.translated(embr_main.NEWER_DATA, language).split("{version}")[0]
+        assert intro.strip() in message.text, message.texts
+        ok = kit.translated(embr_main.OK, language)
+        assert ok in message.buttons, message.buttons
+        _press(process, "OK", language)
+        assert process.wait() == 1
+    _no_traceback(process)
     assert database.read_bytes() == original
-    assert [p for p in (program / ".run" / "data" / "backup").rglob("embr.sqlite")] == []
+    assert list((root / "data" / "backup").rglob("embr.sqlite")) == []
     assert sentinels.leftovers() == []
 
 
-@pytest.mark.parametrize("folder", ["temp", "logs"])
-def test_folder_replaced_by_a_file(
-    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels, folder: str
-) -> None:
-    program, _ = _copy(template, tmp_path)
-    root = program / ".run"
-    before = _documents(root)
-    shutil.rmtree(root / folder)
-    (root / folder).write_bytes(b"not a folder")
-    outcome = _start(program, sentinels, tmp_path)
-    _assert_minimum(outcome, before, root, "", str(root / folder))
-    assert sentinels.leftovers() == []
-
-
-def test_temp_folder_unreadable(
-    template: tuple[Path, Seed], tmp_path: Path, sentinels: kit.Sentinels
-) -> None:
-    program, _ = _copy(template, tmp_path)
-    root = program / ".run"
-    before = _documents(root)
-    (root / "temp" / "left-over.bin").write_bytes(b"x")
-    with kit.deny_access(root / "temp", "(RD)"):  # listing the folder is denied
-        outcome = _start(program, sentinels, tmp_path)
-    _assert_minimum(outcome, before, root, "", str(root / "temp"))
-    assert sentinels.leftovers() == []
-
-
-# ---- while the real window runs ---------------------------------------------------------
-
-
-def _running(
-    template: tuple[Path, Seed], tmp_path: Path, embr: Callable[..., kit.EmbrApp]
-) -> tuple[kit.EmbrApp, Seed]:
-    program, seed = _copy(template, tmp_path)
-    return embr(program / ".run"), seed
+# ---- archive files, logs/ while the real window runs ------------------------------------
 
 
 def _maybe_identify(app: kit.EmbrApp) -> None:
@@ -370,48 +725,16 @@ def test_archive_file_missing_or_tampered_refuses_flash(
     assert "Kept firmware" in kit.sidebar_names(window)
 
 
-@pytest.mark.parametrize("kind", ["project", "firmware"])
-def test_document_damaged_while_running(
-    template: tuple[Path, Seed],
-    tmp_path: Path,
-    embr: Callable[..., kit.EmbrApp],
-    kind: str,
-) -> None:
-    app, seed = _running(template, tmp_path, embr)
-    window = app.window
-    root = app.paths.root
-    before = _documents(root)
-    if kind == "project":
-        damaged = f"data/projects/{seed.victim_project}.toml"
-    else:
-        damaged = f"data/firmwares/{seed.victim_firmware}.toml"
-    _damage(root / damaged, "garbage")
-    errors: list[BaseException] = []
-    try:
-        kit.click_sidebar(window, "Kept firmware")
-        kit.click_sidebar(window, "Standalone firmware")
-        kit.pump(500)
-    except BaseException as exc:  # an exception that escaped a slot into the test
-        errors.append(exc)
-    names = kit.sidebar_names(window)
-    shown = kit.log_text(window) + "\n" + "\n".join(kit.all_texts(window))
-    assert errors == [], f"exception while refreshing: {errors!r}"
-    assert {"Kept firmware", "Standalone firmware"} <= set(names), names
-    after = _documents(root)
-    assert [r for r, d in before.items() if r != damaged and after.get(r) != d] == []
-    assert Path(damaged).name in shown, f"no message naming the damaged file:\n{shown[-2000:]}"
-
-
 def test_logs_folder_not_writable_while_running(
     template: tuple[Path, Seed], tmp_path: Path, embr: Callable[..., kit.EmbrApp]
 ) -> None:
     """logs/ loses write access while Embr runs; Connect & identify must say so (no
     crash, the port is not left busy) instead of failing silently."""
     port = kit.board_port("EMBR_TEST_PORT_UART")
-    app, _ = _running(template, tmp_path, embr)
+    program, _ = _copy(template, tmp_path)
+    app = embr(program / ".run")
     window = app.window
-    logs = app.paths.logs
-    with kit.deny_access(logs, "(OI)(CI)(W,AD)"):
+    with kit.deny_access(app.paths.logs, "(OI)(CI)(WD,AD)"):
         kit.pick_combo(window.connection.port, port, contains=True)
         kit.click(window.connection.identify)
         kit.pump(500)
