@@ -13,7 +13,11 @@ Fixtures:
   on a fresh portable folder (tmp_path/"embr" by default); every window is closed after
   the test;
 * file_dialogs: release_kit.FileDialogs installed for the test; its queue must be used up;
-* sentinels: release_kit.Sentinels under tmp_path, for child processes.
+* sentinels: release_kit.Sentinels under tmp_path, for child processes;
+* idf_project / pio_project (session): builds_kit.IdfProject / PioProject, the real test
+  projects of EMBR_TEST_IDF_PROJECT / EMBR_TEST_PIO_PROJECT, backed up before their first
+  use and, after the session (also on failure), restored byte for byte, rebuilt for their
+  original target and verified (a problem fails the session's teardown).
 
 For every test: exceptions that reach sys.excepthook (raised in Qt slots / timers) fail
 it, and a failed test saves screenshots of every window and the screen in its tmp_path
@@ -25,6 +29,7 @@ from collections.abc import Callable, Generator, Iterator
 from pathlib import Path
 from typing import Any
 
+import builds_kit
 import pytest
 import release_kit as kit
 
@@ -120,3 +125,43 @@ def embr(tmp_path: Path, qapp: Any) -> Iterator[Callable[..., kit.EmbrApp]]:
 @pytest.fixture
 def sentinels(tmp_path: Path) -> kit.Sentinels:
     return kit.Sentinels(tmp_path / "sentinels")
+
+
+@pytest.fixture(scope="session")
+def idf_project(tmp_path_factory: pytest.TempPathFactory) -> Iterator[builds_kit.IdfProject]:
+    root = kit.env_path(builds_kit.IDF_PROJECT_VAR)
+    idf = builds_kit.idf_main()
+    original = builds_kit.build_facts(root / "build")
+    if original is None:
+        pytest.fail(f"{root} has no build: build the project once before the release suite")
+    store = tmp_path_factory.mktemp("idf_project_backup")
+    backup = builds_kit.ProjectBackup(root, store, frozenset({"build", ".git"}))
+    backup.capture()
+    project = builds_kit.IdfProject(root, idf, backup, builds_kit.git_status(root), original)
+    print(f"[idf_project] {root} backed up to {store}")
+    try:
+        yield project
+    finally:
+        problems = project.restore_final()
+        if problems:
+            raise AssertionError(f"{root} not restored (backup in {store}): {problems}")
+
+
+@pytest.fixture(scope="session")
+def pio_project(tmp_path_factory: pytest.TempPathFactory) -> Iterator[builds_kit.PioProject]:
+    root = kit.env_path(builds_kit.PIO_PROJECT_VAR)
+    builds_kit.find_pio()
+    envs = builds_kit.ini_envs_of(root)
+    if not envs:
+        pytest.fail(f"{root / builds_kit.PIO_INI} declares no env")
+    store = tmp_path_factory.mktemp("pio_project_backup")
+    backup = builds_kit.ProjectBackup(root, store, frozenset({".pio"}))
+    backup.capture()
+    project = builds_kit.PioProject(root, backup, envs[0])
+    print(f"[pio_project] {root} backed up to {store}")
+    try:
+        yield project
+    finally:
+        problems = project.restore_final()
+        if problems:
+            raise AssertionError(f"{root} not restored (backup in {store}): {problems}")
