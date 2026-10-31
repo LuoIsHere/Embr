@@ -1,29 +1,42 @@
 Embr includes or depends on the following third-party software.
-Full license texts are added to this file for each release.
+The release package adds the full license texts of everything it bundles to this file.
 
-Runtime dependencies
---------------------
+Bundled in the release package
+------------------------------
+Python 3.13                PSF-2.0 (the Python runtime, with the third-party
+                           components named in its license)
+Microsoft Visual C++ runtime and Universal C Runtime (VCRUNTIME140.dll,
+                           VCRUNTIME140_1.dll, ucrtbase.dll, api-ms-win-*.dll):
+                           runtime libraries required by Python, redistributed
+                           under Microsoft's distribution terms for these files
 esptool 5.3.1              GPL-2.0-or-later
-PySide6-Essentials 6.12.0  LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
-shiboken6 6.12.0           LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+PySide6-Essentials 6.12.0  LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only; used
+                           under GPL-3.0-only. Qt includes third-party components:
+                           https://doc.qt.io/qt-6/licenses-used-in-qt.html
+shiboken6 6.12.0           LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only; used
+                           under GPL-3.0-only
 pyserial 3.5               BSD-3-Clause
-cryptography 50.0.2        Apache-2.0 OR BSD-3-Clause
-cffi 2.1.1                 MIT-0
-pycparser 3.12             BSD-3-Clause
 click 8.5.0                BSD-3-Clause
 rich 15.0.0                MIT
 rich-click 1.9.9           MIT
 Pygments 2.21.0            BSD-2-Clause
 markdown-it-py 4.2.0       MIT
 mdurl 0.1.2                MIT
-PyYAML 6.0.3               MIT
 intelhex 2.3.0             BSD-3-Clause
-reedsolo 1.7.0             Unlicense OR MIT-0
-bitstring 5.0.0            MIT
-tibs 2.0.2                 MIT
 colorama 0.4.6             BSD-3-Clause
 typing_extensions 4.16.0   PSF-2.0
 tomli-w 1.2.0              MIT
+
+Other dependencies of esptool (installed when Embr is run from source; not in the
+release package, as Embr does not use the parts of esptool that need them)
+--------------------------------------------------------------------------------
+cryptography 50.0.2        Apache-2.0 OR BSD-3-Clause
+cffi 2.1.1                 MIT-0
+pycparser 3.12             BSD-3-Clause
+PyYAML 6.0.3               MIT
+reedsolo 1.7.0             Unlicense OR MIT-0
+bitstring 5.0.0            MIT
+tibs 2.0.2                 MIT
 
 Bundled assets
 --------------
