@@ -735,6 +735,45 @@ def test_failed_import_removes_what_it_created(
     assert other.context.firmware.all() == []
 
 
+@pytest.mark.parametrize("into_project", [True, False], ids=["project", "standalone"])
+def test_failed_import_removes_the_loose_firmware_it_created(
+    rig: Rig, other: Rig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, into_project: bool
+) -> None:
+    source, _ = _two_loose(rig, tmp_path)
+    q = other.library.create_project("Q")
+    other.library.add_group(q.id, "h")
+    other.library.create_firmware("kept in q", q.id, "h")
+    other.library.create_firmware("kept")
+    placement = Placement(q.id, "h") if into_project else Placement(None)
+    package = other.packager.open(source)
+    before = _state(other)
+    firmware_before = {f.id for f in other.context.firmware.all()}
+    original_save = FirmwareStore.save
+    saved: list[str] = []
+
+    def failing_save(store: FirmwareStore, firmware: Firmware) -> None:
+        if firmware.name not in saved:
+            saved.append(firmware.name)
+        if len(saved) > 1:  # the first loose firmware is written, the second fails
+            raise OSError("disk full")
+        original_save(store, firmware)
+
+    monkeypatch.setattr(FirmwareStore, "save", failing_save)
+    try:
+        with pytest.raises(OSError, match="disk full"):
+            other.packager.import_package(package, source.name, placement)
+    finally:
+        monkeypatch.undo()
+        package.discard()
+
+    assert len(saved) == 2
+    after = _state(other)
+    assert (after.projects, after.firmwares) == (before.projects, before.firmwares)
+    assert {f.id for f in other.context.firmware.all()} == firmware_before
+    assert other.context.projects.get(q.id).devices == ["h"]
+    assert [p.id for p in other.context.projects.all()] == [q.id]
+
+
 # ---- rejected packages ------------------------------------------------------------------
 
 
