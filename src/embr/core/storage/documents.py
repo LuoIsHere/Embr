@@ -11,6 +11,8 @@ from typing import cast
 
 import tomli_w
 
+from embr.i18n import N_
+
 Document = dict[str, object]
 Migration = Callable[[Document], Document]
 """Upgrades a document by one version; migrations[n] turns version n into n + 1."""
@@ -24,6 +26,51 @@ class LoadedDocument:
     """True when the file has a higher schema_version than this Embr supports."""
     migrated_from: int | None
     """The file's version before migration, or None if no migration ran."""
+
+
+@dataclass(frozen=True)
+class DamagedDocument:
+    """A project or firmware file that cannot be read (design doc §12.8): skipped, never
+    changed."""
+
+    path: Path
+    reason: str
+
+
+class DamagedDocumentError(KeyError):
+    """get() of a document that cannot be read; a KeyError, so callers treat it as missing."""
+
+    def __init__(self, damaged: DamagedDocument) -> None:
+        super().__init__(damaged.path.stem)
+        self.damaged = damaged
+
+
+def damage_reason(exc: Exception) -> str:
+    """One line for the user: what is wrong with the file."""
+    if isinstance(exc, UnicodeDecodeError):
+        return N_("not UTF-8 text")
+    if isinstance(exc, tomllib.TOMLDecodeError):
+        return N_(f"not valid TOML ({exc})")
+    if isinstance(exc, ValueError) and "schema_version" in str(exc):
+        return N_("empty, or not an Embr project or firmware file")
+    return str(exc) or type(exc).__name__
+
+
+def keep_damaged_copy(path: Path, backup_root: Path) -> Path | None:
+    """Copy a damaged file to backup_root/<timestamp>/damaged/ unless an identical copy is
+    already there; the original stays. Returns the copy (new or existing); None when the
+    file cannot be read or copied."""
+    try:
+        content = path.read_bytes()
+        for old in sorted(backup_root.glob(f"*/damaged/{path.name}")):
+            if old.read_bytes() == content:
+                return old
+        target = backup_folder(backup_root) / "damaged" / path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    except OSError:
+        return None
+    return target
 
 
 def load_document(

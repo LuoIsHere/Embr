@@ -6,8 +6,11 @@ from pathlib import Path, PurePath
 from embr.core.firmware.model import FIRMWARE_SCHEMA_VERSION, Firmware, Source
 from embr.core.firmware.serialize import firmware_from_doc, firmware_to_doc
 from embr.core.storage.documents import (
+    DamagedDocument,
+    DamagedDocumentError,
     Document,
     Migration,
+    damage_reason,
     load_document,
     save_document,
     upgrade_document,
@@ -38,15 +41,28 @@ class FirmwareStore:
     def __init__(self, directory: Path, backup_root: Path) -> None:
         self.directory = directory
         self.backup_root = backup_root
+        self._damaged: list[DamagedDocument] = []
 
     def all(self) -> list[Firmware]:
-        """Every firmware, migrated to the current schema (newer ones read-only)."""
-        if not self.directory.is_dir():
-            return []
-        return [self._load(p) for p in sorted(self.directory.glob("*.toml"))]
+        """Every readable firmware, migrated to the current schema (newer ones read-only).
+        Files that cannot be read are skipped and listed by damaged() (design doc §12.8)."""
+        found: list[Firmware] = []
+        damaged: list[DamagedDocument] = []
+        if self.directory.is_dir():
+            for path in sorted(self.directory.glob("*.toml")):
+                try:
+                    found.append(self._load(path))
+                except DamagedDocumentError as exc:
+                    damaged.append(exc.damaged)
+        self._damaged = damaged
+        return found
+
+    def damaged(self) -> list[DamagedDocument]:
+        """Files the last all() could not read."""
+        return list(self._damaged)
 
     def get(self, firmware_id: str) -> Firmware:
-        """Raises KeyError if missing."""
+        """Raises KeyError if missing (DamagedDocumentError, a KeyError, if unreadable)."""
         path = self._path(firmware_id)
         if not path.is_file():
             raise KeyError(firmware_id)
@@ -124,13 +140,17 @@ class FirmwareStore:
         return self.directory / f"{firmware_id}.toml"
 
     def _load(self, path: Path) -> Firmware:
-        loaded = load_document(
-            path,
-            current=FIRMWARE_SCHEMA_VERSION,
-            migrations=_MIGRATIONS,
-            backup_root=self.backup_root,
-        )
-        firmware = firmware_from_doc(loaded.data)
+        """DamagedDocumentError when the file cannot be read or parsed."""
+        try:
+            loaded = load_document(
+                path,
+                current=FIRMWARE_SCHEMA_VERSION,
+                migrations=_MIGRATIONS,
+                backup_root=self.backup_root,
+            )
+            firmware = firmware_from_doc(loaded.data)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise DamagedDocumentError(DamagedDocument(path, damage_reason(exc))) from exc
         firmware.read_only = loaded.read_only
         return firmware
 

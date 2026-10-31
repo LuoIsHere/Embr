@@ -1,6 +1,7 @@
 """Portable data layout: everything Embr writes lives next to Embr.exe (design doc §7.6)."""
 
 import contextlib
+import datetime
 import os
 import shutil
 import sys
@@ -74,17 +75,63 @@ def is_writable(root: Path) -> bool:
     return True
 
 
-def prepare(paths: AppPaths) -> None:
-    """Create data/ (projects, firmwares, archive, backup), logs/ and temp/ if missing,
-    and point Python's tempfile module at temp/."""
-    for folder in (
+def folders(paths: AppPaths) -> tuple[Path, ...]:
+    """The folders Embr needs, parents first."""
+    return (
+        paths.data,
         paths.projects,
         paths.firmwares,
         paths.archive,
         paths.backup,
         paths.logs,
         paths.temp,
-    ):
+    )
+
+
+@dataclass(frozen=True)
+class FolderProblem:
+    """A folder Embr needs that it cannot use (design doc §12.8)."""
+
+    path: Path
+    occupied: bool
+    """True: a file (not a folder) has the folder's name. False: the folder cannot be
+    listed."""
+    detail: str = ""
+
+
+def folder_problems(paths: AppPaths) -> list[FolderProblem]:
+    """Needed folders that are a file, or a folder that cannot be listed. Missing folders
+    are not problems (prepare() creates them)."""
+    problems: list[FolderProblem] = []
+    for folder in folders(paths):
+        if folder.exists() and not folder.is_dir():
+            problems.append(FolderProblem(folder, occupied=True))
+        elif folder.is_dir():
+            try:
+                next(folder.iterdir(), None)
+            except OSError as exc:
+                problems.append(FolderProblem(folder, False, exc.strerror or str(exc)))
+    return problems
+
+
+def set_aside(path: Path) -> Path:
+    """Rename `path` (a file or folder in the way) to "<name>.<timestamp>" (with a number
+    added if that exists) and return the new path. Raises OSError when it cannot be
+    renamed."""
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = path.with_name(f"{path.name}.{stamp}")
+    count = 2
+    while target.exists():
+        target = path.with_name(f"{path.name}.{stamp}-{count}")
+        count += 1
+    path.rename(target)
+    return target
+
+
+def prepare(paths: AppPaths) -> None:
+    """Create data/ (projects, firmwares, archive, backup), logs/ and temp/ if missing,
+    and point Python's tempfile module at temp/."""
+    for folder in folders(paths):
         folder.mkdir(parents=True, exist_ok=True)
     tempfile.tempdir = str(paths.temp)
 

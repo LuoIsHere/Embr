@@ -8,8 +8,11 @@ from pathlib import Path
 from embr.core.firmware.model import Firmware, Source
 from embr.core.firmware.store import FirmwareStore, ReadOnlyError, now
 from embr.core.storage.documents import (
+    DamagedDocument,
+    DamagedDocumentError,
     Document,
     Migration,
+    damage_reason,
     doc_bool,
     doc_str,
     doc_strs,
@@ -63,15 +66,28 @@ class ProjectStore:
     def __init__(self, directory: Path, backup_root: Path) -> None:
         self.directory = directory
         self.backup_root = backup_root
+        self._damaged: list[DamagedDocument] = []
 
     def all(self) -> list[Project]:
-        """Every project, sorted by name; newer schema versions read-only."""
-        if not self.directory.is_dir():
-            return []
-        return sorted((self._load(p) for p in self.directory.glob("*.toml")), key=lambda p: p.name)
+        """Every readable project, sorted by name; newer schema versions read-only. Files
+        that cannot be read are skipped and listed by damaged() (design doc §12.8)."""
+        found: list[Project] = []
+        damaged: list[DamagedDocument] = []
+        if self.directory.is_dir():
+            for path in sorted(self.directory.glob("*.toml")):
+                try:
+                    found.append(self._load(path))
+                except DamagedDocumentError as exc:
+                    damaged.append(exc.damaged)
+        self._damaged = damaged
+        return sorted(found, key=lambda p: p.name)
+
+    def damaged(self) -> list[DamagedDocument]:
+        """Files the last all() could not read."""
+        return list(self._damaged)
 
     def get(self, project_id: str) -> Project:
-        """Raises KeyError if missing."""
+        """Raises KeyError if missing (DamagedDocumentError, a KeyError, if unreadable)."""
         path = self._path(project_id)
         if not path.is_file():
             raise KeyError(project_id)
@@ -203,13 +219,17 @@ class ProjectStore:
         return self.directory / f"{project_id}.toml"
 
     def _load(self, path: Path) -> Project:
-        loaded = load_document(
-            path,
-            current=PROJECT_SCHEMA_VERSION,
-            migrations=_MIGRATIONS,
-            backup_root=self.backup_root,
-        )
-        project = project_from_doc(loaded.data)
+        """DamagedDocumentError when the file cannot be read or parsed."""
+        try:
+            loaded = load_document(
+                path,
+                current=PROJECT_SCHEMA_VERSION,
+                migrations=_MIGRATIONS,
+                backup_root=self.backup_root,
+            )
+            project = project_from_doc(loaded.data)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise DamagedDocumentError(DamagedDocument(path, damage_reason(exc))) from exc
         project.read_only = loaded.read_only
         return project
 

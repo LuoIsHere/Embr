@@ -82,6 +82,7 @@ from embr.core.flasher.checks import ChipState, revision_incompatibility
 from embr.core.flasher.plan import PlanEntry
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.project import Project, ProjectDefaults
+from embr.core.storage.documents import DamagedDocument, keep_damaged_copy
 from embr.core.storage.ids import unique_name
 from embr.i18n import N_
 
@@ -213,7 +214,8 @@ class Library:
             return not q or q in f.name.casefold()
 
         projects: list[ProjectRow] = []
-        for project in self._ctx.projects.all():
+        readable = self._ctx.projects.all()
+        for project in readable:
             members = sorted((f for f in everything if f.project_id == project.id), key=_by_name)
             if not q or q in project.name.casefold():
                 shown = members
@@ -231,12 +233,25 @@ class Library:
             projects.append(
                 ProjectRow(project.id, project.name, project.notes, tuple(groups), len(members))
             )
+        # firmware whose project cannot be read (or is gone) stay usable: shown standalone
+        known = {p.id for p in readable}
         standalone = tuple(
             rows[f.id]
             for f in sorted(everything, key=_by_name)
-            if f.project_id is None and matches(f)
+            if (f.project_id is None or f.project_id not in known) and matches(f)
         )
         return Tree(tuple(projects), standalone)
+
+    def damaged(self) -> list[DamagedDocument]:
+        """Project and firmware files the last tree() could not read (design doc §12.8)."""
+        return self._ctx.projects.damaged() + self._ctx.firmware.damaged()
+
+    def keep_damaged(self, damaged: list[DamagedDocument]) -> Path | None:
+        """Copy each damaged file to data/backup/<timestamp>/damaged/ (once per content;
+        the originals stay). Returns the folder of the copies, None if none was made."""
+        copies = [keep_damaged_copy(d.path, self._ctx.paths.backup) for d in damaged]
+        made = [c for c in copies if c is not None]
+        return made[-1].parent if made else None
 
     def check_files(self, firmware_id: str) -> dict[str, FileState]:
         """Re-check every entry by name, path and hash (done when a firmware is opened and

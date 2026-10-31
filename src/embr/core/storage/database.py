@@ -15,18 +15,29 @@ class NewerSchemaError(Exception):
     """Data written by a newer Embr; it is opened read-only or not at all, never changed."""
 
 
+class DamagedDatabaseError(Exception):
+    """The database file is not a readable SQLite database, or fails its integrity check
+    (design doc §12.8). The file is left untouched."""
+
+
 def open_database(path: Path, backup_root: Path) -> sqlite3.Connection:
     """Open (creating if missing) and migrate step by step to DB_SCHEMA_VERSION.
     Before migrating an existing database, copy it to backup_root/<timestamp>/.
-    Raises NewerSchemaError if user_version > DB_SCHEMA_VERSION (file left untouched)."""
+    Raises NewerSchemaError if user_version > DB_SCHEMA_VERSION, DamagedDatabaseError if
+    an existing file is damaged (the file is left untouched in both cases)."""
     existing = path.is_file() and path.stat().st_size > 0
     version = 0
     if existing:
         probe = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         try:
             version = schema_version(probe)
+            result = probe.execute("PRAGMA quick_check").fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise DamagedDatabaseError(f"{path}: {exc}") from exc
         finally:
             probe.close()
+        if result is None or result[0] != "ok":
+            raise DamagedDatabaseError(f"{path}: {result[0] if result else 'check failed'}")
     if version > DB_SCHEMA_VERSION:
         raise NewerSchemaError(
             f"{path} has schema version {version}, newer than {DB_SCHEMA_VERSION}"

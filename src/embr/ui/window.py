@@ -78,6 +78,7 @@ from embr.core.history import RecordResult
 from embr.core.logs import HEADER_PREFIX
 from embr.core.package import PACKAGE_SUFFIX, PackageError
 from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
+from embr.core.storage.documents import DamagedDocument
 from embr.i18n import N_, SETTINGS_KEY, Language, current, effective, tr
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
@@ -185,6 +186,8 @@ class EmbrWindow(FrameWindow):
         """Firmware id, state and digest the workspace shows (flash compares the digest)."""
         self._round: list[str] = []
         self._round_changed = False
+        self._reported: set[tuple[Path, str]] = set()
+        """Damaged files already shown this session (design doc §12.8)."""
         self._job_kind: JobKind | None = None
         self._signals = JobSignals(self)
         self._selection: tuple[str, str] | None = None
@@ -454,6 +457,34 @@ class EmbrWindow(FrameWindow):
             self._library.mismatches(snapshot.info) if snapshot else {},
             self._ops.running_firmware_id,
         )
+        fresh = [d for d in self._library.damaged() if (d.path, d.reason) not in self._reported]
+        if fresh:
+            self._reported.update((d.path, d.reason) for d in fresh)
+            QTimer.singleShot(0, lambda: self._show_damaged(fresh))
+
+    def _show_damaged(self, damaged: list[DamagedDocument]) -> None:
+        """Project or firmware files that cannot be read (design doc §12.8): left out, a
+        copy kept in data/backup/, the originals unchanged. Waits for an open dialog."""
+        if QApplication.activeModalWidget() is not None:
+            QTimer.singleShot(500, lambda: self._show_damaged(damaged))
+            return
+        folder = self._library.keep_damaged(damaged)
+        lines = "".join(
+            f"<br>•&nbsp;<b>{html.escape(d.path.name)}</b> ({html.escape(str(d.path.parent))})"
+            f" — {html.escape(tr(d.reason))}"
+            for d in damaged
+        )
+        text = [
+            tr(
+                "These project or firmware files cannot be read and are left out; everything "
+                f"else works as usual. The files themselves are not changed:{lines}"
+            )
+        ]
+        if folder is not None:
+            text.append(tr(f"A copy of each is kept in {html.escape(str(folder))}."))
+        for d in damaged:
+            self.note("warning", f"[data] {d.path} cannot be read: {d.reason}")
+        dialogs.notice(self, tr("Files that cannot be read"), text)
 
     def _refresh_workspace(self) -> None:
         selection = self._selection
