@@ -83,6 +83,7 @@ from embr.core.flasher.plan import PlanEntry
 from embr.core.flasher.protocol import InfoEvent
 from embr.core.project import Project, ProjectDefaults
 from embr.core.storage.ids import unique_name
+from embr.i18n import N_
 
 UNTITLED = "untitled"
 """Name of a firmware created without one; replaced by the first added file's name."""
@@ -108,6 +109,10 @@ class AlreadyTrackedError(PlanError):
     def __init__(self, message: str, firmware_id: str) -> None:
         super().__init__(message)
         self.firmware_id = firmware_id
+
+
+ARCHIVE_ORIGIN = N_("Archive")
+"""FirmwareRow.origin of archived firmware (shown translated)."""
 
 
 @dataclass(frozen=True)
@@ -939,7 +944,7 @@ _MARK_STATES = {EntryMark.CHANGED: FileState.CHANGED, EntryMark.MISSING: FileSta
 
 def _origin(firmware: Firmware) -> str:
     if firmware.source == Source.ARCHIVED:
-        return "Archive"
+        return ARCHIVE_ORIGIN
     if firmware.build_ref is not None:
         env = firmware.build_ref.env
         return f"{firmware.build_ref.path} (env: {env})" if env else firmware.build_ref.path

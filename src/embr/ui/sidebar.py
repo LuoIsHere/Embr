@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from embr.app.library import FirmwareFlag, FirmwareRow, Tree
+from embr.app.library import ARCHIVE_ORIGIN, FirmwareFlag, FirmwareRow, Tree
 from embr.core import chipinfo
 from embr.core.firmware.model import Source
 from embr.i18n import tr
@@ -424,7 +424,9 @@ class Sidebar(QWidget):
     def _firmware(self, fw: FirmwareRow, indent: int) -> None:
         row = Row(indent)
         name = elided(fw.name)
-        origin = elided(fw.origin, tone="3", mono=True)
+        # a path, or the fixed text of archived firmware (translated)
+        origin_text = tr(fw.origin) if fw.origin == ARCHIVE_ORIGIN else fw.origin
+        origin = elided(origin_text, tone="3", mono=True)
         origin.setStyleSheet("font-size: 11px;")
         row.text.addWidget(name)
         if fw.origin:  # no second line: the name stays centred in the row
@@ -443,7 +445,7 @@ class Sidebar(QWidget):
         if fw.mcus:
             row.add_optional(label(chips_text(fw.mcus), tone="3"), 1)  # hidden before the tag
         reason = self._dimmed.get(fw.id)
-        tip = fw.origin or fw.name
+        tip = origin_text or fw.name
         row.setToolTip(
             tip if reason is None else tr(f"{tip}\nNot for the identified board: {tr(reason)}")
         )
