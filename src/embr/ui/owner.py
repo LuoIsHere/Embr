@@ -47,5 +47,9 @@ class Owner(Protocol):
         ...
 
     def firmware_action(self, name: str) -> None:
-        """rename, duplicate, move, delete for the selected firmware."""
+        """rename, duplicate, move, archive, export, delete for the selected firmware."""
+        ...
+
+    def export_project(self, project_id: str) -> None:
+        """Export project… on the project page."""
         ...

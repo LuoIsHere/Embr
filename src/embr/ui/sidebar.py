@@ -272,6 +272,7 @@ class Sidebar(QWidget):
     new_project = Signal()
     import_idf = Signal()
     import_pio = Signal()
+    import_package = Signal()
     query_changed = Signal(str)
     files_dropped = Signal(list, object)
     """See FirmwareTree.files_dropped."""
@@ -296,6 +297,9 @@ class Sidebar(QWidget):
         )
         self.new_menu.addAction(tr("Import PlatformIO build…"), self.import_pio.emit).setToolTip(
             tr("follows the build folders of PlatformIO envs")
+        )
+        self.new_menu.addAction(tr("Import .embr package…"), self.import_package.emit).setToolTip(
+            tr("projects and firmware exported from Embr")
         )
         self.new_menu.addSeparator()
         self.new_menu.addAction(tr("New project"), self.new_project.emit)

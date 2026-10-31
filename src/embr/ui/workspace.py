@@ -125,6 +125,7 @@ class Header(QWidget):
         self.archive_action = self.menu.addAction(
             tr("Archive this version…"), lambda: owner.firmware_action("archive")
         )
+        self.menu.addAction(tr("Export…"), lambda: owner.firmware_action("export"))
         self.menu.addSeparator()
         danger_action(self.menu, tr("Delete…"), lambda: owner.firmware_action("delete"))
         self.menu_button.clicked.connect(

@@ -2,6 +2,7 @@
 
 import contextlib
 import html
+from collections.abc import Generator
 from datetime import date, datetime
 from pathlib import Path
 
@@ -44,6 +45,7 @@ from embr.app.operations import (
     JobProgress,
     Operations,
 )
+from embr.app.packages import Packager, Placement
 from embr.app.pio import PioConfigs
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, Tracker, TrackStatus
@@ -74,6 +76,7 @@ from embr.core.flasher.protocol import (
 )
 from embr.core.history import RecordResult
 from embr.core.logs import HEADER_PREFIX
+from embr.core.package import PACKAGE_SUFFIX, PackageError
 from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
 from embr.i18n import N_, SETTINGS_KEY, Language, current, effective, tr
 from embr.ui import dialogs
@@ -108,6 +111,8 @@ RESULT_TEXT = {
 COMMAND_UNKNOWN = N_("(identify the board, or add entries with addresses, to see the command)")
 READ_FOLDER = "read_folder"
 """settings.ini [ui]: the folder the last read flash was saved to."""
+PACKAGE_FOLDER = "package_folder"
+"""settings.ini [ui]: the folder of the last .embr package exported or imported."""
 HINT_MANUAL_RESET = N_(
     "Flashed and verified. If the device did not restart on its own (usually when download "
     "mode was entered by hand), reset it manually."
@@ -173,6 +178,7 @@ class EmbrWindow(FrameWindow):
         self._ops = Operations(context, self._memory, self._dispatcher.dispatch, tracker=tracker)
         self._archiver = Archiver(context, tracker)
         self._merger = Merger(context, tracker)
+        self._packager = Packager(context, tracker)
         self._schedule = RefreshSchedule()
         self._schedule.seed(context.history)
         self._shown: tuple[str, ResolveState, str] | None = None
@@ -241,6 +247,7 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.new_project.connect(self._new_project)
         self.sidebar_panel.import_idf.connect(self._import_idf)
         self.sidebar_panel.import_pio.connect(self._import_pio)
+        self.sidebar_panel.import_package.connect(self._import_package)
         self.sidebar_panel.files_dropped.connect(self._files_dropped)
         self.sidebar_panel.tree.menu_requested.connect(self._firmware_menu)
         self.firmware_view.entries.archive_requested.connect(self._archive_entry)
@@ -399,6 +406,9 @@ class EmbrWindow(FrameWindow):
                 return
         elif name == "archive":
             self._archive_version(firmware_id)
+            return
+        elif name == "export":
+            self._export_firmware(firmware_id)
             return
         elif name == "directory":
             self._change_build_dir(firmware_id)
@@ -928,6 +938,114 @@ class EmbrWindow(FrameWindow):
         self.note("ok", f"[archive] '{archived.name}' created; '{firmware.name}' is unchanged")
         self.select_firmware(archived.id)
 
+    def _package_folder(self) -> Path:
+        stored = self._context.settings.get(ui_settings.UI_SECTION, PACKAGE_FOLDER)
+        folder = Path(stored) if stored else Path.home()
+        return folder if folder.is_dir() else Path.home()
+
+    def _remember_package_folder(self, path: Path) -> None:
+        settings = self._context.settings
+        settings.set(ui_settings.UI_SECTION, PACKAGE_FOLDER, str(path.parent))
+        settings.save()
+
+    def _export_firmware(self, firmware_id: str) -> None:
+        """Export… (design doc §12.6): the firmware of the same scope, the chosen one checked."""
+        firmware = self._library.firmware(firmware_id)
+        if firmware.project_id is not None:
+            scope = self._library.project_firmware(firmware.project_id)
+        else:
+            scope = [self._library.firmware(r.id) for r in self._library.tree().standalone]
+        check = self._packager.check_export([f.id for f in scope])
+        request = dialogs.export_firmware(self, scope, firmware_id, check, self._package_folder())
+        if request is None:
+            return
+        ids, path = request
+        try:
+            with _busy():
+                self._packager.export_firmware(ids, path)
+        except (PlanError, OSError, ValueError) as exc:
+            self.note("error", f"[export] {_text(exc)}")
+            return
+        self._remember_package_folder(path)
+        self.note("ok", f"[export] {len(ids)} firmware written to {path}")
+
+    def export_project(self, project_id: str) -> None:
+        project = self._library.project(project_id)
+        ids = [f.id for f in self._library.project_firmware(project_id)]
+        check = self._packager.check_export(ids)
+        path = dialogs.export_project(self, project.name, len(ids), check, self._package_folder())
+        if path is None:
+            return
+        try:
+            with _busy():
+                self._packager.export_project(project_id, path)
+        except (PlanError, OSError, ValueError) as exc:
+            self.note("error", f"[export] {_text(exc)}")
+            return
+        self._remember_package_folder(path)
+        self.note("ok", f"[export] '{project.name}' with {len(ids)} firmware written to {path}")
+
+    def _import_package(
+        self,
+        path: Path | None = None,
+        project_id: str | None = None,
+        device: str | None = None,
+    ) -> None:
+        """Import .embr package… (New menu, or a package dropped on the sidebar, where the
+        drop point gives the default project and group): the package is checked in full
+        first; nothing is written unless all of it is valid."""
+        if path is None:
+            chosen, _ = QFileDialog.getOpenFileName(
+                self,
+                tr("Import .embr package"),
+                str(self._package_folder()),
+                tr(dialogs.PACKAGE_FILTER),
+            )
+            if not chosen:
+                return
+            path = Path(chosen)
+            project_id = self._current_placement()[0]
+        try:
+            with _busy():
+                package = self._packager.open(path)
+        except (PackageError, OSError) as exc:
+            dialogs.notice(
+                self,
+                tr("Not imported"),
+                [
+                    tr(f"<b>{html.escape(path.name)}</b> cannot be imported."),
+                    html.escape(tr(_text(exc))),
+                ],
+            )
+            return
+        try:
+            placement = dialogs.import_package(
+                self, self._library, package, path.name, project_id, device
+            )
+            if placement is None:
+                return
+            with _busy():
+                result = self._packager.import_package(
+                    package, path.name, Placement(placement.project_id, placement.device)
+                )
+        except (KeyError, OSError, ValueError) as exc:
+            self.note("error", f"[import] {path.name}: {_text(exc)}")
+            return
+        finally:
+            package.discard()
+        self._remember_package_folder(path)
+        self.note(
+            "ok",
+            f"[import] {path.name}: {len(result.project_ids)} project(s), "
+            f"{len(result.firmware_ids)} firmware",
+        )
+        if result.firmware_ids:
+            self.select_firmware(result.firmware_ids[0])
+        elif result.project_ids:
+            self.select_project(result.project_ids[0])
+        else:
+            self.changed()
+
     def _archive_entry(self, entry_id: str) -> None:
         firmware_id = self._selected_firmware_id()
         if firmware_id is None:
@@ -1088,7 +1206,21 @@ class EmbrWindow(FrameWindow):
         if node.firmware_id is not None and self.is_locked(node.firmware_id):
             dialogs.notice(self, tr("Nothing added"), [tr("This firmware is being flashed.")])
             return
-        files, build, problems = sort_drop([Path(n) for n in names])
+        paths = [Path(n) for n in names]
+        packages = [p for p in paths if p.suffix.lower() == PACKAGE_SUFFIX]
+        if packages:
+            if len(paths) > 1:
+                dialogs.notice(self, tr("Nothing added"), [tr("Drop a .embr package on its own.")])
+                return
+            # the drop point, as for dragged firmware: a group, a project (ungrouped), the
+            # standalone header, or a firmware's own project and group
+            project_id, device = node.project_id, node.device
+            if node.firmware_id is not None:
+                dropped_on = self._library.firmware(node.firmware_id)
+                project_id, device = dropped_on.project_id, dropped_on.device
+            self._import_package(packages[0], project_id, device)
+            return
+        files, build, problems = sort_drop(paths)
         if node.firmware_id is not None:
             self._drop_on_firmware(node.firmware_id, files, build, problems)
             return
@@ -1364,6 +1496,16 @@ def _pio_folder(path: Path) -> Path | None:
         return None
     built = built_envs_below(path)
     return built[0].build_dir if built else path
+
+
+@contextlib.contextmanager
+def _busy() -> Generator[None]:
+    """Wait cursor while packing or checking a package."""
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    try:
+        yield
+    finally:
+        QApplication.restoreOverrideCursor()
 
 
 def _text(exc: Exception) -> str:

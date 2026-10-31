@@ -223,6 +223,7 @@ QLabel#flashtext:disabled {{ color: {p.fg_3}; }}
 QLabel#keycap {{ background: transparent; }}
 QPushButton[kind="danger"] QLabel#flashtext {{ color: #ffffff; }}
 QCheckBox[warn="1"] {{ color: {p.warn}; }}
+QCheckBox:disabled {{ color: {p.fg_3}; }}
 QPushButton[kind="danger"] {{ background: {p.bad}; border-color: {p.bad}; color: #ffffff;
   font-weight: 600; font-size: 14px; min-height: 38px; }}
 QPushButton[kind="danger-small"] {{ background: {p.bad}; border-color: {p.bad}; color: #ffffff; }}
