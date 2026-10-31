@@ -47,6 +47,7 @@ NOT_BACKED_UP = N_("The database could not be copied to {target} ({detail}). Not
 RENAME_AND_CONTINUE = N_("Rename and continue")
 BACK_UP_AND_START = N_("Back up and start anew")
 EXIT = N_("Exit")
+OK = N_("OK")
 BACKUP_TITLE = N_("Back up the damaged database")
 
 
@@ -230,11 +231,18 @@ def _choose(message: str, proceed: str) -> bool:
 
 
 def _application() -> "QApplication":
-    """The QApplication, created on first use (startup messages may need it earlier)."""
+    """The QApplication, created on first use (startup messages may need it earlier), with
+    the Embr logo as the icon of every window and message box."""
     from PySide6.QtWidgets import QApplication
 
+    from embr.ui.icons import app_icon
+
     existing = QApplication.instance()
-    return existing if isinstance(existing, QApplication) else QApplication(sys.argv)
+    if isinstance(existing, QApplication):
+        return existing
+    app = QApplication(sys.argv)
+    app.setWindowIcon(app_icon())
+    return app
 
 
 def _relaunch() -> None:
@@ -252,5 +260,7 @@ def _fatal(message: str) -> int:
     from PySide6.QtWidgets import QMessageBox
 
     _application()
-    QMessageBox.critical(None, "Embr", message)
+    box = QMessageBox(QMessageBox.Icon.Critical, "Embr", message)
+    box.addButton(tr(OK), QMessageBox.ButtonRole.AcceptRole)  # standard buttons stay English
+    box.exec()
     return 1
