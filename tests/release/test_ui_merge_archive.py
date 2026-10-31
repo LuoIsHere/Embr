@@ -140,17 +140,20 @@ def test_merge_to_bin(
 def test_merge_target_exists_or_is_not_writable(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§8.3 abnormal operations: an existing target file is not overwritten without asking
-    (as read flash and export ask, §12 item 3); a folder that cannot be written gives an
-    error, no firmware and no crash."""
+    """§8.3 abnormal operations, as decided in §5 合成工具 (2026-10-31): an existing target
+    file of Merge to .bin… is overwritten directly, without a Replace file question, and
+    nothing else changes; a folder that cannot be written gives an error, no firmware and
+    no crash."""
     app = embr(language=language)
-    window = app.window
-    files = kit.hello_files("esp32s3_hello", tmp_path / "bins")
+    window, root = app.window, app.paths.root
+    bins = tmp_path / "bins"
+    files = kit.hello_files("esp32s3_hello", bins)
     ui.fixed_firmware(window, file_dialogs, "Target", files)
     out = tmp_path / "out"
     out.mkdir()
     existing = out / "existing.bin"
-    existing.write_bytes(b"keep me")
+    existing.write_bytes(b"old target")
+    (out / "neighbour.bin").write_bytes(b"neighbour")
     problems: list[str] = []
     asked: list[str] = []
 
@@ -158,14 +161,35 @@ def test_merge_target_exists_or_is_not_writable(
         asked.append(driver.text())
         driver.cancel()
 
+    names = kit.sidebar_names(window)
+    docs = ui.firmware_docs(root)
+    sources = kit.snapshot(bins)
+    neighbours = {k: v for k, v in kit.snapshot(out).items() if k != existing.name}
     try:
-        with kit.expect_dialog(replace, title="Replace file", timeout=8):
+        with kit.expect_dialog(replace, title="Replace file", timeout=3):
             _merge(window, file_dialogs, existing, add=False)
     except AssertionError as exc:
-        problems.append(f"no Replace file question for an existing target: {exc}")
-    kit.pump(200)
-    if existing.read_bytes() != b"keep me":
-        problems.append("the existing target file was overwritten")
+        if "did not appear" not in str(exc):
+            raise
+    if asked:
+        problems.append(f"a Replace file question for an existing target: {asked[0]}")
+    kit.wait_log(window, f"[merge] written to {existing}")
+    kit.assert_no_dialog("Replace file", seconds=1.0)
+    if existing.read_bytes() != REFERENCE.read_bytes():
+        problems.append(
+            f"the existing target does not hold the merged image ({existing.stat().st_size} bytes)"
+        )
+    after = {k: v for k, v in kit.snapshot(out).items() if k != existing.name}
+    if after != neighbours:
+        problems.append(f"other files in the target folder changed: {neighbours} -> {after}")
+    if kit.snapshot(bins) != sources:
+        problems.append("the source files changed")
+    if kit.sidebar_names(window) != names:
+        problems.append(f"the firmware list changed: {names} -> {kit.sidebar_names(window)}")
+    if ui.firmware_docs(root) != docs:
+        problems.append("a firmware document changed after a merge without import")
+    if leftovers := sorted(p.name for p in app.paths.temp.glob("merge-*")):
+        problems.append(f"temporary merge files left behind: {leftovers}")
 
     locked = tmp_path / "locked"
     locked.mkdir()
