@@ -157,6 +157,10 @@ def style_sheet(p: Palette) -> str:
     """The whole application's QSS. Widgets opt in with object names and the dynamic
     properties `kind` (buttons, edits), `tag` (status labels) and `tone` (text colour)."""
     mono = ", ".join(f'"{f}"' for f in MONO_FAMILIES)
+    # data text (paths, addresses, commands, MAC) uses the interface font too, whose digits
+    # are tabular; only the log keeps a monospace font for esptool's aligned output
+    # (author, 2026-10-31)
+    data = ", ".join(f'"{f}"' for f in UI_FAMILIES)
     return f"""
 * {{ outline: none; }}
 QWidget {{ color: {p.fg}; }}
@@ -180,7 +184,7 @@ QSplitter::handle:hover {{ background: {p.line}; }}
 QLabel[tone="2"] {{ color: {p.fg_2}; }}
 QLabel[tone="3"] {{ color: {p.fg_3}; }}
 QLabel[tone="bad"] {{ color: {p.bad}; }}
-QLabel[mono="1"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
+QLabel[mono="1"] {{ font-family: {data}; font-size: {MONO_PX}px; }}
 QLabel[heading="1"] {{ font-size: 16px; font-weight: 600; }}
 QLabel[group="1"] {{ color: {p.fg_3}; font-size: 12px; letter-spacing: 1px; }}
 
@@ -262,10 +266,10 @@ QLineEdit[kind="cell"] {{ background: transparent; border: 1px solid transparent
   border-radius: 4px; padding: 0px 4px; min-height: 26px; }}
 QLineEdit[kind="cell"]:hover, QLineEdit[kind="cell"]:focus {{ border-color: {p.line};
   background: {p.panel_2}; }}
-QLineEdit[kind="cell"][mono="1"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
+QLineEdit[kind="cell"][mono="1"] {{ font-family: {data}; font-size: {MONO_PX}px; }}
 QComboBox[kind="cell"] {{ padding: 0px 3px; min-height: 26px; }}
 #tabline {{ border-bottom: 1px solid {p.line_2}; }}
-QLineEdit[kind="mono"] {{ font-family: {mono}; font-size: {MONO_PX}px; }}
+QLineEdit[kind="mono"] {{ font-family: {data}; font-size: {MONO_PX}px; }}
 QComboBox:disabled {{ color: {p.fg_3}; background: {p.panel_2}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
 QComboBox QAbstractItemView {{ background: {p.panel}; border: 1px solid {p.line};
@@ -301,7 +305,7 @@ QProgressBar {{ background: {p.line_2}; border: none; border-radius: 4px; max-he
 QProgressBar::chunk {{ background: {p.accent}; border-radius: 4px; }}
 #log {{ background: {p.log_bg}; color: {p.log_fg}; border: none; font-family: {mono};
   font-size: 11.5px; padding: 6px; }}
-#cmdtext {{ color: {p.fg_2}; font-family: {mono}; font-size: {MONO_PX}px; }}
+#cmdtext {{ color: {p.fg_2}; font-family: {data}; font-size: {MONO_PX}px; }}
 
 /* ---- menus and dialogs ---- */
 QMenu {{ background: {p.panel}; border: 1px solid {p.line}; border-radius: 6px; padding: 4px; }}
