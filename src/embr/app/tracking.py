@@ -256,7 +256,7 @@ class Tracker:
             )
         if not status.state.flashable:
             reasons = status.problems or tuple(c.message for c in status.changes[:3])
-            why = _STATE_TEXT[status.state]
+            why = STATE_TEXT[status.state]
             raise PlanError(f"{status.firmware.name}: {why}. " + "; ".join(reasons))
         return copy.deepcopy(status.firmware)
 
@@ -432,10 +432,11 @@ class Tracker:
         return FileState.OK if same else FileState.CHANGED
 
 
-_STATE_TEXT = {
-    ResolveState.NEEDS_CONFIRMATION: "changes need confirmation",
-    ResolveState.TARGET_SWITCHED: "the target was switched; rebuild the project",
-    ResolveState.INCOMPLETE: "the build is incomplete",
-    ResolveState.MISSING: "the build output or a file is missing",
-    ResolveState.BUILDING: "the build is still being written",
+STATE_TEXT = {
+    ResolveState.NEEDS_CONFIRMATION: N_("changes need confirmation"),
+    ResolveState.TARGET_SWITCHED: N_("the target was switched; rebuild the project"),
+    ResolveState.INCOMPLETE: N_("the build is incomplete"),
+    ResolveState.MISSING: N_("the build output or a file is missing"),
+    ResolveState.BUILDING: N_("the build is still being written"),
 }
+"""Why a firmware in that state is not flashable (short, translatable)."""

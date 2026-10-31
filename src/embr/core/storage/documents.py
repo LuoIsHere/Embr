@@ -58,7 +58,16 @@ def upgrade_document(
     """In memory: a lower schema_version is migrated step by step and set to `current`.
     Raises NewerDocumentError for a higher version, ValueError when schema_version is
     missing, invalid or below 1."""
-    raise NotImplementedError
+    version = data.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        raise ValueError("missing or invalid schema_version")
+    if version > current:
+        raise NewerDocumentError(f"schema_version {version} is newer than {current}")
+    for step in range(version, current):
+        if step not in migrations:
+            raise ValueError(f"no migration from schema_version {step}")
+        data = migrations[step](data)
+    return {**data, "schema_version": current}
 
 
 def save_document(path: Path, data: Document, *, current: int) -> None:

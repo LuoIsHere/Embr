@@ -16,6 +16,7 @@ from embr.core.storage.documents import (
     doc_table,
     load_document,
     save_document,
+    upgrade_document,
 )
 from embr.core.storage.ids import new_id, unique_name
 
@@ -216,7 +217,7 @@ class ProjectStore:
 def upgrade_project_doc(doc: Document) -> Document:
     """A project document upgraded to PROJECT_SCHEMA_VERSION in memory (see
     storage.documents.upgrade_document)."""
-    raise NotImplementedError
+    return upgrade_document(doc, current=PROJECT_SCHEMA_VERSION, migrations=_MIGRATIONS)
 
 
 def project_to_doc(project: Project) -> Document:
