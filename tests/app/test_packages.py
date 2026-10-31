@@ -3,6 +3,7 @@ the `context` data folder to `other`, a second data folder standing in for anoth
 computer, unless a test needs both ends in one folder."""
 
 import datetime
+import hashlib
 import re
 import shutil
 import tempfile
@@ -19,12 +20,17 @@ import tomli_w
 from app_testkit import (
     REPO,
     Clock,
+    FakePio,
     build_files,
     copy_files,
     fixed_firmware,
     flip_last_byte,
     idf_project,
+    make_package,
     move_app,
+    pio_build,
+    pio_configs,
+    pio_project,
     root_first,
 )
 
@@ -42,6 +48,7 @@ from embr.app.packages import (
     default_package_name,
 )
 from embr.app.tracking import Tracker
+from embr.core.firmware.import_pio import BOOT_APP0_IN_PACKAGE
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import (
     FIRMWARE_SCHEMA_VERSION,
@@ -391,6 +398,135 @@ def test_tracking_firmware_is_exported_as_fixed(rig: Rig, tmp_path: Path) -> Non
     assert {p: p.read_bytes() for p in files} == files
     stored = rig.context.firmware.get(tracked.id)
     assert (stored.source, stored.entry_overrides) == (Source.IDF_BUILD, tracked.entry_overrides)
+
+
+# ---- PlatformIO Arduino: boot_app0.bin from the framework package ------------------------
+
+PIO_ESP32, PIO_S3 = "esp32dev", "esp32-s3-devkitc-1"
+PIO_PACKAGE = Path("packages") / "framework-arduinoespressif32"
+"""The framework package in the fake PIO core of the samples."""
+
+
+def _pio_rig(context: AppContext, tmp_path: Path, sample: str) -> tuple[Rig, Path, Path]:
+    """A rig whose tracker knows PIO configs (FakePio, as tests/app/test_pio_tracking.py)
+    for a copy of `sample`. Returns it, the project root and the fake PIO core."""
+    root, core = tmp_path / "project", tmp_path / "core"
+    pio_project(sample, root, core)
+    configs = pio_configs(core, FakePio())
+    configs.load(root)
+    tracker = Tracker(context, clock=Clock(), pio=configs)
+    packager = Packager(context, tracker, clock=lambda: NOW)
+    return Rig(context, tracker, Library(context, tracker), packager), root, core
+
+
+def _member_texts(path: Path) -> dict[str, str]:
+    return {n: d.decode("utf-8") for n, d in _members(path) if n.endswith(".toml")}
+
+
+def _assert_no_text_names(texts: dict[str, str], places: list[Path]) -> None:
+    locals_ = {t.lower() for p in places for t in (str(p), p.as_posix())}
+    for name, text in texts.items():
+        assert "path:" not in text, name
+        assert not any(local in text.lower() for local in locals_), name
+        for value in _strings(tomllib.loads(text)):
+            assert not any(local in value.lower() for local in locals_), (name, value)
+
+
+# (sample, env, otadata address, manual framework package): the default package in the
+# PIO core, a manual one (set_framework_pkg), and a table with otadata away from 0xE000
+FRAMEWORK_CASES: dict[str, tuple[str, str, int, bool]] = {
+    "core_package": ("multi_env", PIO_ESP32, 0xE000, False),
+    "manual_package": ("multi_env", PIO_ESP32, 0xE000, True),
+    "otadata_moved": ("arduino_esp32s3_otadata", PIO_S3, 0xD000, False),
+}
+
+
+@pytest.mark.parametrize("case", FRAMEWORK_CASES)
+def test_pio_boot_app0_from_the_framework_package_travels_with_the_firmware(
+    context: AppContext, other: Rig, tmp_path: Path, case: str
+) -> None:
+    sample, env, address, manual = FRAMEWORK_CASES[case]
+    rig, root, core = _pio_rig(context, tmp_path, sample)
+    (firmware,) = rig.library.import_pio(root, [env])
+    package_dir = core / PIO_PACKAGE
+    if manual:
+        package_dir = make_package(tmp_path / "own", "2.0.0", b"\x5a" * 0x2000)
+        rig.library.set_framework_pkg(firmware.id, str(package_dir))
+    boot_file = package_dir / BOOT_APP0_IN_PACKAGE
+    boot_bytes = boot_file.read_bytes()
+    boot_sha = hashlib.sha256(boot_bytes).hexdigest()
+    build = pio_build(root, env)
+    assert not (build / "boot_app0.bin").exists()  # not in the build folder
+    status = rig.tracker.check(firmware.id)
+    assert status.state.flashable, status.problems
+    boot = next(e for e in status.firmware.entries if e.kind == EntryKind.OTADATA)
+    assert (boot.name, boot.address, boot.sha256, boot.file) == (
+        "boot_app0.bin",
+        address,
+        boot_sha,
+        f"path:{boot_file}",
+    )
+    destination = tmp_path / "pio.embr"
+
+    rig.packager.export_firmware([firmware.id], destination)
+
+    members = dict(_members(destination))
+    assert members[f"files/{boot_sha}.bin"] == boot_bytes
+    listed = {f.sha256: f for f in read_manifest(destination).files}
+    assert listed[boot_sha].original_name == "boot_app0.bin"
+    assert listed[boot_sha].size == len(boot_bytes)
+    _assert_no_text_names(_member_texts(destination), [package_dir, core, package_dir.resolve()])
+
+    (imported,) = _get(other, _import(other, destination, Placement(None)).firmware_ids)
+    otadata = [e for e in imported.entries if e.kind == EntryKind.OTADATA]
+    assert [(e.name, e.address, e.file, e.enabled, e.sha256) for e in otadata] == [
+        ("boot_app0.bin", address, f"archive:{boot_sha}", True, boot_sha)
+    ]
+    assert other.context.archive.path(boot_sha).read_bytes() == boot_bytes
+    back = other.tracker.check(imported.id)
+    assert back.state.flashable, back.problems
+    assert back.state is ResolveState.OK
+
+
+@pytest.mark.parametrize(
+    ("sample", "env", "address"),
+    [("multi_env", PIO_ESP32, 0xE000), ("arduino_esp32s3_otadata", PIO_S3, 0xD000)],
+    ids=["otadata_at_e000", "otadata_moved"],
+)  # otadata partitions are 0x2000 bytes in both tables
+def test_pio_blank_otadata_stays_blank(
+    context: AppContext, other: Rig, tmp_path: Path, sample: str, env: str, address: int
+) -> None:
+    rig, root, core = _pio_rig(context, tmp_path, sample)
+    shutil.rmtree(core / "packages")  # no framework package anywhere
+    (firmware,) = rig.library.import_pio(root, [env])
+    status = rig.tracker.check(firmware.id)
+    assert status.state.flashable, status.problems
+    blank = next(e for e in status.firmware.entries if e.kind == EntryKind.OTADATA)
+    assert (blank.file, blank.size, blank.address) == ("blank:", 0x2000, address)
+    destination = tmp_path / "pio.embr"
+
+    rig.packager.export_firmware([firmware.id], destination)
+
+    package = other.packager.open(destination)
+    try:
+        (exported,) = package.firmwares
+        (packed,) = [e for e in exported.entries if e.kind == EntryKind.OTADATA]
+        assert (packed.file, packed.size, packed.address) == ("blank:", 0x2000, address)
+    finally:
+        package.discard()
+    others = {e.sha256 for e in status.firmware.entries if e.file != "blank:"}
+    listed = {f.sha256 for f in read_manifest(destination).files}
+    assert listed == others  # nothing added for the blank entry
+    files = sorted(n for n, _ in _members(destination) if n.startswith("files/"))
+    assert files == sorted(f"files/{s}.bin" for s in others)
+    _assert_no_text_names(_member_texts(destination), [core])
+
+    (imported,) = _get(other, _import(other, destination, Placement(None)).firmware_ids)
+    otadata = [e for e in imported.entries if e.kind == EntryKind.OTADATA]
+    assert [(e.file, e.size, e.address, e.enabled) for e in otadata] == [
+        ("blank:", 0x2000, address, True)
+    ]
+    assert other.tracker.check(imported.id).state is ResolveState.OK
 
 
 def _build_missing(rig: Rig, tmp_path: Path) -> str:
