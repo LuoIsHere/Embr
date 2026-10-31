@@ -348,7 +348,14 @@ class Tracker:
         if firmware.build_ref is None or not firmware.build_ref.env:
             return missing(firmware, N_("No PlatformIO project and env")), ()
         ref = EnvRef(Path(firmware.build_ref.path), firmware.build_ref.env)
-        fallback = (ref.project_root / PLATFORMIO_INI, ref.build_dir)
+        # a folder has no stamp of its own: the files every build writes make a rebuild
+        # after `pio run -t clean` (or a deleted build folder) visible
+        fallback = (
+            ref.project_root / PLATFORMIO_INI,
+            ref.build_dir,
+            ref.build_dir / "firmware.bin",
+            ref.build_dir / "partitions.bin",
+        )
         manual = (
             firmware.framework_pkg or self._ctx.settings.get(PIO_SECTION, FRAMEWORK_PKG_KEY) or ""
         )

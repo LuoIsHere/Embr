@@ -188,6 +188,8 @@ class EmbrWindow(FrameWindow):
         """Firmware id, state and digest the workspace shows (flash compares the digest)."""
         self._round: list[str] = []
         self._round_changed = False
+        self._closed = False
+        """Set by closeEvent: queued refresh rounds stop."""
         self._reported: set[tuple[Path, str]] = set()
         """Damaged files already shown this session (design doc §12.8)."""
         self._job_kind: JobKind | None = None
@@ -910,7 +912,7 @@ class EmbrWindow(FrameWindow):
             self.changed()
 
     def _start_round(self) -> None:
-        if self._ops.busy or self.isMinimized() or self._round:
+        if self._closed or self._ops.busy or self.isMinimized() or self._round:
             return
         existing = [f.id for f in self._context.firmware.all()]
         self._round = self._schedule.round(self._selected_firmware_id(), existing)
@@ -919,7 +921,7 @@ class EmbrWindow(FrameWindow):
 
     def _next_in_round(self) -> None:
         """One firmware per event loop pass, so a round never blocks the window."""
-        if not self._round or self._ops.busy:
+        if self._closed or not self._round or self._ops.busy:
             self._round = []
             return
         firmware_id = self._round.pop(0)
@@ -1460,6 +1462,10 @@ class EmbrWindow(FrameWindow):
             ui_settings.save_ints(settings, "log", self.center_split.sizes())
         ui_settings.save_flag(settings, "sidebar", self.sidebar_visible or self._auto_hidden)
         self.ports.blockSignals(True)
+        # nothing of this window runs after it closed (its data may be closed next)
+        self._closed = True
+        self._refresh_timer.stop()
+        self._round = []
         event.accept()
 
 
