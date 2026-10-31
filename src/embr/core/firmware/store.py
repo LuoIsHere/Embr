@@ -5,7 +5,7 @@ from pathlib import Path, PurePath
 
 from embr.core.firmware.model import FIRMWARE_SCHEMA_VERSION, Firmware, Source
 from embr.core.firmware.serialize import firmware_from_doc, firmware_to_doc
-from embr.core.storage.documents import Migration, load_document, save_document
+from embr.core.storage.documents import Document, Migration, load_document, save_document
 from embr.core.storage.ids import new_id, unique_name
 
 
@@ -15,6 +15,12 @@ class ReadOnlyError(Exception):
 
 _MIGRATIONS: dict[int, Migration] = {}
 """migrations[n] upgrades a firmware document from version n to n + 1."""
+
+
+def upgrade_firmware_doc(doc: Document) -> Document:
+    """A firmware document upgraded to FIRMWARE_SCHEMA_VERSION in memory (see
+    storage.documents.upgrade_document)."""
+    raise NotImplementedError
 
 
 def now() -> str:

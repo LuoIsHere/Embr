@@ -100,7 +100,9 @@ class ProjectStore:
         project.updated_at = now()
         if not project.created_at:
             project.created_at = project.updated_at
-        save_document(self._path(project.id), _to_doc(project), current=PROJECT_SCHEMA_VERSION)
+        save_document(
+            self._path(project.id), project_to_doc(project), current=PROJECT_SCHEMA_VERSION
+        )
 
     def rename(self, project_id: str, name: str) -> Project:
         """Rename, made globally unique. Firmware keep their project_id."""
@@ -206,12 +208,18 @@ class ProjectStore:
             migrations=_MIGRATIONS,
             backup_root=self.backup_root,
         )
-        project = _from_doc(loaded.data)
+        project = project_from_doc(loaded.data)
         project.read_only = loaded.read_only
         return project
 
 
-def _to_doc(project: Project) -> Document:
+def upgrade_project_doc(doc: Document) -> Document:
+    """A project document upgraded to PROJECT_SCHEMA_VERSION in memory (see
+    storage.documents.upgrade_document)."""
+    raise NotImplementedError
+
+
+def project_to_doc(project: Project) -> Document:
     d = project.defaults
     return {
         "id": project.id,
@@ -225,7 +233,7 @@ def _to_doc(project: Project) -> Document:
     }
 
 
-def _from_doc(doc: Document) -> Project:
+def project_from_doc(doc: Document) -> Project:
     d = doc_table(doc, "defaults") or {}
     return Project(
         id=doc_str(doc, "id"),

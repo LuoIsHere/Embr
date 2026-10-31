@@ -48,6 +48,19 @@ def load_document(
     return LoadedDocument(data, read_only=False, migrated_from=version)
 
 
+class NewerDocumentError(ValueError):
+    """A document has a higher schema_version than this Embr supports."""
+
+
+def upgrade_document(
+    data: Document, *, current: int, migrations: Mapping[int, Migration]
+) -> Document:
+    """In memory: a lower schema_version is migrated step by step and set to `current`.
+    Raises NewerDocumentError for a higher version, ValueError when schema_version is
+    missing, invalid or below 1."""
+    raise NotImplementedError
+
+
 def save_document(path: Path, data: Document, *, current: int) -> None:
     """Write `data` as TOML with schema_version = current. The write is atomic (temporary
     file in the same folder, then replace), so a crash never leaves a half-written file."""
