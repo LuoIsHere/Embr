@@ -13,7 +13,9 @@ FONT_FILES = ("HarmonyOS_Sans_SC_Regular.ttf", "HarmonyOS_Sans_SC_Bold.ttf")
 """In embr/resources/fonts, unmodified, with LICENSE_Fonts (HarmonyOS Sans Fonts
 License Agreement: no modification, no stand-alone redistribution, a notice in the
 software, which About shows)."""
-MONO_FAMILIES = ["Cascadia Mono", "Consolas"]
+MONO_FAMILIES = ["Cascadia Mono", "Consolas", "HarmonyOS Sans SC"]
+"""The monospace fonts have no CJK glyphs: Chinese in paths, commands and the log falls
+back to HarmonyOS Sans SC, not to whatever system font Windows picks."""
 UI_PX = 13
 MONO_PX = 12
 
@@ -134,9 +136,11 @@ def ui_font() -> QFont:
     font = QFont()
     font.setFamilies(UI_FAMILIES)
     font.setPixelSize(UI_PX)
-    # full hinting snaps stems to the pixel grid: crisper CJK text at small sizes (author's
-    # pick of four renderings, 2026-10-31); widgets with their own font-size inherit it
-    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+    # vertical hinting: stems and baselines snap to the pixel grid vertically, horizontal
+    # advances stay fractional; full hinting rounded every Latin advance to whole pixels and
+    # spread small bold text like the "ARC" tag (author's choice, 2026-10-31); widgets with
+    # their own font-size inherit it
+    font.setHintingPreference(QFont.HintingPreference.PreferVerticalHinting)
     return font
 
 
