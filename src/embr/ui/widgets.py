@@ -1,5 +1,6 @@
 """Small building blocks styled by theme.style_sheet() through dynamic properties."""
 
+import html
 from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt
@@ -42,6 +43,9 @@ def label(
 ) -> QLabel:
     """`tone`: "2" / "3" for secondary / tertiary text, "bad" for errors."""
     widget = QLabel(text)
+    # plain unless a caller opts in: names and paths may contain "<", "&" (a project named
+    # "<b>x</b>" must show as typed)
+    widget.setTextFormat(Qt.TextFormat.PlainText)
     if tone:
         widget.setProperty("tone", tone)
     if mono:
@@ -63,11 +67,12 @@ class ElidedLabel(QLabel):
         self._full = ""
         self._mode = mode
         self.setMinimumWidth(1)
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self.set_full_text(text)
 
     def set_full_text(self, text: str) -> None:
         self._full = text
-        self.setToolTip(text)
+        self.setToolTip(plain_tooltip(text))
         self._elide()
 
     def full_text(self) -> str:
@@ -88,6 +93,12 @@ class ElidedLabel(QLabel):
     def _elide(self) -> None:
         width = max(self.width(), 1)
         self.setText(self.fontMetrics().elidedText(self._full, self._mode, width))
+
+
+def plain_tooltip(text: str) -> str:
+    """A tooltip that shows `text` as typed (Qt renders tooltips that look like HTML as
+    rich text)."""
+    return f"<qt>{html.escape(text)}</qt>" if "<" in text or "&" in text else text
 
 
 def elided(

@@ -173,6 +173,10 @@ class Resolution:
     """Entry id -> DerivedFile.note, for files with a note."""
     build_notes: tuple[str, ...] = ()
     """DerivedBuild.notes."""
+    removed: tuple[Entry, ...] = ()
+    """Entries of last_resolved whose file is no longer in the build (renamed or dropped;
+    design doc §3.4 case 2), rebuilt from the snapshot for display and marked MISSING.
+    Never part of `firmware`: not flashed, not accepted."""
 
 
 def entry_key(kind: EntryKind, file_name: str) -> str:
@@ -258,8 +262,14 @@ def resolve(
     else:
         state = ResolveState.OK
     changes: list[Change] = []
+    removed: list[Entry] = []
     if last is not None:
         changes = _changes(firmware, resolved, last, snapshot, derived, marks)
+        current = {d.key for d in derived}
+        for key, doc in last_entries.items():
+            if key not in current:
+                removed.append(_snapshot_entry(doc, firmware))
+                marks[key] = EntryMark.MISSING
     if state == ResolveState.OK and changes:
         content_only = all(
             c.kind == ChangeKind.CONTENT and c.subject in {d.name for d in derived} for c in changes
@@ -278,6 +288,7 @@ def resolve(
         configured_target=build.configured_target,
         entry_notes=entry_notes,
         build_notes=build.notes,
+        removed=tuple(removed),
     )
 
 
@@ -285,23 +296,7 @@ def missing(firmware: Firmware, problem: str) -> Resolution:
     """MISSING resolution showing the last_resolved snapshot (no entries without one)."""
     resolved = copy.deepcopy(firmware)
     last = firmware.last_resolved or {}
-    derived: list[Entry] = []
-    for doc in doc_tables(last, "entries"):
-        key = doc_str(doc, "key")
-        address = _hex(doc_str(doc, "address"))
-        entry = Entry(
-            id=key,
-            name=doc_str(doc, "name"),
-            file=doc_str(doc, "file"),
-            sha256=doc_str(doc, "sha256"),
-            size=doc_int(doc, "size"),
-            kind=EntryKind(doc_str(doc, "kind", EntryKind.UNKNOWN.value)),
-            address=address,
-            auto_address=address,
-            address_source=AddressSource.AUTO,
-        )
-        _apply_override(entry, firmware.entry_overrides.get(key))
-        derived.append(entry)
+    derived = [_snapshot_entry(doc, firmware) for doc in doc_tables(last, "entries")]
     resolved.entries = derived
     return Resolution(
         state=ResolveState.MISSING,
@@ -313,6 +308,25 @@ def missing(firmware: Firmware, problem: str) -> Resolution:
         idf_version=doc_opt_str(last, "idf_version"),
         configured_target=None,
     )
+
+
+def _snapshot_entry(doc: Document, firmware: Firmware) -> Entry:
+    """A derived entry as last_resolved recorded it (id = its key, overrides applied)."""
+    key = doc_str(doc, "key")
+    address = _hex(doc_str(doc, "address"))
+    entry = Entry(
+        id=key,
+        name=doc_str(doc, "name"),
+        file=doc_str(doc, "file"),
+        sha256=doc_str(doc, "sha256"),
+        size=doc_int(doc, "size"),
+        kind=EntryKind(doc_str(doc, "kind", EntryKind.UNKNOWN.value)),
+        address=address,
+        auto_address=address,
+        address_source=AddressSource.AUTO,
+    )
+    _apply_override(entry, firmware.entry_overrides.get(key))
+    return entry
 
 
 def accept(firmware: Firmware, resolution: Resolution) -> None:

@@ -1,8 +1,9 @@
 """Center column: firmware header, Entries / Parameters / Records tabs (design doc §6.1
 "中间工作区 — 选中固件时")."""
 
+import dataclasses
 import html
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -25,7 +26,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -53,6 +53,7 @@ from embr.core.firmware.tracking import ChangeKind, EntryMark, ResolveState
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.history import FlashRecord, RecordResult
 from embr.i18n import N_, tr
+from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS
@@ -104,7 +105,7 @@ def crumb(owner: Owner, firmware: Firmware) -> str:
         project = owner.library.project(firmware.project_id).name
     except KeyError:
         project = "?"
-    return f"{project} / {firmware.device or 'Ungrouped'}"
+    return f"{project} / {firmware.device or tr('Ungrouped')}"
 
 
 class Header(QWidget):
@@ -149,9 +150,12 @@ class Header(QWidget):
         firmware = status.firmware
         clear_layout(self.row)
         self.menu_button.show()
-        path = label(crumb(self._owner, firmware), tone="3")
-        self.row.addWidget(path)
-        name = QLabel(firmware.name)
+        # long names end in "…" (full text in the tooltip) when the row is too narrow
+        path = elided(crumb(self._owner, firmware), tone="3")
+        path.setMinimumWidth(CRUMB_MIN)
+        self.row.addWidget(path, 1)
+        name = elided(firmware.name)
+        name.setMinimumWidth(HEADING_MIN)
         name.setProperty("heading", "1")
         lift_to_baseline(name, path)
         self.row.addWidget(name)
@@ -184,12 +188,15 @@ class Header(QWidget):
         count = len(owner.library.project_firmware(project_id))
         caption = label(tr("Project"), tone="3")
         self.row.addWidget(caption)
-        name = QLabel(project.name)
+        name = elided(project.name)
+        name.setMinimumWidth(HEADING_MIN)
         name.setProperty("heading", "1")
         lift_to_baseline(name, caption)
         self.row.addWidget(name)
         self.row.addWidget(tag(tr(f"{count} firmware"), "gray"))
         self.row.addWidget(tag(tr(f"{len(project.devices)} groups"), "gray"))
+        if project.read_only:
+            self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
         self.menu_button.hide()
         self.notes.setText(project.notes or tr("no note — edit below"))
         self.notes.setToolTip(project.notes or tr("No note yet."))
@@ -234,6 +241,10 @@ class Banner(QFrame):
 
 
 NOTE_MIN_WIDTH = 120
+CRUMB_MIN = 40
+"""Narrowest the header's crumb gets."""
+HEADING_MIN = 80
+"""The header's name never shrinks below this."""
 ROW_PX = 36
 """Height of an entries row."""
 _DRAGGABLE = (1, 2, 3, 4, 5, 6)
@@ -336,35 +347,51 @@ class EntriesTab(QWidget):
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._filling = False
+        self._committed: tuple[str, int] | None = None
+        """(entry id, column) of the address just committed: the refresh that follows shows
+        the stored value, not the text still in the focused edit (an emptied address)."""
 
     def show_firmware(
         self,
         firmware: Firmware,
         marks: Mapping[str, EntryMark],
         notes: Mapping[str, str] | None = None,
+        removed: Sequence[Entry] = (),
     ) -> None:
-        """`notes`: importer remarks by entry id (TrackStatus.entry_notes)."""
+        """`notes`: importer remarks by entry id (TrackStatus.entry_notes). `removed`:
+        entries whose file left the build (TrackStatus.removed), shown read-only below the
+        others with their "file missing" mark (design doc §3.4 case 2)."""
         notes = notes or {}
         same = self._firmware is not None and self._firmware.id == firmware.id
         typing = self._typing() if same else None
+        if typing is not None and typing[:2] == self._committed:
+            typing = None
+        self._committed = None
         self._firmware = firmware
         self._mcus = firmware_mcus(self._owner.context, firmware)
         locked = self._owner.is_locked(firmware.id) or firmware.read_only
         self._filling = True
         self.table.setRowCount(0)
         rows = sorted(firmware.entries, key=lambda e: (e.address is None, e.address or 0))
+        gone = [dataclasses.replace(e, enabled=False) for e in removed]
         tracking = firmware.source.tracking
-        self.table.setRowCount(len(rows))
+        self.table.setRowCount(len(rows) + len(gone))
         for row, entry in enumerate(rows):
             self._fill_row(row, entry, marks.get(entry.id), locked, notes.get(entry.id, ""))
+        for row, entry in enumerate(gone, start=len(rows)):
+            self._fill_row(row, entry, marks.get(entry.id, EntryMark.MISSING), True)
         self._filling = False
         self.add_button.setEnabled(not locked)
         self.add_button.setVisible(not tracking)
         self.from_build.setVisible(tracking)
-        self.merge_button.setEnabled(any(e.enabled for e in firmware.entries))
+        enabled = [e for e in firmware.entries if e.enabled]
+        # nothing to merge, or the build output / a file is missing (design doc §5)
+        self.merge_button.setEnabled(
+            bool(enabled) and all(marks.get(e.id) != EntryMark.MISSING for e in enabled)
+        )
         header_height = self.table.horizontalHeader().sizeHint().height()
         self._fit_columns()
-        self.table.setFixedHeight(header_height + ROW_PX * len(rows) + 2)
+        self.table.setFixedHeight(header_height + ROW_PX * (len(rows) + len(gone)) + 2)
         if typing is not None:
             self._restore_typing(*typing)
 
@@ -645,6 +672,7 @@ class EntriesTab(QWidget):
             self._owner.note(
                 "dim", f"[entry] {entry.name}: address cleared, restored detected {restored}"
             )
+        self._committed = (entry.id, 1)
         self._owner.changed()
 
     def _note(self, entry: Entry, widget: QLineEdit) -> None:
@@ -700,20 +728,21 @@ class EntriesTab(QWidget):
             return
         partitions = self._partitions(firmware)
         choices = [tr(f"Partition: {p}") for p in partitions] + [tr("At an address…")]
-        choice, ok = QInputDialog.getItem(
-            self, tr("Place attachment"), tr("Placement"), choices, 0, False
-        )
-        if not ok:
+        # chosen by index: the texts are translated
+        index = dialogs.ask_choice(self, tr("Place attachment"), tr("Placement"), choices, tr("OK"))
+        if index is None:
             return
         try:
-            if choice.startswith("Partition: "):
-                partition = choice.removeprefix("Partition: ")
+            if index < len(partitions):
+                partition = partitions[index]
                 self._owner.library.add_attachment(firmware.id, Path(name), partition=partition)
             else:
-                text, ok = QInputDialog.getText(self, tr("Place attachment"), tr("Hex address"))
-                if not ok:
+                text = dialogs.ask_text(
+                    self, tr("Place attachment"), tr("Hex address"), "", "", tr("OK")
+                )
+                if text is None:
                     return
-                address = int(text.strip(), 16)
+                address = int(text, 16)
                 self._owner.library.add_attachment(firmware.id, Path(name), address=address)
         except (OSError, ValueError) as exc:
             self._owner.note("error", f"[entry] {exc}")
@@ -784,11 +813,11 @@ class EntriesTab(QWidget):
             self._owner.note("note", "[entry] no other firmware to copy to")
             return
         names = [f"{f.name}  ({crumb(self._owner, f)})" for f in targets]
-        choice, ok = QInputDialog.getItem(
-            self, tr("Copy entry"), tr(f"Copy {entry.name} to"), names, 0, False
+        index = dialogs.ask_choice(
+            self, tr("Copy entry"), tr(f"Copy {entry.name} to"), names, tr("Copy")
         )
-        if ok:
-            target = targets[names.index(choice)]
+        if index is not None:
+            target = targets[index]
             self._owner.library.copy_entry_to(firmware.id, entry.id, target.id)
             self._owner.note("dim", f"[entry] copied {entry.name} to '{target.name}'")
 
@@ -1049,7 +1078,7 @@ class ParamsTab(QWidget):
         if text.strip() == firmware.framework_pkg:
             return
         self._owner.library.set_framework_pkg(firmware.id, text)
-        shown = text.strip() or tr("the Settings path / auto-detection")
+        shown = text.strip() or "the Settings path / auto-detection"  # logs stay English
         self._owner.note("dim", f"[firmware] {firmware.name}: framework package {shown}")
         self._owner.changed()
 
@@ -1268,7 +1297,7 @@ class FirmwareView(QWidget):
         else:
             self._fixed_banner(status)
         self.banner.action.setEnabled(not self._owner.is_locked(firmware.id))
-        self.entries.show_firmware(firmware, status.marks, status.entry_notes)
+        self.entries.show_firmware(firmware, status.marks, status.entry_notes, status.removed)
         self.params.show_firmware(firmware)
         self.records.show_firmware(firmware)
 

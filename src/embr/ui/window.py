@@ -112,6 +112,8 @@ RESULT_TEXT = {
 COMMAND_UNKNOWN = N_("(identify the board, or add entries with addresses, to see the command)")
 READ_FOLDER = "read_folder"
 """settings.ini [ui]: the folder the last read flash was saved to."""
+CHANGES_FIRMWARE = ("rename", "move", "delete", "directory")
+"""Firmware menu actions that would change a firmware's own file."""
 PACKAGE_FOLDER = "package_folder"
 """settings.ini [ui]: the folder of the last .embr package exported or imported."""
 HINT_MANUAL_RESET = N_(
@@ -380,6 +382,9 @@ class EmbrWindow(FrameWindow):
         if firmware_id is None or self.is_locked(firmware_id):
             return
         firmware = self._library.firmware(firmware_id)
+        if firmware.read_only and name in CHANGES_FIRMWARE:
+            self._read_only_notice(firmware.name)
+            return
         if name == "rename":
             scope = tr("the project") if firmware.project_id else tr("standalone firmware")
             text = dialogs.ask_text(
@@ -422,8 +427,9 @@ class EmbrWindow(FrameWindow):
                 tr("Delete firmware"),
                 [
                     tr(
-                        f"Delete <b>{firmware.name}</b>? Archived files are kept (use Clean "
-                        "archive to remove unreferenced ones) and flash records are not affected."
+                        f"Delete <b>{html.escape(firmware.name)}</b>? Archived files are kept "
+                        "(use Clean archive to remove unreferenced ones) and flash records are "
+                        "not affected."
                     )
                 ],
                 tr("Delete"),
@@ -618,6 +624,9 @@ class EmbrWindow(FrameWindow):
         before = self._library.firmware(firmware_id)
         if before.project_id == target and before.device == device:
             return
+        if before.read_only:
+            self._read_only_notice(before.name)
+            return
         moved = self._library.move_firmware(firmware_id, target, device)
         if target is None:
             where = "standalone"
@@ -627,6 +636,20 @@ class EmbrWindow(FrameWindow):
             )
         self.note("dim", f"[move] '{moved.name}' → {where}")
         self.changed()
+
+    def _read_only_notice(self, name: str) -> None:
+        """Firmware or project written by a newer Embr: shown, never changed (design doc
+        §3.5)."""
+        dialogs.notice(
+            self,
+            tr("Read only"),
+            [
+                tr(
+                    f"<b>{html.escape(name)}</b> was created by a newer version of Embr and is "
+                    "read-only here."
+                )
+            ],
+        )
 
     def _current_placement(self) -> tuple[str | None, str]:
         selection = self._selection
@@ -1288,7 +1311,10 @@ class EmbrWindow(FrameWindow):
         self, firmware_id: str, files: list[Path], build: Path | None, problems: list[str]
     ) -> None:
         if build is not None:
-            problems = [*problems, tr(f"{build.name}: drop a build folder on a project or group")]
+            problems = [
+                *problems,
+                tr(f"{html.escape(build.name)}: drop a build folder on a project or group"),
+            ]
         if problems or not files:
             dialogs.notice(self, tr("Nothing added"), problems or [tr("No files were dropped.")])
             return

@@ -79,6 +79,8 @@ class TrackStatus:
     """Resolution.entry_notes (e.g. boot_app0.bin moved to the otadata partition)."""
     build_notes: tuple[str, ...] = ()
     """Resolution.build_notes (e.g. idedata.json not used and why)."""
+    removed: tuple[Entry, ...] = ()
+    """Resolution.removed: entries whose file left the build, shown marked missing."""
 
 
 class BuildChangedError(PlanError):
@@ -192,12 +194,20 @@ class Tracker:
         return found
 
     def mark_seen(self, firmware_id: str) -> None:
-        """The user left the firmware: clear updated_at."""
+        """The user left the firmware: clear updated_at and, after a followed content
+        change, the "content changed" marks (design doc §3.4: they last until the next
+        change of the build output or switching firmware)."""
         self._updated.pop(firmware_id, None)
         status = self._status.get(firmware_id)
         if status is not None and status.updated_at is not None:
-            state = ResolveState.OK if status.state == ResolveState.UPDATED else status.state
-            self._status[firmware_id] = dataclasses.replace(status, state=state, updated_at=None)
+            followed = status.state == ResolveState.UPDATED
+            state = ResolveState.OK if followed else status.state
+            marks = status.marks
+            if followed:
+                marks = {k: m for k, m in marks.items() if m != EntryMark.CHANGED}
+            self._status[firmware_id] = dataclasses.replace(
+                status, state=state, updated_at=None, marks=marks
+            )
 
     def confirm(self, firmware_id: str) -> TrackStatus:
         """Accept a NEEDS_CONFIRMATION status (tracking.accept() for tracking firmware,
@@ -288,6 +298,7 @@ class Tracker:
             configured_target=resolution.configured_target,
             entry_notes=resolution.entry_notes,
             build_notes=resolution.build_notes,
+            removed=resolution.removed,
         )
         return status, inputs, resolution
 

@@ -38,7 +38,7 @@ class FirmwareLink(QFrame):
         row.setContentsMargins(4, 6, 4, 6)
         text = QVBoxLayout()
         text.setSpacing(2)
-        text.addWidget(QLabel(firmware.name))
+        text.addWidget(label(firmware.name))
         text.addWidget(label(firmware.notes or "", tone="3"))
         row.addLayout(text, 1)
         if chips:
@@ -72,6 +72,7 @@ class ProjectView(QScrollArea):
         grid.setColumnMinimumWidth(0, 150)
         grid.setColumnStretch(1, 1)
         self._grid, self._row = grid, 0
+        self._fields: list[QWidget] = []
         name = QLineEdit(project.name)
         name.setMaximumWidth(420)
         name.editingFinished.connect(lambda: self._rename(name))
@@ -93,12 +94,25 @@ class ProjectView(QScrollArea):
         row.addStretch(1)
         self.content.addLayout(row)
         self.content.addStretch(1)
+        if project.read_only:  # shown, never changed (design doc §3.5)
+            warning = label(
+                tr("This project was created by a newer version of Embr and is read-only here."),
+                wrap=True,
+            )
+            warning.setProperty("hint", "warn")
+            warning.setContentsMargins(9, 7, 9, 7)
+            self.content.insertWidget(0, warning)
+            for field in self._fields:
+                field.setEnabled(False)
+            export.setEnabled(False)
+            delete.setEnabled(False)
 
     def _add(self, title: str, widget: QWidget) -> None:
         caption = label(title, tone="3")
         caption.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self._grid.addWidget(caption, self._row, 0)
         self._grid.addWidget(widget, self._row, 1)
+        self._fields.append(widget)
         self._row += 1
 
     def _with_note(self, widget: QWidget, note: str) -> QWidget:

@@ -163,6 +163,20 @@ def notice(parent: QWidget, title: str, lines: list[str]) -> None:
     dialog.exec()
 
 
+def ask_choice(
+    parent: QWidget, title: str, caption: str, choices: list[str], ok: str
+) -> int | None:
+    """Index of the chosen item, or None when cancelled."""
+    dialog = Dialog(parent, title, ok, danger=False)
+    combo = QComboBox()
+    combo.addItems(choices)
+    dialog.field(caption, combo)
+    combo.setFocus()
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return combo.currentIndex()
+
+
 def ask_text(
     parent: QWidget, title: str, caption: str, value: str, note: str, ok: str
 ) -> str | None:

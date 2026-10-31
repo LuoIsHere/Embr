@@ -242,19 +242,21 @@ def _build(status: TrackStatus) -> CheckItem:
             for p in (status.idf_version and f"ESP-IDF {status.idf_version}", status.firmware.chip)
             if p
         ]
-        if status.updated_at is not None:
-            parts.append(f"updated {status.updated_at:%H:%M:%S}")
-        return CheckItem(CheckState.PASS, N_("Build resolved"), " · ".join(parts))
+        detail = " · ".join(parts)
+        if status.updated_at is not None:  # whole messages, so that they translate
+            time = f"{status.updated_at:%H:%M:%S}"
+            detail = N_(f"{detail} · updated {time}") if detail else N_(f"updated {time}")
+        return CheckItem(CheckState.PASS, N_("Build resolved"), detail)
     reasons = status.problems or tuple(c.message for c in status.changes[:3])
     return CheckItem(CheckState.REFUSE, _BUILD_TITLES[status.state], "; ".join(reasons))
 
 
 _BUILD_TITLES = {
-    ResolveState.NEEDS_CONFIRMATION: "Build changed: confirm entries",
-    ResolveState.TARGET_SWITCHED: "Target switched: rebuild",
-    ResolveState.INCOMPLETE: "Build incomplete",
-    ResolveState.MISSING: "Build output missing",
-    ResolveState.BUILDING: "Build in progress",
+    ResolveState.NEEDS_CONFIRMATION: N_("Build changed: confirm entries"),
+    ResolveState.TARGET_SWITCHED: N_("Target switched: rebuild"),
+    ResolveState.INCOMPLETE: N_("Build incomplete"),
+    ResolveState.MISSING: N_("Build output missing"),
+    ResolveState.BUILDING: N_("Build in progress"),
 }
 
 

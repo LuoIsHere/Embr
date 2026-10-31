@@ -702,4 +702,15 @@ TEXT: dict[str, str] = {
     "not UTF-8 text": "不是 UTF-8 文本",
     "not valid TOML ({0})": "不是有效的 TOML（{0}）",
     "empty, or not an Embr project or firmware file": "文件为空，或不是 Embr 的项目或固件文件",
+    # check list: build item (release tests)
+    "{0} · updated {1}": "{0} · 更新于 {1}",
+    "updated {0}": "更新于 {0}",
+    "Build changed: confirm entries": "构建已变化：请确认条目",
+    "Target switched: rebuild": "目标芯片已切换：请重新编译",
+    "Build incomplete": "构建不完整",
+    "Build output missing": "构建产物缺失",
+    "Build in progress": "正在编译",
+    "Read only": "只读",
+    "<b>{0}</b> was created by a newer version of Embr and is read-only here.": "<b>{0}</b> 由更新版本的 Embr 创建，在此版本中只读。",
+    "This project was created by a newer version of Embr and is read-only here.": "此项目由更新版本的 Embr 创建，在此版本中只读。",
 }
