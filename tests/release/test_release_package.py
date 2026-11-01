@@ -31,8 +31,10 @@ import release_kit as kit
 from embr import __version__
 from embr.i18n import Language
 
-NAME = f"Embr-{__version__}"
-ARCHIVE = kit.REPO / "dist" / "release" / f"{NAME}-windows-x64.zip"
+NAME = f"embr_{__version__}_windows_x64"
+ARCHIVE = kit.REPO / "dist" / "release" / f"{NAME}.zip"
+CHECKSUM = kit.REPO / "dist" / "release" / f"{NAME}.zip.sha256"
+VERIFY_TIMEOUT = 600
 ANALYSIS = kit.REPO / "build" / "Embr" / "PYZ-00.toc"
 BUILD_TXT = "_internal/embr/resources/build.txt"
 RULE = "=" * 78
@@ -56,7 +58,7 @@ class Package:
     started: datetime.datetime
     finished: datetime.datetime
     folder: Path
-    """The zip extracted: <tmp>/Embr-<version>."""
+    """The zip extracted: <tmp>/embr_<version>_windows_x64."""
     names: list[str]
 
     def read(self, member: str) -> bytes:
@@ -158,6 +160,35 @@ def test_script_reports_the_archive(package: Package) -> None:
     assert str(package.archive) in last
     assert f"{len(data)} bytes" in last
     assert hashlib.sha256(data).hexdigest() in last
+
+
+def test_checksum_file_next_to_the_zip(package: Package) -> None:
+    """sha256sum format, LF, naming the zip without a folder (sha256sum -c in its folder)."""
+    digest = hashlib.sha256(package.archive.read_bytes()).hexdigest()
+    assert CHECKSUM.read_bytes() == f"{digest}  {ARCHIVE.name}\n".encode()
+
+
+def test_verify_release_accepts_the_package(package: Package, tmp_path: Path) -> None:
+    """scripts/verify_release.py as the release workflow runs it, worker check included
+    (on the Embr.exe it extracts from the zip)."""
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    env.pop("QT_QPA_PLATFORM", None)
+    done = subprocess.run(
+        [sys.executable, str(kit.REPO / "scripts" / "verify_release.py"), str(package.archive)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=VERIFY_TIMEOUT,
+        check=False,
+    )
+    output = done.stdout + done.stderr
+    assert done.returncode == 0, output[-4000:]
+    assert "FAIL" not in output, output[-4000:]
+    assert "ok: events arrive over pipes" in done.stdout, "the worker check did not run"
+    assert done.stdout.strip().splitlines()[-1] == f"ok: {ARCHIVE.name}"
 
 
 def test_zip_layout(package: Package) -> None:

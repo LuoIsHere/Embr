@@ -22,8 +22,9 @@ from embr import __version__
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "package_release.py"
 RULE = "=" * 78
-NAME = f"Embr-{__version__}"
-ZIP_NAME = f"{NAME}-windows-x64.zip"
+NAME = f"embr_{__version__}_windows_x64"
+"""The zip's name without .zip, and the one folder in it."""
+ZIP_NAME = f"{NAME}.zip"
 QT_STATEMENT = "GNU General Public License, version 3"
 
 
@@ -408,6 +409,10 @@ class _Repo:
     def stage(self) -> Path:
         return self.release / NAME
 
+    @property
+    def checksum(self) -> Path:
+        return self.release / f"{ZIP_NAME}.sha256"
+
 
 REPO_NOTICES = (
     "Embr includes or depends on the following third-party software.\n\n"
@@ -466,6 +471,7 @@ def test_main_packages_the_release(
     assert str(archive) in out
     assert str(len(data)) in out
     assert hashlib.sha256(data).hexdigest() in out
+    assert {p.name for p in repo.release.iterdir()} == {NAME, ZIP_NAME, f"{ZIP_NAME}.sha256"}
 
     with zipfile.ZipFile(archive) as zf:
         assert zf.testzip() is None
@@ -524,6 +530,44 @@ def test_main_replaces_an_earlier_package(
         assert f"{NAME}/Embr.exe" in zf.namelist()
 
 
+def _sha256sum_line(archive: Path) -> bytes:
+    """What `sha256sum <zip>` prints, run in the zip's folder."""
+    return f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n".encode()
+
+
+def test_main_writes_the_checksum_next_to_the_zip(
+    pr: Any, repo: _Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert pr.main() == 0
+    out = capsys.readouterr().out
+    assert repo.checksum.is_file()
+    data = repo.checksum.read_bytes()
+    assert data == _sha256sum_line(repo.archive)
+    assert b"\r" not in data, "the .sha256 file is not LF (sha256sum -c expects LF)"
+    assert data.count(b"\n") == 1
+    digest, name = data.decode("ascii").rstrip("\n").split("  ")
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+    assert name == ZIP_NAME, "the .sha256 file must name the zip without a folder"
+    assert digest in out
+
+
+def test_main_rewrites_the_checksum_on_a_second_run(
+    pr: Any, repo: _Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo.release.mkdir(parents=True)
+    repo.checksum.write_bytes(b"0" * 64 + f"  {ZIP_NAME}\r\n".encode())
+    assert pr.main() == 0
+    first = repo.checksum.read_bytes()
+    assert first == _sha256sum_line(repo.archive)
+
+    (repo.dist / "Embr.exe").write_bytes(b"MZ another fake exe")
+    assert pr.main() == 0
+    second = repo.checksum.read_bytes()
+    assert second == _sha256sum_line(repo.archive)
+    assert second != first, "the checksum of the first package was kept"
+    assert {p.name for p in repo.release.iterdir()} == {NAME, ZIP_NAME, f"{ZIP_NAME}.sha256"}
+
+
 @pytest.mark.parametrize("missing", ["Embr.exe", "_internal/embr/resources/build.txt"])
 def test_main_refuses_an_incomplete_build(
     pr: Any, repo: _Repo, missing: str, capsys: pytest.CaptureFixture[str]
@@ -532,6 +576,7 @@ def test_main_refuses_an_incomplete_build(
     assert pr.main() == 1
     assert "FAIL" in capsys.readouterr().out
     assert not repo.archive.exists()
+    assert not repo.checksum.exists()
 
 
 @pytest.mark.parametrize(
@@ -549,6 +594,7 @@ def test_main_refuses_a_bundled_distribution_not_listed(
     assert "FAIL: bundled but not listed" in out
     assert "embrtest-foo 1.0" in out
     assert not repo.archive.exists()
+    assert not repo.checksum.exists()
 
 
 def test_main_accepts_another_spelling_in_the_notices(
@@ -617,6 +663,7 @@ def test_script_paths_point_into_the_repository(pr: Any) -> None:
     assert pr.DIST == REPO / "dist" / "Embr"
     assert pr.RELEASE == REPO / "dist" / "release"
     assert pr.ANALYSIS == REPO / "build" / "Embr" / "PYZ-00.toc"
+    assert pr.PACKAGE_NAME == NAME == f"embr_{__version__}_windows_x64"
     for name in pr.COPIED:
         assert (REPO / name).is_file(), name
     assert set(pr.COPIED) == {"LICENSE", "README.md", "CHANGELOG.md"}
