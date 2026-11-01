@@ -1,7 +1,7 @@
-"""Build the release package (design doc §7.5): dist/release/Embr-<version>-windows-x64.zip
-holding the folder Embr-<version>/ with Embr.exe, _internal/, LICENSE, THIRD_PARTY_NOTICES
+"""Build the release package (design doc §7.5): dist/release/embr_<version>_windows_x64.zip
+holding the folder of the same name with Embr.exe, _internal/, LICENSE, THIRD_PARTY_NOTICES
 (the list from the repository plus the full license texts of everything bundled),
-ESPTOOL.txt, README.md and CHANGELOG.md.
+ESPTOOL.txt, README.md and CHANGELOG.md; next to it <zip name>.sha256 ("<hash>  <name>").
 
     uv run python scripts/package_release.py [--skip-build]
 
@@ -35,6 +35,8 @@ FONT_LICENSE = REPO / "src" / "embr" / "resources" / "fonts" / "LICENSE_Fonts"
 COPIED = ("LICENSE", "README.md", "CHANGELOG.md")
 LICENSE_FILE = re.compile(r"(LICEN[CS]E|COPYING|NOTICE)", re.IGNORECASE)
 RULE = "=" * 78
+PACKAGE_NAME = f"embr_{__version__}_windows_x64"
+"""Name of the zip (without .zip) and of the folder in it."""
 
 # distribution (normalized) -> text used instead of the files in its metadata
 STATED = {
@@ -68,8 +70,7 @@ def main() -> int:
         print("FAIL: bundled but not listed in THIRD_PARTY_NOTICES: " + ", ".join(missing))
         return 1
 
-    name = f"Embr-{__version__}"
-    stage = RELEASE / name
+    stage = RELEASE / PACKAGE_NAME
     if stage.exists():
         shutil.rmtree(stage)
     shutil.copytree(DIST, stage)
@@ -78,12 +79,14 @@ def main() -> int:
     write_text(stage / "THIRD_PARTY_NOTICES", listed.rstrip() + "\n\n" + license_texts(bundled))
     write_text(stage / "ESPTOOL.txt", esptool_note())
 
-    archive = RELEASE / f"{name}-windows-x64.zip"
+    archive = RELEASE / f"{PACKAGE_NAME}.zip"
     archive.unlink(missing_ok=True)
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for path in sorted(stage.rglob("*")):
             zf.write(path, path.relative_to(RELEASE).as_posix())
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    # LF, as sha256sum -c expects
+    Path(f"{archive}.sha256").write_bytes(f"{digest}  {archive.name}\n".encode())
     print(f"{archive} {archive.stat().st_size} bytes sha256 {digest}")
     return 0
 
