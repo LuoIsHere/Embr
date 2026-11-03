@@ -176,3 +176,67 @@ def test_fixed_firmware_with_a_changed_file_needs_confirmation(
     assert tracker.confirm(firmware.id).state is ResolveState.OK
     sha = hashlib.sha256(app.read_bytes()).hexdigest()
     assert sha in {e.sha256 for e in context.firmware.get(firmware.id).entries}
+
+
+# ---- what the workspace shows follows the stored firmware ----------------------------------
+
+
+def test_a_rename_reaches_the_status_and_the_flash_check(
+    context: AppContext, tmp_path: Path
+) -> None:
+    rig = _rig(context, tmp_path)
+    shown = digest(rig.tracker.check(rig.firmware_id).firmware)
+
+    rig.library.rename_firmware(rig.firmware_id, "renamed")
+
+    assert rig.tracker.check(rig.firmware_id).firmware.name == "renamed"
+    # the flash job is the same, so a digest shown before the rename still starts it
+    assert rig.tracker.verify_for_flash(rig.firmware_id, shown).name == "renamed"
+
+
+def test_a_move_reaches_the_status(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    project = rig.library.create_project("P")
+    assert rig.tracker.check(rig.firmware_id).firmware.project_id is None
+
+    rig.library.move_firmware(rig.firmware_id, project.id, "G")
+
+    shown = rig.tracker.check(rig.firmware_id).firmware
+    assert (shown.project_id, shown.device) == (project.id, "G")
+
+
+def test_group_changes_reach_the_status(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    project = rig.library.create_project("P")
+    rig.library.move_firmware(rig.firmware_id, project.id, "G")
+    assert rig.tracker.check(rig.firmware_id).firmware.device == "G"
+
+    rig.library.rename_group(project.id, "G", "H")
+    assert rig.tracker.check(rig.firmware_id).firmware.device == "H"
+
+    rig.library.remove_group(project.id, "H")
+    assert rig.tracker.check(rig.firmware_id).firmware.device == ""
+
+
+def test_deleting_the_project_reaches_the_status(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    project = rig.library.create_project("P")
+    rig.library.move_firmware(rig.firmware_id, project.id)
+    assert rig.tracker.check(rig.firmware_id).firmware.project_id == project.id
+
+    rig.library.delete_project(project.id)
+
+    assert rig.tracker.check(rig.firmware_id).firmware.project_id is None
+
+
+def test_a_rename_of_a_fixed_firmware_reaches_the_status(
+    context: AppContext, tmp_path: Path
+) -> None:
+    tracker = Tracker(context, clock=Clock())
+    library = Library(context, tracker)
+    firmware = fixed_firmware(library, copy_files(build_files("esp32s3_hello"), tmp_path / "f"))
+    assert tracker.check(firmware.id).firmware.name == firmware.name
+
+    library.rename_firmware(firmware.id, "renamed")
+
+    assert tracker.check(firmware.id).firmware.name == "renamed"

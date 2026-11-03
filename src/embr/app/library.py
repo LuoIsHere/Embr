@@ -301,7 +301,9 @@ class Library:
         return project
 
     def delete_project(self, project_id: str, *, delete_firmware: bool = False) -> None:
+        members = self._ctx.firmware.in_scope(project_id)
         self._ctx.projects.delete(project_id, self._ctx.firmware, delete_firmware=delete_firmware)
+        self._invalidate(members)
 
     def add_group(self, project_id: str, name: str) -> Project:
         """ValueError for an empty name; project.DuplicateGroupError if it exists."""
@@ -309,11 +311,19 @@ class Library:
 
     def rename_group(self, project_id: str, old: str, new: str) -> Project:
         """ValueError for an empty name; project.DuplicateGroupError if `new` exists."""
-        return self._ctx.projects.rename_group(project_id, old, _required(new), self._ctx.firmware)
+        members = self._ctx.firmware.in_scope(project_id)
+        project = self._ctx.projects.rename_group(
+            project_id, old, _required(new), self._ctx.firmware
+        )
+        self._invalidate(members)
+        return project
 
     def remove_group(self, project_id: str, name: str) -> Project:
         """Its firmware stay in the project, ungrouped."""
-        return self._ctx.projects.remove_group(project_id, name, self._ctx.firmware)
+        members = self._ctx.firmware.in_scope(project_id)
+        project = self._ctx.projects.remove_group(project_id, name, self._ctx.firmware)
+        self._invalidate(members)
+        return project
 
     # ---- firmware ---------------------------------------------------------------------
 
@@ -339,11 +349,17 @@ class Library:
 
     def rename_firmware(self, firmware_id: str, name: str) -> Firmware:
         """ValueError for an empty name; otherwise made unique within the scope."""
-        return self._ctx.firmware.rename(firmware_id, _required(name))
+        firmware = self._ctx.firmware.rename(firmware_id, _required(name))
+        self._tracker.invalidate(firmware_id)
+        return firmware
 
     def move_firmware(self, firmware_id: str, project_id: str | None, device: str = "") -> Firmware:
         """Into a project and group (unknown groups are added) or out to standalone."""
-        return self._ctx.projects.move_firmware(self._ctx.firmware, firmware_id, project_id, device)
+        firmware = self._ctx.projects.move_firmware(
+            self._ctx.firmware, firmware_id, project_id, device
+        )
+        self._tracker.invalidate(firmware_id)
+        return firmware
 
     def duplicate_firmware(self, firmware_id: str) -> Firmware:
         """Copy in the same project and group named "<name> copy" (made unique), with new
@@ -859,6 +875,10 @@ class Library:
     def _save(self, firmware: Firmware) -> None:
         self._ctx.firmware.save(firmware)
         self._tracker.invalidate(firmware.id)
+
+    def _invalidate(self, firmware: Sequence[Firmware]) -> None:
+        for fw in firmware:
+            self._tracker.invalidate(fw.id)
 
     def _save_entries(self, firmware: Firmware) -> None:
         """Re-resolve entries placed by partition (against the table of their own chip),
