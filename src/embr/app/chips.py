@@ -8,7 +8,8 @@ none, and the entry is not flashed to any board until one is chosen.
 
 An MCU is a chip plus, for chips split into revision lines (ESP32-P4: v0-v1 and v3), the
 line: from the image header's revision range, or chosen by hand with the chip
-(Entry.chip_line). An image whose range spans lines has no line and fits both.
+(Entry.chip_line). An image whose range spans lines has no line and fits both. Beside a
+line of its chip such an entry is not an MCU of its own: it fits that line.
 """
 
 import dataclasses
@@ -77,7 +78,13 @@ def firmware_mcus(context: AppContext, firmware: Firmware) -> tuple[Mcu, ...]:
         found |= {Mcu(e.chip, e.chip_line) for e in firmware.entries if e.chip}
     elif not found and firmware.chip:
         found = {Mcu(firmware.chip)}
-    return tuple(sorted(found))
+    return tuple(sorted(_without_covered(found)))
+
+
+def _without_covered(mcus: set[Mcu]) -> set[Mcu]:
+    """`mcus` without the line-less ones of a chip that also has a line."""
+    lined = {m.chip for m in mcus if m.line}
+    return {m for m in mcus if m.line or m.chip not in lined}
 
 
 def fits(mcu: Mcu | None, chip: str, revision: int | None) -> bool:
@@ -158,16 +165,17 @@ def merge_problem(context: AppContext, firmware: Firmware) -> str | None:
     than one MCU ("Checked entries are for esp32p4 and esp32s3", "... for esp32p4 v0-v1 and
     esp32p4 v3": Mcu.key), or an enabled entry has no MCU ("storage.bin has no MCU")."""
     mcus = firmware_mcus(context, firmware)
-    found: set[str] = set()
+    found: set[Mcu] = set()
     for entry in firmware.entries:
         if not entry.enabled:
             continue
         mcu = _entry_mcu(context, firmware, entry, mcus)
         if mcu is None:
             return f"{entry.name} has no MCU"
-        found.add(mcu.key)
+        found.add(mcu)
+    found = _without_covered(found)
     if len(found) > 1:
-        return f"Checked entries are for {' and '.join(sorted(found))}"
+        return f"Checked entries are for {' and '.join(sorted(m.key for m in found))}"
     return None
 
 

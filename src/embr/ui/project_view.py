@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from embr.app.chips import firmware_mcus
 from embr.core.firmware.model import Firmware
 from embr.core.flasher.plan import AFTER_MODES, BEFORE_MODES
 from embr.core.project import DuplicateGroupError, Project, ProjectDefaults
@@ -238,8 +237,7 @@ class ProjectView(QScrollArea):
             if not listed:
                 inner.addWidget(label(tr("(empty)"), tone="3"))
             for firmware in listed:
-                mcus = firmware_mcus(self._owner.context, firmware)
-                link = FirmwareLink(firmware, tuple(m.label for m in mcus))
+                link = FirmwareLink(firmware, self._owner.library.mcu_labels(firmware))
                 link.clicked.connect(self._owner.select_firmware)
                 inner.addWidget(link)
         if not members and not project.devices:

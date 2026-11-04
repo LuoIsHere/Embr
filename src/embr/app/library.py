@@ -933,6 +933,14 @@ class Library:
                 return reason
         return None
 
+    def mcu_labels(self, firmware: Firmware) -> tuple[str, ...]:
+        """Labels of firmware_mcus(), for lists. A tracking firmware's stored copy has no
+        entries, so it takes the last resolved copy; before its first check only the chip is
+        known, without a line."""
+        status = self._tracker.cached(firmware.id)
+        shown = status.firmware if firmware.source.tracking and status is not None else firmware
+        return tuple(m.label for m in firmware_mcus(self._ctx, shown))
+
     def _row(self, firmware: Firmware) -> FirmwareRow:
         return FirmwareRow(
             id=firmware.id,
@@ -940,7 +948,7 @@ class Library:
             origin=_origin(firmware),
             source=firmware.source,
             chips=firmware_chips(self._ctx, firmware),
-            mcus=tuple(m.label for m in firmware_mcus(self._ctx, firmware)),
+            mcus=self.mcu_labels(firmware),
             flag=self._cached_flag(firmware),
             project_id=firmware.project_id,
             device=firmware.device,

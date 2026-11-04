@@ -27,6 +27,7 @@ from embr.app.chips import (
     fits,
     for_chip,
     image_mcu,
+    merge_problem,
 )
 from embr.app.context import AppContext
 from embr.app.library import Library
@@ -202,3 +203,55 @@ def test_for_chip_takes_the_lines_holding_the_revision(
         None: {e.id for e in firmware.entries},  # secure download mode: only the chip counts
     }[revision]
     assert {e.id for e in for_chip(context, firmware, "esp32p4", revision).entries} == expected
+
+
+def test_a_line_less_entry_beside_a_line_is_no_mcu_of_its_own(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    rev3_boot = build_files("esp32p4_rev3_hello")[0]
+    files = copy_files([rev3_boot], tmp_path)
+    firmware = library.create_firmware("p4")
+    library.add_files(firmware.id, [*files, spanning_app(tmp_path / "app.bin")])
+    stored = context.firmware.get(firmware.id)
+
+    assert firmware_mcus(context, stored) == (P4_V3,)
+    assert merge_problem(context, stored) is None
+
+
+def test_a_table_chosen_without_a_line_is_no_mcu_of_its_own(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    files = copy_files(build_files("esp32p4_rev3_hello"), tmp_path)
+    firmware = library.create_firmware("p4")
+    library.add_files(firmware.id, files)
+    stored = context.firmware.get(firmware.id)
+    table = next(e for e in stored.entries if image_mcu(context, e) is None)
+    table.chip = "esp32p4"  # as an archive made by v0.1.0 has it: no chip_line
+    context.firmware.save(stored)
+
+    assert firmware_mcus(context, stored) == (P4_V3,)
+    assert merge_problem(context, stored) is None
+
+
+def test_a_line_less_entry_alone_stays_line_less(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    firmware = library.create_firmware("p4")
+    library.add_files(firmware.id, [spanning_app(tmp_path / "app.bin")])
+    assert firmware_mcus(context, context.firmware.get(firmware.id)) == (P4_ANY,)
+
+
+def test_a_line_less_entry_does_not_join_two_lines(context: AppContext, tmp_path: Path) -> None:
+    firmware = p4_lines_firmware(context, tmp_path)
+    table = next(e for e in firmware.entries if image_mcu(context, e) is None)
+    table.chip_line = ""
+    assert firmware_mcus(context, firmware) == (P4_V0_V1, P4_V3)
+
+
+def test_a_line_of_one_chip_does_not_cover_another_chip(
+    context: AppContext, tmp_path: Path
+) -> None:
+    firmware = p4_lines_firmware(context, tmp_path)
+    table = next(e for e in firmware.entries if image_mcu(context, e) is None)
+    table.chip, table.chip_line = "esp32s3", ""
+    assert Mcu("esp32s3") in firmware_mcus(context, firmware)

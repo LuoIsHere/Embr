@@ -13,7 +13,7 @@ from app_testkit import (
 )
 
 from embr.app.archiving import Archiver
-from embr.app.chips import firmware_chips
+from embr.app.chips import firmware_chips, firmware_mcus, image_chip, merge_problem
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
@@ -131,3 +131,32 @@ def test_usage_lists_every_archive_file_with_its_firmware(context: AppContext) -
         (orphan.sha256, ()),
     ]
     assert [u.file for u in usage if not u.firmware_ids] == archiver.unreferenced()
+
+
+def test_an_archived_p4_v3_build_stays_one_mcu(context: AppContext, tmp_path: Path) -> None:
+    library, archiver = _rig(context)
+    source = library.import_idf(idf_project("esp32p4_rev3_hello", tmp_path / "hello"))
+
+    archived = archiver.archive_version(source.id)
+
+    tables = [e for e in archived.entries if image_chip(context, e) is None]
+    assert tables
+    assert {(e.chip, e.chip_line) for e in tables} == {("esp32p4", "v3")}
+    assert [m.label for m in firmware_mcus(context, archived)] == ["ESP32-P4 v3"]
+    assert merge_problem(context, archived) is None
+    assert library.mcu_labels(archived) == ("ESP32-P4 v3",)
+
+
+def test_an_archive_without_chip_lines_shows_one_mcu_too(
+    context: AppContext, tmp_path: Path
+) -> None:
+    library, archiver = _rig(context)
+    source = library.import_idf(idf_project("esp32p4_rev3_hello", tmp_path / "hello"))
+    archived = archiver.archive_version(source.id)
+    for entry in archived.entries:  # as v0.1.0 wrote them
+        entry.chip_line = ""
+    context.firmware.save(archived)
+    stored = context.firmware.get(archived.id)
+
+    assert [m.label for m in firmware_mcus(context, stored)] == ["ESP32-P4 v3"]
+    assert merge_problem(context, stored) is None

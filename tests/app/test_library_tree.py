@@ -8,12 +8,14 @@ from app_testkit import (
     copy_files,
     find_row,
     fixed_firmware,
+    idf_project,
     multi_chip_firmware,
     p4_lines_firmware,
 )
 
 from embr.app.context import AppContext
 from embr.app.library import Library, Tree
+from embr.app.tracking import Tracker
 
 
 def shape(tree: Tree) -> list[tuple[str, list[tuple[str, list[str]]]]]:
@@ -99,3 +101,16 @@ def test_row_lists_p4_lines_as_mcus(library: Library, context: AppContext, tmp_p
         ("ESP32-P4 v3",),
     ]
     assert find_row(tree, lines.id).chips == ("esp32p4",)
+
+
+def test_a_tracking_row_shows_the_line_once_it_was_checked(
+    library: Library, context: AppContext, tmp_path: Path
+) -> None:
+    firmware = library.import_idf(idf_project("esp32p4_rev3_hello", tmp_path / "hello"))
+    assert find_row(library.tree(), firmware.id).mcus == ("ESP32-P4 v3",)  # checked by the import
+
+    restarted = Library(context, Tracker(context))  # nothing checked yet
+    assert find_row(restarted.tree(), firmware.id).mcus == ("ESP32-P4",)
+
+    restarted.tracker.check(firmware.id)
+    assert find_row(restarted.tree(), firmware.id).mcus == ("ESP32-P4 v3",)
