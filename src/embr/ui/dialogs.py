@@ -251,8 +251,8 @@ def new_firmware(
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
         tr(
-            "Fixed firmware: add entries by hand afterwards. Reset policy and erase_all are copied "
-            "from the project defaults."
+            "Fixed firmware: add entries by hand afterwards. Reset policy is copied from the "
+            "project defaults."
         )
     )
     name.setFocus()
@@ -269,9 +269,7 @@ def new_project(parent: QWidget) -> tuple[str, str] | None:
     notes.setPlaceholderText(tr("hardware revision, purpose…"))
     dialog.field(tr("Name (unique)"), name)
     dialog.field(tr("Notes"), notes)
-    dialog.text(
-        tr("Defaults for new firmware: before=default-reset · after=hard-reset · erase_all=off")
-    )
+    dialog.text(tr("Defaults for new firmware: before=default-reset · after=hard-reset"))
     name.setFocus()
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None

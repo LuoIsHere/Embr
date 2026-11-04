@@ -105,8 +105,8 @@ def test_project_odd_and_overlong_names(embr: Start, language: Language) -> None
 
 @ui.LANGUAGES
 def test_project_notes_and_defaults(embr: Start, language: Language) -> None:
-    """Notes are saved when the field loses the focus; defaults are copied once into new
-    firmware (design doc §3.1 项目的默认值)."""
+    """Notes are saved when the field loses the focus; the reset modes are copied once into
+    new firmware, which starts with erase_all off (design doc §3.1 项目的默认值)."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     ui.new_project(window, "Defaults")
@@ -121,11 +121,11 @@ def test_project_notes_and_defaults(embr: Start, language: Language) -> None:
     assert len(combos) == 2, combos  # before, after
     ui.choose(combos[0], "no-reset")
     ui.choose(combos[1], "watchdog-reset")
-    kit.set_checked(kit.find_checkbox(window.project_view, "erase all before flashing"), True)
+    assert not kit.find_all(window.project_view, QCheckBox)
     kit.wait_until(
         lambda: (
             _project(root, "Defaults")["defaults"]
-            == {"before": "no-reset", "after": "watchdog-reset", "erase_all": True}
+            == {"before": "no-reset", "after": "watchdog-reset", "erase_all": False}
         ),
         5,
         message=lambda: f"defaults on disk: {_project(root, 'Defaults')['defaults']}",
@@ -135,8 +135,8 @@ def test_project_notes_and_defaults(embr: Start, language: Language) -> None:
     kit.wait_log(window, "[new] fixed firmware 'First' created in Defaults")
     first = _firmware(root, "First")
     assert first["reset"] == {"before": "no-reset", "after": "watchdog-reset"}
-    assert first["erase_all"] is True
-    assert window.connection.erase_all.isChecked()
+    assert first["erase_all"] is False
+    assert not window.connection.erase_all.isChecked()
     ui.open_tab(window, "Parameters")
     assert [c.currentText() for c in ui.param_combos(window, "Reset before")] == ["no-reset"]
     assert [c.currentText() for c in ui.param_combos(window, "Reset after")] == ["watchdog-reset"]
@@ -144,10 +144,8 @@ def test_project_notes_and_defaults(embr: Start, language: Language) -> None:
     ui.click_row(window, "Defaults", "project")
     combos = kit.find_all(window.project_view, QComboBox)
     ui.choose(combos[0], "default-reset")
-    kit.set_checked(kit.find_checkbox(window.project_view, "erase all before flashing"), False)
-    kit.wait_until(lambda: _project(root, "Defaults")["defaults"]["erase_all"] is False, 5)  # type: ignore[index]
+    kit.wait_until(lambda: _project(root, "Defaults")["defaults"]["before"] == "default-reset", 5)  # type: ignore[index]
     assert _firmware(root, "First")["reset"] == first["reset"]  # existing firmware untouched
-    assert _firmware(root, "First")["erase_all"] is True
     ui.new_firmware(window, "Second")
     kit.wait_log(window, "[new] fixed firmware 'Second' created in Defaults")
     second = _firmware(root, "Second")

@@ -2,7 +2,6 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -137,20 +136,16 @@ class ProjectView(QScrollArea):
         after = QComboBox()
         after.addItems(list(AFTER_MODES))
         after.setCurrentText(project.defaults.after)
-        erase = QCheckBox(tr("erase all before flashing"))
-        erase.setChecked(project.defaults.erase_all)
 
         def save() -> None:
-            defaults = ProjectDefaults(before.currentText(), after.currentText(), erase.isChecked())
+            defaults = ProjectDefaults(before.currentText(), after.currentText())
             self._owner.library.set_project_defaults(project.id, defaults)
 
         before.activated.connect(save)
         after.activated.connect(save)
-        erase.toggled.connect(save)
         for caption, widget in (("before", before), ("after", after)):
             row.addWidget(label(caption, tone="2"))
             row.addWidget(widget)
-        row.addWidget(erase)
         row.addStretch(1)
         column.addLayout(row)
         note = label(

@@ -110,8 +110,8 @@ def test_defaults_apply_only_to_new_firmware(stores: Stores) -> None:
 
     old = firmware.get(before.id)
     assert (old.before, old.after, old.erase_all) == ("default-reset", "hard-reset", False)
-    assert (after.before, after.after, after.erase_all) == ("no-reset", "no-reset", True)
-    assert firmware.get(after.id).erase_all
+    assert (after.before, after.after, after.erase_all) == ("no-reset", "no-reset", False)
+    assert not firmware.get(after.id).erase_all
 
 
 def test_tracking_firmware_defaults(stores: Stores) -> None:
@@ -120,13 +120,13 @@ def test_tracking_firmware_defaults(stores: Stores) -> None:
     project = projects.create("P", defaults=defaults)
 
     idf = projects.create_firmware(firmware, project.id, "IDF", source=Source.IDF_BUILD)
-    assert idf.erase_all
+    assert not idf.erase_all
     # the reset strategy of IDF tracking firmware comes from the build, not the project
     assert idf.before != "no-reset"
     assert idf.after != "no-reset"
 
     pio = projects.create_firmware(firmware, project.id, "PIO", source=Source.PIO_BUILD)
-    assert (pio.before, pio.after, pio.erase_all) == ("no-reset", "no-reset", True)
+    assert (pio.before, pio.after, pio.erase_all) == ("no-reset", "no-reset", False)
 
 
 # --- device groups -----------------------------------------------------------------------

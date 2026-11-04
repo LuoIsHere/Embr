@@ -92,8 +92,8 @@ def test_import_pio_creates_one_firmware_per_env(context: AppContext, tmp_path: 
         )
         assert stored.build_ref is not None
         assert (Path(stored.build_ref.path), stored.build_ref.env) == (rig.root, env)
-        # PIO builds give no reset modes: the project's defaults are copied
-        assert (stored.erase_all, stored.before, stored.after) == (True, "no-reset", "no-reset")
+        # PIO builds give no reset modes: the project's are copied, its erase_all is not
+        assert (stored.erase_all, stored.before, stored.after) == (False, "no-reset", "no-reset")
         assert stored.last_resolved is not None
         status = rig.tracker.check(firmware.id)
         assert (status.state, status.firmware.chip) == (ResolveState.OK, CHIPS[env])

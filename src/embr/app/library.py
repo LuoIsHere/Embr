@@ -404,7 +404,7 @@ class Library:
     ) -> Firmware:
         """New IDF_BUILD firmware following `build_dir`: name (default
         import_idf.default_firmware_name(), made unique), project and group as given (a
-        project copies only erase_all from its defaults); resolved at once and the first
+        project's defaults do not apply); resolved at once and the first
         resolution accepted as last_resolved. import_idf errors propagate; PlanError when
         the build cannot be resolved (incomplete, target switched), nothing is created;
         AlreadyTrackedError when tracking_firmware_for() finds a firmware already following
@@ -493,7 +493,7 @@ class Library:
     ) -> list[Firmware]:
         """New PIO_BUILD firmware, one per env in `envs` (design doc §12.5): named after the
         env (made unique), build_ref = (project root, env), all in the same project and group
-        (a project copies its defaults: reset modes and erase_all, as PIO builds give no reset
+        (a project copies its default reset modes, as PIO builds give no reset
         modes, design doc §3.1), resolved at once with the first
         resolution accepted. All or nothing: AlreadyTrackedError when tracking_firmware_for_env()
         finds one of them followed already, PlanError (naming the env) when one cannot be

@@ -32,7 +32,8 @@ class DuplicateGroupError(ValueError):
 
 @dataclass
 class ProjectDefaults:
-    """Copied once into firmware created in the project."""
+    """Reset modes copied once into firmware created in the project. erase_all is not copied:
+    a firmware starts with it off. It stays in the file so that v0.1.0 keeps reading it."""
 
     before: str = "default-reset"
     after: str = "hard-reset"
@@ -184,8 +185,8 @@ class ProjectStore:
         device: str = "",
         source: Source = Source.MANUAL,
     ) -> Firmware:
-        """New firmware in the project with the project's current defaults copied in
-        (IDF tracking firmware copy only erase_all). An unknown `device` is added as a group."""
+        """New firmware in the project with the project's current reset modes copied in
+        (IDF tracking firmware copy nothing). An unknown `device` is added as a group."""
         project = self._ensure_group(project_id, device)
         defaults = project.defaults
         idf = source == Source.IDF_BUILD  # IDF firmware take reset modes from the build
@@ -196,7 +197,6 @@ class ProjectStore:
             device=device,
             before="default-reset" if idf else defaults.before,
             after="hard-reset" if idf else defaults.after,
-            erase_all=defaults.erase_all,
         )
 
     def move_firmware(

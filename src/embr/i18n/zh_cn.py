@@ -194,16 +194,16 @@ TEXT: dict[str, str] = {
     "Create": "创建",
     "e.g. S3-main-v1.3 (default: the first file added)": "例如 S3-main-v1.3（默认：第一个加入的文件名）",
     "Name": "名称",
-    "Fixed firmware: add entries by hand afterwards. Reset policy and erase_all are copied from the project defaults.": (
-        "固定型固件：之后手动添加条目。复位策略与 erase_all 取自项目默认值。"
+    "Fixed firmware: add entries by hand afterwards. Reset policy is copied from the project defaults.": (
+        "固定型固件：之后手动添加条目。复位策略取自项目默认值。"
     ),
     "New project": "新建项目",
     "e.g. 500_roller_hmi": "例如 500_roller_hmi",
     "hardware revision, purpose…": "硬件版本、用途…",
     "Name (unique)": "名称（不可重复）",
     "Notes": "备注",
-    "Defaults for new firmware: before=default-reset · after=hard-reset · erase_all=off": (
-        "新固件的默认值：before=default-reset · after=hard-reset · erase_all=off"
+    "Defaults for new firmware: before=default-reset · after=hard-reset": (
+        "新固件的默认值：before=default-reset · after=hard-reset"
     ),
     "Move firmware": "移动固件",
     "Move": "移动",
@@ -351,7 +351,6 @@ TEXT: dict[str, str] = {
     "Defaults for new firmware": "新固件的默认值",
     "Groups": "分组",
     "Delete project…": "删除项目…",
-    "erase all before flashing": "烧录前擦除整片",
     "copied once when a firmware is created here; changing them later does not touch existing firmware": (
         "仅在此处新建固件时复制一次；之后修改不影响已有固件"
     ),

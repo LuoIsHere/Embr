@@ -57,7 +57,8 @@ def test_new_firmware_copies_project_defaults(library: Library) -> None:
     )
     inside = library.create_firmware("inside", project.id)
     alone = library.create_firmware("alone")
-    assert (inside.before, inside.after, inside.erase_all) == ("no-reset", "no-reset", True)
+    # a stored erase_all default (v0.1.0) is not copied
+    assert (inside.before, inside.after, inside.erase_all) == ("no-reset", "no-reset", False)
     assert (alone.before, alone.after, alone.erase_all) == ("default-reset", "hard-reset", False)
 
 
@@ -228,8 +229,8 @@ def test_import_idf_creates_a_tracking_firmware(context: AppContext, tmp_path: P
         project.id,
         "board",
     )
-    # only erase_all comes from the project; reset modes come from the build
-    assert (stored.before, stored.after, stored.erase_all) == ("default-reset", "hard-reset", True)
+    # nothing comes from the project; reset modes come from the build
+    assert (stored.before, stored.after, stored.erase_all) == ("default-reset", "hard-reset", False)
     assert stored.build_ref is not None
     assert Path(stored.build_ref.path).resolve() == build.resolve()
     assert stored.last_resolved is not None
