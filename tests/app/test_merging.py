@@ -115,3 +115,39 @@ def test_merge_is_refused(context: AppContext, tmp_path: Path, case: str) -> Non
         merger.merge(firmware.id, output, options)
     assert not output.exists()
     assert len(context.firmware.all()) == 1
+
+
+@pytest.mark.parametrize(
+    ("project", "group", "expected"),
+    [
+        ("Station", "Main", "Merged from Station/Main/hello: start offset 0x0"),
+        ("Station", "", "Merged from Station/hello: start offset 0x0"),
+        (None, "", "Merged from hello: start offset 0x0"),
+    ],
+)
+def test_the_merged_note_says_where_it_came_from(
+    context: AppContext, tmp_path: Path, project: str | None, group: str, expected: str
+) -> None:
+    library, merger = _rig(context)
+    project_id = library.create_project(project).id if project else None
+    source = library.create_firmware("hello", project_id, group)
+    library.add_files(source.id, root_first(build_files("esp32s3_hello_v61")))
+
+    merged = merger.merge(source.id, tmp_path / "out.bin", MergeOptions())
+
+    assert merged is not None
+    assert merged.notes == expected
+
+
+def test_the_merged_note_follows_a_rename(context: AppContext, tmp_path: Path) -> None:
+    library, merger = _rig(context)
+    project = library.create_project("Station")
+    source = library.create_firmware("hello", project.id, "Main")
+    library.add_files(source.id, root_first(build_files("esp32s3_hello_v61")))
+    library.rename_group(project.id, "Main", "Core")
+    library.rename_firmware(source.id, "renamed")
+
+    merged = merger.merge(source.id, tmp_path / "out.bin", MergeOptions())
+
+    assert merged is not None
+    assert merged.notes.startswith("Merged from Station/Core/renamed:")

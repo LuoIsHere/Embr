@@ -2,6 +2,7 @@
 "中间工作区 — 选中固件时")."""
 
 import dataclasses
+import datetime
 import html
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -119,6 +120,10 @@ class Header(QWidget):
         self.row.setSpacing(8)
         self.notes = label("", tone="3")
         self.notes.setStyleSheet("font-size: 12px;")
+        self._notes_text = ""
+        self.files_updated = label("", tone="3")
+        self.files_updated.setStyleSheet("font-size: 12px;")
+        self.files_updated.hide()
         self.menu_button = button("⋯", "ibtn", tooltip=tr("Firmware actions"))
         self.menu = QMenu(self)
         self.menu.addAction(tr("Rename…\tF2"), lambda: owner.firmware_action("rename"))
@@ -144,7 +149,12 @@ class Header(QWidget):
         layout.setContentsMargins(14, 10, 14, 0)
         layout.setSpacing(4)
         layout.addLayout(top)
-        layout.addWidget(self.notes)
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 0, 0)
+        bottom.setSpacing(NOTES_GAP)
+        bottom.addWidget(self.files_updated)
+        bottom.addWidget(self.notes, 1)
+        layout.addLayout(bottom)
 
     def show_firmware(self, status: TrackStatus, flag: FirmwareFlag) -> None:
         firmware = status.firmware
@@ -152,11 +162,11 @@ class Header(QWidget):
         self.menu_button.show()
         # long names end in "…" (full text in the tooltip) when the row is too narrow
         path = elided(crumb(self._owner, firmware), tone="3")
-        path.setMinimumWidth(CRUMB_MIN)
+        shrink_to(path, CRUMB_MIN)
         self.row.addWidget(path, 1)
         name = elided(firmware.name)
-        name.setMinimumWidth(HEADING_MIN)
         name.setProperty("heading", "1")
+        shrink_to(name, HEADING_MIN)
         lift_to_baseline(name, path)
         self.row.addWidget(name)
         for mcu in firmware_mcus(self._owner.context, firmware):
@@ -173,13 +183,26 @@ class Header(QWidget):
             self.row.addWidget(tag(tr(f"Build updated {status.updated_at:%H:%M:%S}"), "info"))
         if firmware.read_only:
             self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
-        text = firmware.notes or tr("no note — edit on the Parameters tab")
-        self.notes.setText(
-            self.notes.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, 900)
-        )
+        self._notes_text = firmware.notes or tr("no note — edit on the Parameters tab")
+        self.show_files_updated(status)
         self.notes.setToolTip(firmware.notes or tr("No note yet. Edit it on the Parameters tab."))
         self.archive_action.setEnabled(
             status.state.flashable and any(e.file.startswith("path:") for e in firmware.entries)
+        )
+
+    def show_files_updated(self, status: TrackStatus) -> None:
+        """The grey time left of the notes, alone: a rebuild with the same content changes it
+        without any reason to rebuild the workspace."""
+        moment = status.files_updated
+        self.files_updated.setText(tr(f"Files updated {time_text(moment)}") if moment else "")
+        self.files_updated.setVisible(moment is not None)
+        width = NOTES_WIDTH
+        if moment is not None:
+            width -= self.files_updated.sizeHint().width() + NOTES_GAP
+        self.notes.setText(
+            self.notes.fontMetrics().elidedText(
+                self._notes_text, Qt.TextElideMode.ElideRight, width
+            )
         )
 
     def show_project(self, owner: Owner, project_id: str) -> None:
@@ -189,8 +212,8 @@ class Header(QWidget):
         caption = label(tr("Project"), tone="3")
         self.row.addWidget(caption)
         name = elided(project.name)
-        name.setMinimumWidth(HEADING_MIN)
         name.setProperty("heading", "1")
+        shrink_to(name, HEADING_MIN)
         lift_to_baseline(name, caption)
         self.row.addWidget(name)
         self.row.addWidget(tag(tr(f"{count} firmware"), "gray"))
@@ -198,8 +221,23 @@ class Header(QWidget):
         if project.read_only:
             self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
         self.menu_button.hide()
+        self.files_updated.hide()
         self.notes.setText(project.notes or tr("no note — edit below"))
         self.notes.setToolTip(project.notes or tr("No note yet."))
+
+
+def shrink_to(widget: ElidedLabel, narrowest: int) -> None:
+    """A header text may end in "…" down to `narrowest`, but a shorter text is no wider than
+    itself, so that what follows it stays next to it. Measured with the font as styled."""
+    widget.ensurePolished()
+    widget.setMinimumWidth(min(narrowest, widget.sizeHint().width()))
+
+
+def time_text(moment: datetime.datetime, today: datetime.date | None = None) -> str:
+    """HH:MM:SS today, MM-DD HH:MM on any other day."""
+    if moment.date() == (today or datetime.date.today()):
+        return f"{moment:%H:%M:%S}"
+    return f"{moment:%m-%d %H:%M}"
 
 
 def lift_to_baseline(heading: QLabel, reference: QLabel) -> None:
@@ -242,9 +280,13 @@ class Banner(QFrame):
 
 NOTE_MIN_WIDTH = 120
 CRUMB_MIN = 40
-"""Narrowest the header's crumb gets."""
+"""Narrowest the header's crumb gets, unless its text is shorter."""
 HEADING_MIN = 80
-"""The header's name never shrinks below this."""
+"""The header's name never shrinks below this, unless its text is shorter."""
+NOTES_WIDTH = 900
+"""Widest the header's grey line gets, with the files' time."""
+NOTES_GAP = 12
+"""Between the files' time and the notes."""
 ROW_PX = 36
 """Height of an entries row."""
 _DRAGGABLE = (1, 2, 3, 4, 5, 6)
@@ -330,6 +372,7 @@ class EntriesTab(QWidget):
         row_layout.setContentsMargins(6, 0, 6, 0)
         row_layout.addWidget(self.add_button, 1)
         self.from_build = label(tr("Entries come from the build directory"), tone="3")
+        self.from_build.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.from_build.setToolTip(
             tr("To add files, archive this version (⋯ menu) or create a fixed firmware")
         )

@@ -81,6 +81,17 @@ class TrackStatus:
     """Resolution.build_notes (e.g. idedata.json not used and why)."""
     removed: tuple[Entry, ...] = ()
     """Resolution.removed: entries whose file left the build, shown marked missing."""
+    files_updated: datetime.datetime | None = None
+    """Newest modification time of the firmware's own files; None when it has none outside
+    the archive."""
+
+
+def _files_updated(firmware: Firmware) -> datetime.datetime | None:
+    """TrackStatus.files_updated: stats only. Build inputs that are no entries (sdkconfig,
+    platformio.ini) and archived copies do not count."""
+    paths = [Path(e.file[len("path:") :]) for e in firmware.entries if e.file.startswith("path:")]
+    newest = fingerprint(paths).newest_mtime_ns
+    return None if newest is None else datetime.datetime.fromtimestamp(newest / 1e9)
 
 
 class BuildChangedError(PlanError):
@@ -133,6 +144,7 @@ class Tracker:
         firmware = self._ctx.firmware.get(firmware_id)
         now = self._clock()
         status, inputs, resolution = self._evaluate(firmware, now)
+        status = dataclasses.replace(status, files_updated=_files_updated(status.firmware))
         print_ = fingerprint(inputs)
         newest = print_.newest_mtime_ns
         settling = settle and firmware.source.tracking and newest is not None

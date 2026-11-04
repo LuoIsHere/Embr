@@ -2,32 +2,10 @@
 erase-all box, and an erase_all default stored by v0.1.0 no longer reaches new firmware.
 Driven offscreen on a real window."""
 
-from collections.abc import Iterator
-from pathlib import Path
-
-import pytest
-from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QCheckBox, QComboBox
 
-from embr.app.context import open_context
 from embr.core.project import ProjectDefaults
-from embr.core.storage.paths import AppPaths, prepare
-from embr.i18n import Language, current, set_language
 from embr.ui.window import EmbrWindow
-
-
-@pytest.fixture
-def window(qapp: QCoreApplication, tmp_path: Path) -> Iterator[EmbrWindow]:
-    language = current()
-    set_language(Language.ENGLISH)
-    paths = AppPaths(tmp_path / "Embr")
-    prepare(paths)
-    context = open_context(paths)
-    shown = EmbrWindow(context)
-    yield shown
-    shown.close()
-    context.close()
-    set_language(language)
 
 
 def test_the_project_page_has_no_erase_all_box(window: EmbrWindow) -> None:

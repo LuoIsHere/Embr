@@ -490,6 +490,7 @@ TEXT: dict[str, str] = {
     "needs confirmation": "需确认",
     "build output missing": "构建产物缺失",
     "Build updated {0}": "构建已更新 {0}",
+    "Files updated {0}": "文件更新于 {0}",
     "created by a newer Embr": "由更新版本的 Embr 创建",
     "no note — edit on the Parameters tab": "无备注——在参数页编辑",
     "No note yet. Edit it on the Parameters tab.": "还没有备注。可在参数页编辑。",

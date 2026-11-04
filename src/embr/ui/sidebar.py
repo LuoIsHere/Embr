@@ -380,7 +380,7 @@ class Sidebar(QWidget):
                 grow.text.addWidget(gname)
                 if not group.firmware:
                     grow.meta.addWidget(label(tr("empty"), tone="3"))
-                elif gfolded:
+                else:
                     grow.meta.addWidget(label(str(len(group.firmware)), tone="3"))
                 self._add(grow, Node("group", project.id, group.name, drop="group"), 24)
                 if not gfolded:

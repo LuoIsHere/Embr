@@ -170,7 +170,7 @@ QToolTip {{ background: {p.panel}; color: {p.fg}; border: 1px solid {p.line}; pa
 /* ---- frame areas ---- */
 #topbar, #cmdbar {{ background: {p.panel_2}; }}
 #cmdbar {{ border-top: 1px solid {p.line}; }}
-#sidebar {{ background: {p.panel_2}; border-right: 1px solid {p.line}; }}
+#sidebar {{ background: {p.panel_2}; }}
 #right {{ border-left: 1px solid {p.line}; background: {p.panel}; }}
 #center, #pane, #pane > QWidget {{ background: {p.panel}; }}
 #brand {{ font-weight: 600; }}

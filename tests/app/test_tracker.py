@@ -20,6 +20,7 @@ from app_testkit import (
     move_app,
 )
 
+from embr.app.archiving import Archiver
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
@@ -240,3 +241,46 @@ def test_a_rename_of_a_fixed_firmware_reaches_the_status(
     library.rename_firmware(firmware.id, "renamed")
 
     assert tracker.check(firmware.id).firmware.name == "renamed"
+
+
+# --- when the firmware's files were last updated ------------------------------------------
+
+
+def _set_mtime(path: Path, moment: datetime.datetime) -> None:
+    os.utime(path, (moment.timestamp(), moment.timestamp()))
+
+
+def test_files_updated_is_the_newest_entry_file(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    old = rig.clock.now - datetime.timedelta(hours=2)
+    for file in rig.build.rglob("*.bin"):
+        _set_mtime(file, old)
+    newest = rig.clock.now - datetime.timedelta(hours=1)
+    _set_mtime(rig.app, newest)
+
+    assert rig.tracker.check(rig.firmware_id).files_updated == newest
+
+
+def test_files_updated_ignores_inputs_that_are_no_entries(
+    context: AppContext, tmp_path: Path
+) -> None:
+    rig = _rig(context, tmp_path)
+    old = rig.clock.now - datetime.timedelta(hours=2)
+    for file in rig.build.rglob("*.bin"):
+        _set_mtime(file, old)
+    before = rig.tracker.check(rig.firmware_id).files_updated
+
+    _set_mtime(rig.build / "flasher_args.json", rig.clock.now - datetime.timedelta(hours=1))
+    rig.tracker.invalidate(rig.firmware_id)
+
+    assert before == old
+    assert rig.tracker.check(rig.firmware_id).files_updated == old
+
+
+def test_files_updated_is_none_without_outside_files(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    archived = Archiver(context, rig.tracker).archive_version(rig.firmware_id)
+    empty = rig.library.create_firmware("empty")
+
+    assert rig.tracker.check(archived.id).files_updated is None
+    assert rig.tracker.check(empty.id).files_updated is None

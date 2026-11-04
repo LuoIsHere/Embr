@@ -1,8 +1,8 @@
 """Right column: port and baud, identify, checks, flash / cancel with progress (design doc
 §6.1 "右侧栏"). The log is in the centre column (log_panel)."""
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -60,6 +60,21 @@ class HintLabel(QLabel):
         self.setContentsMargins(9, 7, 9, 7)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tr("Click to dismiss"))
+
+    def fit_text(self) -> None:
+        """Never lower than the wrapped text, whatever a layout has cached for its width.
+        heightForWidth() never answers less than the minimum, so that goes first."""
+        self.setMinimumHeight(0)
+        self.setMinimumHeight(self.heightForWidth(self.width()))
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.fit_text()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self.fit_text()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -346,6 +361,7 @@ class ConnectionPanel(QWidget):
         self.hint.setText(tr(text))
         self.hint.setProperty("hint", kind)
         _repolish(self.hint)
+        self.hint.fit_text()
         self.hint.setVisible(bool(text))
 
     def set_erase_all(self, checked: bool, enabled: bool, visible: bool) -> None:

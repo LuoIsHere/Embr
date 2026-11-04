@@ -87,9 +87,8 @@ class Merger:
         created.flash = FlashParams(firmware.flash.mode, firmware.flash.freq, firmware.flash.size)
         listed = ", ".join(f"{i.path.name} @ {i.address:#x}" for i in inputs)
         padding = f", padded to {pad}" if pad else ""
-        created.notes = (
-            f"Merged from {firmware.name}: start offset {options.target_offset:#x}{padding}"
-        )
+        source = self._source_path(firmware)
+        created.notes = f"Merged from {source}: start offset {options.target_offset:#x}{padding}"
         created.entries = [
             Entry(
                 id=new_id(),
@@ -107,6 +106,16 @@ class Merger:
         ]
         self._ctx.firmware.save(created)
         return created
+
+    def _source_path(self, firmware: Firmware) -> str:
+        """project/group/firmware, as far as it has them."""
+        if firmware.project_id is None:
+            return firmware.name
+        try:
+            project = self._ctx.projects.get(firmware.project_id).name
+        except KeyError:
+            return firmware.name
+        return "/".join(part for part in (project, firmware.device, firmware.name) if part)
 
     def _inputs(
         self, firmware_id: str, options: MergeOptions, *, write_files: bool

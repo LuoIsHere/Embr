@@ -910,6 +910,8 @@ class EmbrWindow(FrameWindow):
             return
         if self._shown != (firmware_id, status.state, status.digest):
             self.changed()
+        else:
+            self.header.show_files_updated(status)
 
     def _start_round(self) -> None:
         if self._closed or self._ops.busy or self.isMinimized() or self._round:
@@ -934,6 +936,8 @@ class EmbrWindow(FrameWindow):
         else:
             if before is None or (before.state, before.digest) != (status.state, status.digest):
                 self._round_changed = True
+            elif firmware_id == self._selected_firmware_id():
+                self.header.show_files_updated(status)
         if self._round:
             QTimer.singleShot(0, self._next_in_round)
         elif self._round_changed:
