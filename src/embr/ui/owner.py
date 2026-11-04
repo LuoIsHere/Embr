@@ -4,6 +4,7 @@ from typing import Protocol
 
 from embr.app.context import AppContext
 from embr.app.library import Library
+from embr.app.locations import Location
 from embr.ui.theme import Palette
 
 
@@ -47,7 +48,12 @@ class Owner(Protocol):
         ...
 
     def firmware_action(self, name: str) -> None:
-        """rename, duplicate, move, archive, export, delete for the selected firmware."""
+        """rename, duplicate, move, archive, export, reveal, delete for the selected
+        firmware."""
+        ...
+
+    def show_in_explorer(self, location: Location | None) -> None:
+        """Show in Explorer; None: the place is gone since the menu was opened."""
         ...
 
     def export_project(self, project_id: str) -> None:

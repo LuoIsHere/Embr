@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from embr.app.context import open_context
@@ -34,5 +34,7 @@ def window(qapp: QCoreApplication, tmp_path: Path) -> Iterator[EmbrWindow]:
     shown = EmbrWindow(context)
     yield shown
     shown.close()
+    shown.deleteLater()  # a closed window kept alive slows every later style sheet change
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     context.close()
     set_language(language)

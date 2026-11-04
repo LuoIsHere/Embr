@@ -229,6 +229,7 @@ def test_sidebar_context_menu_is_the_dots_menu(
             "Move to project…",
             "Archive this version…",
             "Export…",
+            "Show in Explorer",
             "Delete…",
         )
     ]

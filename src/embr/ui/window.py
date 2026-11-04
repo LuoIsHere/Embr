@@ -36,6 +36,7 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, preview_command
 from embr.app.identify import IdentifyMemory, IdentifySnapshot
 from embr.app.library import AlreadyTrackedError, Library, TrackingEntriesError
+from embr.app.locations import Location, firmware_location
 from embr.app.merging import Merger
 from embr.app.operations import (
     SAVE_FAILED,
@@ -81,6 +82,7 @@ from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
 from embr.core.storage.documents import DamagedDocument
 from embr.i18n import N_, SETTINGS_KEY, Language, current, effective, tr
 from embr.ui import dialogs
+from embr.ui.adapters import explorer
 from embr.ui.adapters import settings as ui_settings
 from embr.ui.adapters.jobs import JobSignals, MainThreadDispatcher
 from embr.ui.adapters.ports import PortMonitor
@@ -379,6 +381,15 @@ class EmbrWindow(FrameWindow):
             [("dim", f"[log] logs/{file_name}, line {line + 1}")] + [("info", t) for t in section]
         )
 
+    def show_in_explorer(self, location: Location | None) -> None:
+        if location is None:
+            self.note("warning", "[explorer] the folder no longer exists")
+            return
+        try:
+            explorer.reveal(location)
+        except OSError as exc:
+            self.note("error", f"[explorer] {exc}")
+
     def firmware_action(self, name: str) -> None:
         firmware_id = self._selected_firmware_id()
         if firmware_id is None or self.is_locked(firmware_id):
@@ -386,6 +397,9 @@ class EmbrWindow(FrameWindow):
         firmware = self._library.firmware(firmware_id)
         if firmware.read_only and name in CHANGES_FIRMWARE:
             self._read_only_notice(firmware.name)
+            return
+        if name == "reveal":
+            self.show_in_explorer(firmware_location(firmware))
             return
         if name == "rename":
             scope = tr("the project") if firmware.project_id else tr("standalone firmware")

@@ -542,6 +542,7 @@ TEXT: dict[str, str] = {
     "Re-locate…": "重新定位…",
     "Archive this file": "归档此文件",
     "Copy to firmware…": "复制到固件…",
+    "Show in Explorer": "在资源管理器中打开",
     "Remove entry": "移除条目",
     "Comes from the build output; untick it to leave it out": "来自构建产物；取消勾选即可不烧录",
     "Re-locate {0}": "重新定位 {0}",

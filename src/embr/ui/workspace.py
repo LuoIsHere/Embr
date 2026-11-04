@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 
 from embr.app.chips import Mcu, chip_choosable, entry_mcu, firmware_mcus, fits, image_header
 from embr.app.library import FirmwareFlag
+from embr.app.locations import entry_location, firmware_location
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
 from embr.core.firmware.entries import AddressError, FolderError
@@ -118,6 +119,7 @@ class Header(QWidget):
         self.row = QHBoxLayout()
         self.row.setContentsMargins(0, 0, 0, 0)
         self.row.setSpacing(8)
+        self._firmware: Firmware | None = None
         self.notes = label("", tone="3")
         self.notes.setStyleSheet("font-size: 12px;")
         self._notes_text = ""
@@ -133,6 +135,10 @@ class Header(QWidget):
             tr("Archive this version…"), lambda: owner.firmware_action("archive")
         )
         self.menu.addAction(tr("Export…"), lambda: owner.firmware_action("export"))
+        self.reveal_action = self.menu.addAction(
+            tr("Show in Explorer"), lambda: owner.firmware_action("reveal")
+        )
+        self.menu.aboutToShow.connect(self._update_reveal)
         self.menu.addSeparator()
         danger_action(self.menu, tr("Delete…"), lambda: owner.firmware_action("delete"))
         self.menu_button.clicked.connect(
@@ -156,8 +162,14 @@ class Header(QWidget):
         bottom.addWidget(self.notes, 1)
         layout.addLayout(bottom)
 
+    def _update_reveal(self) -> None:
+        """When the menu opens: the folder may have gone or appeared since the last refresh."""
+        firmware = self._firmware
+        self.reveal_action.setEnabled(firmware is not None and bool(firmware_location(firmware)))
+
     def show_firmware(self, status: TrackStatus, flag: FirmwareFlag) -> None:
         firmware = status.firmware
+        self._firmware = firmware
         clear_layout(self.row)
         self.menu_button.show()
         # long names end in "…" (full text in the tooltip) when the row is too narrow
@@ -206,6 +218,7 @@ class Header(QWidget):
         )
 
     def show_project(self, owner: Owner, project_id: str) -> None:
+        self._firmware = None
         clear_layout(self.row)
         project = owner.library.project(project_id)
         count = len(owner.library.project_firmware(project_id))
@@ -821,6 +834,9 @@ class EntriesTab(QWidget):
         archive = menu.addAction(tr("Archive this file"))
         archive.setEnabled(entry.file.startswith("path:") and not derived)
         copy_to = menu.addAction(tr("Copy to firmware…"))
+        location = entry_location(entry)
+        reveal = menu.addAction(tr("Show in Explorer"))
+        reveal.setEnabled(location is not None)
         menu.addSeparator()
         remove = menu.addAction(tr("Remove entry"))
         remove.setEnabled(not derived)
@@ -839,6 +855,9 @@ class EntriesTab(QWidget):
             return
         elif chosen is copy_to:
             self._copy_to(firmware, entry)
+        elif chosen is reveal:
+            self._owner.show_in_explorer(location)
+            return
         elif chosen is remove:
             self._owner.library.remove_entry(firmware.id, entry.id)
             self._owner.note("dim", f"[entry] removed {entry.name}")
