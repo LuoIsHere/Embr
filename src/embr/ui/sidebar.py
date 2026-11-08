@@ -5,9 +5,20 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
-from PySide6.QtCore import QEvent, QMargins, QMimeData, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QMargins,
+    QMimeData,
+    QModelIndex,
+    QPoint,
+    QRectF,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QAction,
+    QColor,
     QContextMenuEvent,
     QDrag,
     QDragMoveEvent,
@@ -195,10 +206,12 @@ class FirmwareTree(QTreeWidget):
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._press: QPoint | None = None
+        self._current: QTreeWidgetItem | None = None
+        """The current row before the last press (put back when the press starts a reorder)."""
         self._drop_row: QWidget | None = None
         self.sortable = True
         self.read_only: frozenset[str] = frozenset()
-        self.colors = Colors("#f6f7f9", "#ffffff", "#d9dde3")
+        self.colors = Colors("#f6f7f9", "#ffffff", "#d9dde3", "#e4e8ee")
         self._sort: _Sort | None = None
         self._scroller = QTimer(self)
         self._scroller.setInterval(16)
@@ -219,6 +232,7 @@ class FirmwareTree(QTreeWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         self._press = event.position().toPoint()
+        self._current = self.currentItem()  # a press selects a project row; a drag does not
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -403,6 +417,12 @@ class FirmwareTree(QTreeWidget):
                 len(rows),
             )
             allowed = (tops[first], tops[end])
+        if self.currentItem() is not self._current:  # the press selected the dragged row
+            if self._current is None:
+                self.clearSelection()
+                self.setCurrentIndex(QModelIndex())
+            else:
+                self.setCurrentItem(self._current)
         pictures = {b.key: self._picture(b) for b in spans}
         overlay = Overlay(
             self.viewport(), spans, pictures, self.verticalScrollBar().value, self.colors
@@ -434,6 +454,11 @@ class FirmwareTree(QTreeWidget):
             if screen.contains(rect) and rect.height() == height:
                 painter.drawPixmap(0, y, self.viewport().grab(rect))
             else:
+                if item.isSelected():  # the view paints the selection, not the row widget
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QColor(self.colors.selected))
+                    painter.drawRoundedRect(QRectF(0, y, width, height), 5, 5)
                 widget.resize(width, height)
                 painter.drawPixmap(0, y, widget.grab())
             y += height
@@ -595,7 +620,7 @@ class Sidebar(QWidget):
 
     def apply_palette(self, p: Palette) -> None:
         self._search_icon.setIcon(icons.icon("search", p.fg_3))
-        self.tree.colors = Colors(p.panel_2, p.panel, p.line)
+        self.tree.colors = Colors(p.panel_2, p.panel, p.line, p.sel)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """A narrow sidebar shows "+ New" instead of the whole button text (a button cannot

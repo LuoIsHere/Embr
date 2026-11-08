@@ -126,6 +126,8 @@ class Colors:
     lifted: str
     """The dragged block's background."""
     edge: str
+    selected: str
+    """A selected row (the tree's own selection colour), for rows grabbed off screen."""
 
 
 class Overlay(QWidget):

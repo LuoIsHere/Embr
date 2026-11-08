@@ -311,3 +311,56 @@ def test_a_firmware_row_is_not_reordered(window: EmbrWindow) -> None:
     )
     assert firmware is not None and not tree._can_sort(firmware)
     assert _groups(window, project_id) == ["Main", "Display", "Radio"]
+
+
+def test_a_drag_keeps_the_selection(window: EmbrWindow) -> None:
+    """The press on the dragged project row does not select it (a drag is not a click): the
+    firmware shown stays selected, before and after the drop."""
+    project_id = _station(window)
+    window.library.create_project("Alpha")
+    tree = _shown(window)
+    shown = window.library.project_firmware(project_id)[0]
+    window.select_firmware(shown.id)
+    QApplication.processEvents()
+    selected = tree.currentItem()
+    assert selected is not None and tree.node(selected).firmware_id == shown.id  # type: ignore[union-attr]
+
+    _press_and_move(
+        tree, _at(tree, _row(tree, "project", "Alpha")), _at(tree, _row(tree, "group", "Radio"), 30)
+    )
+    assert tree.sorting() and tree.currentItem() is selected
+    _mouse(tree, QEvent.Type.MouseButtonRelease, QPoint(-5, -5), held=False)  # outside: back
+    QApplication.processEvents()
+    current = tree.currentItem()
+    assert current is not None and tree.node(current).firmware_id == shown.id  # type: ignore[union-attr]
+
+
+def test_a_selected_row_off_screen_keeps_its_colour(window: EmbrWindow) -> None:
+    for index in range(12):
+        project = window.library.create_project(f"P{index:02}")
+        window.library.create_firmware(f"fw {index:02}", project.id)
+    tree = _shown(window)
+    last = window.library.project_firmware(window.library.tree().projects[-1].id)[0]
+    window.select_firmware(last.id)
+    tree.verticalScrollBar().setValue(0)
+    QApplication.processEvents()
+    row = next(
+        tree.topLevelItem(i)
+        for i in range(tree.topLevelItemCount())
+        if (n := tree.node(tree.topLevelItem(i))) is not None and n.firmware_id == last.id
+    )
+    assert row is not None and row.isSelected()
+    assert not tree.viewport().rect().contains(tree.visualItemRect(row))  # off screen
+
+    _press_and_move(
+        tree, _at(tree, _row(tree, "project", "P00")), _at(tree, _row(tree, "project", "P01"), 20)
+    )
+    sort = tree._sort
+    assert sort is not None
+    block = next(b for b in sort.spans if b.key == last.project_id)
+    rows = [tree.topLevelItem(i) for i in range(block.first, tree.indexOfTopLevelItem(row))]
+    above = sum(tree.indexRowSizeHint(tree.indexFromItem(r)) for r in rows if r is not None)
+    picture = sort.overlay._pictures[block.key].toImage()
+    colour = picture.pixelColor(8, above + 4).name()
+    assert colour == window._palette.sel.lower()
+    _mouse(tree, QEvent.Type.MouseButtonRelease, QPoint(-5, -5), held=False)
