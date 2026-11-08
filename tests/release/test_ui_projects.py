@@ -7,14 +7,26 @@ data/firmwares)."""
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 import release_kit as kit
 import ui_kit as ui
-from PySide6.QtWidgets import QAbstractButton, QCheckBox, QComboBox, QLabel
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QCursor, QMouseEvent
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QWidget,
+)
 from ui_kit import watchdog  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 from embr.i18n import Language, tr
+from embr.ui.reorder import Overlay
 from embr.ui.widgets import ElidedLabel
 
 Start = Callable[..., kit.EmbrApp]
@@ -292,3 +304,84 @@ def test_delete_project_keeps_or_deletes_its_firmware(
     assert ui.archive_files(root) == archived  # archive files are never deleted here
     assert window.isVisible()
     _ = QCheckBox
+
+
+# ---- sidebar order (plan #9, #20) -------------------------------------------------------
+
+
+def _mouse(window: Any, kind: QEvent.Type, at: QPoint, *, held: bool = True) -> None:
+    """A mouse event on the sidebar's viewport; the real cursor is moved there too."""
+    viewport = window.sidebar_panel.tree.viewport()
+    QCursor.setPos(viewport.mapToGlobal(at))
+    button = Qt.MouseButton.LeftButton
+    event = QMouseEvent(
+        kind,
+        QPointF(at),
+        QPointF(viewport.mapToGlobal(at)),
+        button,
+        button if held else Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, event)
+    kit.pump(16)
+
+
+def _row_point(window: Any, name: str, kind: str, dy: int = 0) -> QPoint:
+    tree = window.sidebar_panel.tree
+    rect = tree.visualItemRect(kit.sidebar_row(window, name, kind))
+    return QPoint(rect.left() + 60, rect.center().y() + dy)
+
+
+def _lift(window: Any, start: QPoint, end: QPoint) -> None:
+    """Press on `start` and move to `end` in steps, the animation running in between."""
+    _mouse(window, QEvent.Type.MouseButtonPress, start)
+    for step in range(1, 11):
+        _mouse(window, QEvent.Type.MouseMove, start + (end - start) * step / 10)
+    kit.pump(200)  # the others have slid out of the way
+
+
+def _overlays(window: Any) -> list[QWidget]:
+    return [w for w in window.sidebar_panel.tree.viewport().children() if isinstance(w, Overlay)]
+
+
+@ui.LANGUAGES
+def test_projects_and_groups_reorder_by_dragging(embr: Start, language: Language) -> None:
+    """Drag a project to the top and a group within its project with real mouse events;
+    Esc puts a drag back; the order is there after a restart (settings.ini, the project
+    file)."""
+    app = embr(language=language)
+    window, root = app.window, app.paths.root
+    for name in ("Alpha", "Bravo", "Charlie"):
+        ui.new_project(window, name)
+    for group in ("Main", "Radio"):
+        ui.add_group(window, group)  # Charlie, the project just created, is shown
+    assert kit.sidebar_names(window, "project") == ["Alpha", "Bravo", "Charlie"]
+
+    end = _row_point(window, "Alpha", "project", -8)
+    _lift(window, _row_point(window, "Charlie", "project"), end)
+    assert window.sidebar_panel.tree.sorting() and len(_overlays(window)) == 1
+    _mouse(window, QEvent.Type.MouseButtonRelease, end, held=False)
+    kit.pump(50)
+    assert kit.sidebar_names(window, "project") == ["Charlie", "Alpha", "Bravo"]
+    assert _overlays(window) == []
+
+    end = _row_point(window, "Main", "group", -8)
+    _lift(window, _row_point(window, "Radio", "group"), end)
+    _mouse(window, QEvent.Type.MouseButtonRelease, end, held=False)
+    kit.pump(50)
+    assert kit.sidebar_names(window, "group") == ["Radio", "Main"]
+    assert _project(root, "Charlie")["devices"] == ["Radio", "Main"]
+
+    end = _row_point(window, "Bravo", "project", 10)
+    _lift(window, _row_point(window, "Alpha", "project"), end)
+    QTest.keyClick(window.sidebar_panel.tree, Qt.Key.Key_Escape)
+    _mouse(window, QEvent.Type.MouseButtonRelease, end, held=False)
+    kit.pump(300)  # slides back, then the overlay goes
+    assert not window.sidebar_panel.tree.sorting() and _overlays(window) == []
+    assert kit.sidebar_names(window, "project") == ["Charlie", "Alpha", "Bravo"]
+    assert window.isVisible()  # Esc went to the drag, not to the window
+
+    app.close()
+    again = embr(root=root, language=language)
+    assert kit.sidebar_names(again.window, "project") == ["Charlie", "Alpha", "Bravo"]
+    assert kit.sidebar_names(again.window, "group") == ["Radio", "Main"]

@@ -63,7 +63,7 @@ from embr.core.firmware.import_pio import (
     env_ref,
 )
 from embr.core.firmware.model import editable_params
-from embr.core.firmware.store import default_name_archived
+from embr.core.firmware.store import ReadOnlyError, default_name_archived
 from embr.core.firmware.tracking import ChangeKind, ResolveState
 from embr.core.flasher.checks import CheckLevel
 from embr.core.flasher.merge import MergeError
@@ -282,6 +282,8 @@ class EmbrWindow(FrameWindow):
         self.connection.read_clicked.connect(self._read)
         self.connection.board_log_clicked.connect(self._open_board_log)
         self.sidebar_panel.tree.move_requested.connect(self._move)
+        self.sidebar_panel.projects_reordered.connect(self._reorder_projects)
+        self.sidebar_panel.groups_reordered.connect(self._reorder_groups)
         self.connection.port_changed.connect(self._port_changed)
         self.connection.baud_changed.connect(self._refresh_right)
         self.connection.identify_clicked.connect(self._identify)
@@ -676,6 +678,21 @@ class EmbrWindow(FrameWindow):
             )
         self.note("dim", f"[move] '{moved.name}' → {where}")
         self.changed()
+
+    def _reorder_projects(self, project_ids: list[str]) -> None:
+        """Projects dragged into a new order in the sidebar (design D6: settings.ini)."""
+        self._library.set_project_order(project_ids)
+        self._refresh_tree()
+
+    def _reorder_groups(self, project_id: str, names: list[str]) -> None:
+        """Groups dragged into a new order within their project (its `devices`)."""
+        try:
+            self._library.reorder_groups(project_id, names)
+        except ReadOnlyError:
+            self._read_only_notice(self._library.project(project_id).name)
+        except (KeyError, ValueError):  # the project changed under the drag
+            pass
+        self._refresh_tree()
 
     def _read_only_notice(self, name: str) -> None:
         """Firmware or project written by a newer Embr: shown, never changed (design doc

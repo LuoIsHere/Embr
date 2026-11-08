@@ -178,6 +178,14 @@ class ProjectRow:
     """Declared groups in order (empty ones included), then Ungrouped when it has firmware."""
     firmware_count: int
     """All firmware of the project, whatever the search."""
+    read_only: bool = False
+    """Written by a newer Embr: its groups cannot be reordered (its file is not written)."""
+
+
+UI_SECTION = "ui"
+PROJECT_ORDER_KEY = "project_order"
+"""settings.ini [ui] project_order: project ids, comma-separated, as dragged in the sidebar
+(design D6). Absent until the first drag: projects by name."""
 
 
 @dataclass(frozen=True)
@@ -199,7 +207,8 @@ class Library:
     # ---- sidebar ----------------------------------------------------------------------
 
     def tree(self, query: str = "") -> Tree:
-        """Projects sorted by name with their groups and firmware (by name), then standalone
+        """Projects in the sidebar order (project_order(), then the others by name) with
+        their groups (in project order) and firmware (by name), then standalone
         firmware. `query` (case-insensitive substring): a project whose name matches keeps
         all its firmware; otherwise only firmware whose name matches are kept, and projects
         left with none are dropped. Flags come from the tracker's cached status of each
@@ -215,7 +224,8 @@ class Library:
 
         projects: list[ProjectRow] = []
         readable = self._ctx.projects.all()
-        for project in readable:
+        rank = {project_id: i for i, project_id in enumerate(self.project_order())}
+        for project in sorted(readable, key=lambda p: rank.get(p.id, len(rank))):
             members = sorted((f for f in everything if f.project_id == project.id), key=_by_name)
             if not q or q in project.name.casefold():
                 shown = members
@@ -231,7 +241,14 @@ class Library:
             if ungrouped:
                 groups.append(GroupRow("", ungrouped))
             projects.append(
-                ProjectRow(project.id, project.name, project.notes, tuple(groups), len(members))
+                ProjectRow(
+                    project.id,
+                    project.name,
+                    project.notes,
+                    tuple(groups),
+                    len(members),
+                    project.read_only,
+                )
             )
         # firmware whose project cannot be read (or is gone) stay usable: shown standalone
         known = {p.id for p in readable}
@@ -317,6 +334,25 @@ class Library:
         )
         self._invalidate(members)
         return project
+
+    def reorder_groups(self, project_id: str, names: Sequence[str]) -> Project:
+        """The project's groups in the order of `names` (exactly its groups, ValueError
+        otherwise); store.ReadOnlyError for a project of a newer Embr."""
+        return self._ctx.projects.reorder_groups(project_id, names)
+
+    def project_order(self) -> list[str]:
+        """Project ids in the order the sidebar was dragged into; [] before the first drag.
+        Unknown ids (deleted projects, a hand-edited value) are kept and skipped by tree();
+        repeated ids count once."""
+        text = self._ctx.settings.get(UI_SECTION, PROJECT_ORDER_KEY) or ""
+        ids = [part.strip() for part in text.split(",") if part.strip()]
+        return list(dict.fromkeys(ids))
+
+    def set_project_order(self, project_ids: Sequence[str]) -> None:
+        """Save the sidebar order of the projects; ones not listed (new projects) come
+        after them, by name."""
+        self._ctx.settings.set(UI_SECTION, PROJECT_ORDER_KEY, ",".join(project_ids))
+        self._ctx.settings.save()
 
     def remove_group(self, project_id: str, name: str) -> Project:
         """Its firmware stay in the project, ungrouped."""

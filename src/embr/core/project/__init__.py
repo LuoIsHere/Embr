@@ -2,6 +2,7 @@
 §3.1, §3.2). Operations that touch firmware take the FirmwareStore explicitly; firmware
 never depends on this module."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -164,6 +165,16 @@ class ProjectStore:
         for fw in firmware.in_scope(project_id):
             if fw.device == old:
                 firmware.move(fw.id, project_id, new)
+        return project
+
+    def reorder_groups(self, project_id: str, names: Sequence[str]) -> Project:
+        """Put the groups in the order of `names`, which must hold exactly the project's
+        groups (ValueError otherwise). ReadOnlyError for a project of a newer Embr."""
+        project = self.get(project_id)
+        if sorted(names) != sorted(project.devices) or len(set(names)) != len(names):
+            raise ValueError(f"{list(names)} are not the groups of {project.name}")
+        project.devices = list(names)
+        self.save(project)
         return project
 
     def remove_group(self, project_id: str, name: str, firmware: FirmwareStore) -> Project:

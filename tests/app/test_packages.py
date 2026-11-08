@@ -1043,3 +1043,16 @@ def test_default_group_looks_only_at_loose_firmware(tmp_path: Path) -> None:
 )
 def test_default_package_name(name: str, expected: str) -> None:
     assert default_package_name(name) == expected
+
+
+def test_a_reordered_project_keeps_its_group_order(rig: Rig, other: Rig, tmp_path: Path) -> None:
+    project = rig.library.create_project("Ordered")
+    for group in ("a", "b", "c"):
+        rig.library.add_group(project.id, group)
+    rig.library.reorder_groups(project.id, ["c", "a", "b"])
+    destination = tmp_path / "ordered.embr"
+    rig.packager.export_project(project.id, destination)
+
+    result = _import(other, destination, Placement(None))
+    (new_project,) = result.project_ids
+    assert other.context.projects.get(new_project).devices == ["c", "a", "b"]

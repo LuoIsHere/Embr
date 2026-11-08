@@ -3,15 +3,19 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import cast
 
-from PySide6.QtCore import QMargins, QMimeData, QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QMargins, QMimeData, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QContextMenuEvent,
     QDrag,
     QDragMoveEvent,
     QDropEvent,
+    QKeyEvent,
     QMouseEvent,
+    QPainter,
+    QPixmap,
     QResizeEvent,
 )
 from PySide6.QtWidgets import (
@@ -30,7 +34,8 @@ from embr.app.library import ARCHIVE_ORIGIN, FirmwareFlag, FirmwareRow, Tree
 from embr.core import chipinfo
 from embr.core.firmware.model import Source
 from embr.i18n import tr
-from embr.ui import icons
+from embr.ui import icons, reorder
+from embr.ui.reorder import ANIMATION_MS, EDGE, SCROLL_STEP, Block, Colors, Overlay
 from embr.ui.theme import Palette
 from embr.ui.widgets import button, elided, label, set_prop, tag
 
@@ -54,6 +59,25 @@ class Node:
     firmware_id: str | None = None
     drop: str | None = None
     """Drop target type: "project", "group", "standalone" or None."""
+
+
+@dataclass
+class _Sort:
+    """A reorder in progress (plan #9, #20)."""
+
+    project_id: str | None
+    """The project whose groups are reordered; None: the projects are."""
+    spans: list[Block]
+    dragged: int
+    grip: int
+    """Content y of the mouse within the dragged block when it was picked up."""
+    allowed: tuple[int, int]
+    """Content y range the mouse may be in for a drop (groups: their own project)."""
+    overlay: Overlay
+    index: int
+    valid: bool = True
+    at: QPoint | None = None
+    """Last mouse position in the viewport."""
 
 
 def chip_name(chip: str | None) -> str:
@@ -137,7 +161,11 @@ class FirmwareTree(QTreeWidget):
     """Rows are QTreeWidgetItems carrying a Node, drawn with Row widgets. Dragging a
     firmware row emits move_requested on a valid drop; the tree itself never moves items.
     Files dragged in from Explorer emit files_dropped (design doc §12 item 19): on a
-    project, group or the standalone header, or on a firmware row."""
+    project, group or the standalone header, or on a firmware row. Dragging a project row,
+    or a named group row within its project, reorders them (plan #9, #20; module reorder):
+    projects_reordered / groups_reordered on a drop that changes the order. Not while
+    `sortable` is off (a search shows part of the list) nor for the groups of a project in
+    `read_only`; Esc or a drop outside the allowed area puts everything back."""
 
     move_requested = Signal(str, object, str)
     """firmware id, project id (None = standalone), group ("" = ungrouped)."""
@@ -145,6 +173,12 @@ class FirmwareTree(QTreeWidget):
     """local paths (list[str]), the Node they were dropped on."""
     menu_requested = Signal(str, QPoint)
     """firmware id, global position: right-click on a firmware row."""
+    projects_reordered = Signal(list)
+    """project ids (list[str]) in their new order."""
+    groups_reordered = Signal(str, list)
+    """project id, its group names (list[str]) in their new order."""
+    sort_finished = Signal()
+    """A reorder ended (dropped or cancelled); the rows may be shown again."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -162,6 +196,13 @@ class FirmwareTree(QTreeWidget):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._press: QPoint | None = None
         self._drop_row: QWidget | None = None
+        self.sortable = True
+        self.read_only: frozenset[str] = frozenset()
+        self.colors = Colors("#f6f7f9", "#ffffff", "#d9dde3")
+        self._sort: _Sort | None = None
+        self._scroller = QTimer(self)
+        self._scroller.setInterval(16)
+        self._scroller.timeout.connect(self._edge_scroll)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         node = self.node(self.itemAt(event.pos()))
@@ -181,12 +222,21 @@ class FirmwareTree(QTreeWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._sort is not None:
+            self._sort_to(event.position().toPoint())
+            return
         start = self._press
         if start is None or not event.buttons() & Qt.MouseButton.LeftButton:
             return
         if (event.position().toPoint() - start).manhattanLength() < 8:
             return
         node = self.node(self.itemAt(start))
+        if node is not None and self._can_sort(node):
+            self._press = None
+            self._begin_sort(node, start)
+            if self._sort is not None:
+                self._sort_to(event.position().toPoint())
+            return
         if node is None or node.firmware_id is None:
             return
         self._press = None
@@ -288,6 +338,198 @@ class FirmwareTree(QTreeWidget):
         else:
             self._drop_row = None
 
+    # ---- reordering projects and groups -----------------------------------------------
+
+    def sorting(self) -> bool:
+        return self._sort is not None
+
+    def _can_sort(self, node: Node) -> bool:
+        if not self.sortable or node.project_id is None:
+            return False
+        if node.kind == "project":
+            return True
+        return node.kind == "group" and bool(node.device) and node.project_id not in self.read_only
+
+    def _keys(self, project_id: str | None) -> list[tuple[str | None, int]]:
+        """(block key, height) of every row: the project id for the rows of a project
+        (project_id None), or the group name for a named group of `project_id` and its
+        firmware rows; None for the rest."""
+        rows: list[tuple[str | None, int]] = []
+        project: str | None = None
+        key: str | None = None
+        for index in range(self.topLevelItemCount()):
+            item = self.topLevelItem(index)
+            node = self.node(item)
+            kind = node.kind if node is not None else ""
+            if kind == "project" and node is not None:
+                project = node.project_id
+                key = project if project_id is None else None
+            elif kind in ("header", "spare"):
+                project = key = None
+            elif kind == "group" and node is not None and project_id is not None:
+                key = node.device if project == project_id and node.device else None
+            elif kind == "placeholder" and project_id is not None:
+                key = None
+            height = self.indexRowSizeHint(self.indexFromItem(item)) if item else 0
+            rows.append((key, height))
+        return rows
+
+    def _begin_sort(self, node: Node, press: QPoint) -> None:
+        project_id = node.project_id if node.kind == "group" else None
+        rows = self._keys(project_id)
+        spans = reorder.blocks(rows)
+        picked = node.device if node.kind == "group" else node.project_id
+        dragged = next((i for i, b in enumerate(spans) if b.key == picked), None)
+        if dragged is None or len(spans) < 2:
+            return
+        scroll = self.verticalScrollBar().value()
+        allowed = (spans[0].top, spans[-1].top + spans[-1].height)
+        if project_id is not None:  # the project's own rows: its row down to its last
+            tops = [sum(h for _, h in rows[:i]) for i in range(len(rows) + 1)]
+            first = next(
+                i
+                for i in range(len(rows))
+                if (n := self.node(self.topLevelItem(i))) is not None
+                and n.kind == "project"
+                and n.project_id == project_id
+            )
+            end = next(
+                (
+                    i
+                    for i in range(first + 1, len(rows))
+                    if (n := self.node(self.topLevelItem(i))) is not None
+                    and n.kind in ("project", "header")
+                ),
+                len(rows),
+            )
+            allowed = (tops[first], tops[end])
+        pictures = {b.key: self._picture(b) for b in spans}
+        overlay = Overlay(
+            self.viewport(), spans, pictures, self.verticalScrollBar().value, self.colors
+        )
+        block = spans[dragged]
+        grip = press.y() + scroll - block.top
+        self._sort = _Sort(project_id, spans, dragged, grip, allowed, overlay, dragged)
+        overlay.lift(dragged, block.top)
+        self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.grabKeyboard()
+        self._scroller.start()
+
+    def _picture(self, block: Block) -> QPixmap:
+        """The block's rows as shown: grabbed from the viewport when on screen (with the
+        selection), from the row widgets otherwise."""
+        width = self.viewport().width()
+        picture = QPixmap(width, block.height)
+        picture.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(picture)
+        y = 0
+        screen = self.viewport().rect()
+        for index in range(block.first, block.first + block.count):
+            item = self.topLevelItem(index)
+            if item is None:
+                continue
+            height = self.indexRowSizeHint(self.indexFromItem(item))
+            rect = self.visualItemRect(item)
+            widget = self.itemWidget(item, 0)
+            if screen.contains(rect) and rect.height() == height:
+                painter.drawPixmap(0, y, self.viewport().grab(rect))
+            else:
+                widget.resize(width, height)
+                painter.drawPixmap(0, y, widget.grab())
+            y += height
+        painter.end()
+        return picture
+
+    def _sort_to(self, at: QPoint) -> None:
+        sort = self._sort
+        if sort is None:
+            return
+        sort.at = at
+        scroll = self.verticalScrollBar().value()
+        block = sort.spans[sort.dragged]
+        mouse = at.y() + scroll
+        low, high = sort.allowed
+        inside = 0 <= at.x() < self.viewport().width() and 0 <= at.y() < self.viewport().height()
+        sort.valid = inside and low <= mouse < high
+        top = mouse - sort.grip
+        region_top, region_bottom = sort.overlay.region
+        within = min(max(top, region_top - block.height), region_bottom)
+        sort.index = (
+            reorder.landing(sort.spans, sort.dragged, within) if sort.valid else sort.dragged
+        )
+        sort.overlay.lift(sort.dragged, top)
+        sort.overlay.place(reorder.slots(sort.spans, sort.dragged, sort.index))
+        cursor = Qt.CursorShape.ClosedHandCursor if sort.valid else Qt.CursorShape.ForbiddenCursor
+        self.viewport().setCursor(cursor)
+
+    def _edge_scroll(self) -> None:
+        sort = self._sort
+        if sort is None or sort.at is None:
+            self._scroller.stop()
+            return
+        bar = self.verticalScrollBar()
+        if sort.at.y() < EDGE:
+            step = -SCROLL_STEP
+        elif sort.at.y() >= self.viewport().height() - EDGE:
+            step = SCROLL_STEP
+        else:
+            return
+        before = bar.value()
+        bar.setValue(before + step)
+        if bar.value() != before:
+            self._sort_to(sort.at)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._sort is None:
+            super().mouseReleaseEvent(event)
+            return
+        sort = self._sort
+        self._sort_to(event.position().toPoint())
+        if sort.valid and sort.index != sort.dragged:
+            keys = reorder.moved([b.key for b in sort.spans], sort.dragged, sort.index)
+            self._end_sort(cancelled=False)
+            if sort.project_id is None:
+                self.projects_reordered.emit(keys)
+            else:
+                self.groups_reordered.emit(sort.project_id, keys)
+        else:
+            self._end_sort(cancelled=True)
+
+    def event(self, event: QEvent) -> bool:
+        """Esc during a reorder cancels it (the tree takes no focus; the keyboard is grabbed
+        while dragging). The shortcut override is accepted first, or a window shortcut on Esc
+        would take the key before it gets here."""
+        kind = event.type()
+        if (
+            getattr(self, "_sort", None) is not None  # events come during __init__ too
+            and kind in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress)
+            and cast(QKeyEvent, event).key() == Qt.Key.Key_Escape
+        ):
+            event.accept()
+            if kind == QEvent.Type.KeyPress:
+                self._end_sort(cancelled=True)
+            return True
+        return super().event(event)
+
+    def _end_sort(self, *, cancelled: bool) -> None:
+        """Dropped: the overlay goes now (the rows are rebuilt in the new order). Cancelled:
+        everything slides back first."""
+        sort = self._sort
+        if sort is None:
+            return
+        self._sort = None
+        self._scroller.stop()
+        self.releaseKeyboard()
+        self.viewport().unsetCursor()
+        overlay = sort.overlay
+        if cancelled:
+            overlay.drop_back()
+            QTimer.singleShot(ANIMATION_MS + 20, overlay.deleteLater)
+        else:
+            overlay.hide()
+            overlay.deleteLater()
+        self.sort_finished.emit()
+
 
 class Sidebar(QWidget):
     firmware_selected = Signal(str)
@@ -300,6 +542,10 @@ class Sidebar(QWidget):
     query_changed = Signal(str)
     files_dropped = Signal(list, object)
     """See FirmwareTree.files_dropped."""
+    projects_reordered = Signal(list)
+    """See FirmwareTree.projects_reordered."""
+    groups_reordered = Signal(str, list)
+    """See FirmwareTree.groups_reordered."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -338,6 +584,9 @@ class Sidebar(QWidget):
         self.search.textChanged.connect(self.query_changed.emit)
         self.tree.itemClicked.connect(self._clicked)
         self.tree.files_dropped.connect(self.files_dropped.emit)
+        self.tree.projects_reordered.connect(self.projects_reordered.emit)
+        self.tree.groups_reordered.connect(self.groups_reordered.emit)
+        self.tree.sort_finished.connect(self._sort_finished)
         self._folded: set[str] = set()
         self._data: Tree | None = None
         self._selected: tuple[str, str] | None = None
@@ -346,6 +595,7 @@ class Sidebar(QWidget):
 
     def apply_palette(self, p: Palette) -> None:
         self._search_icon.setIcon(icons.icon("search", p.fg_3))
+        self.tree.colors = Colors(p.panel_2, p.panel, p.line)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """A narrow sidebar shows "+ New" instead of the whole button text (a button cannot
@@ -377,6 +627,10 @@ class Sidebar(QWidget):
             dimmed,
             busy_id,
         )
+        if self.tree.sorting():  # the rows being dragged stay; shown when the drag ends
+            return
+        self.tree.sortable = not self.search.text().strip()
+        self.tree.read_only = frozenset(p.id for p in data.projects if p.read_only)
         scroll = self.tree.verticalScrollBar().value()
         self.tree.clear()
         self._header(tr("PROJECTS"))
@@ -518,6 +772,12 @@ class Sidebar(QWidget):
                 self._toggle(f"p:{node.project_id}")
             else:
                 self.project_selected.emit(node.project_id)
+
+    def _sort_finished(self) -> None:
+        """Shown again after a reorder: what came meanwhile, and the press on a project row
+        no longer shows it selected (a drag is not a click)."""
+        if self._data is not None:
+            self.show_tree(self._data, self._selected, self._dimmed, self._busy_id)
 
     def _toggle(self, key: str) -> None:
         self._folded ^= {key}

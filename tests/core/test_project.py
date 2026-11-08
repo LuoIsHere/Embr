@@ -1,13 +1,16 @@
 """core/project: project files, names, deletion, defaults and device groups."""
 
+import tomllib
 from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from embr.core.firmware.model import Source
-from embr.core.firmware.store import FirmwareStore
+from embr.core.firmware.store import FirmwareStore, ReadOnlyError
 from embr.core.project import (
+    PROJECT_SCHEMA_VERSION,
     DuplicateGroupError,
     Project,
     ProjectDefaults,
@@ -187,3 +190,39 @@ def test_unknown_device_is_added_as_group(stores: Stores) -> None:
     assert (moved.project_id, moved.device) == (project.id, "Rev B")
     assert created.device == "Rev A"
     assert projects.get(project.id).devices == ["Rev A", "Rev B"]
+
+
+def test_reorder_groups_keeps_the_new_order(stores: Stores) -> None:
+    projects, _ = stores
+    project = projects.create("P")
+    for name in ("A", "B", "C"):
+        projects.add_group(project.id, name)
+    projects.reorder_groups(project.id, ["C", "A", "B"])
+    reloaded = ProjectStore(projects.directory, projects.backup_root).get(project.id)
+    assert reloaded.devices == ["C", "A", "B"]
+
+
+@pytest.mark.parametrize("names", [["A", "B"], ["A", "B", "C", "D"], ["A", "A", "B"], []])
+def test_reorder_groups_needs_exactly_the_groups(stores: Stores, names: list[str]) -> None:
+    projects, _ = stores
+    project = projects.create("P")
+    for name in ("A", "B", "C"):
+        projects.add_group(project.id, name)
+    with pytest.raises(ValueError, match="are not the groups"):
+        projects.reorder_groups(project.id, names)
+    assert projects.get(project.id).devices == ["A", "B", "C"]
+
+
+def test_reorder_groups_of_a_newer_project_is_refused(stores: Stores) -> None:
+    projects, _ = stores
+    project = projects.create("P")
+    for name in ("A", "B"):
+        projects.add_group(project.id, name)
+    file = projects.directory / f"{project.id}.toml"
+    doc = tomllib.loads(file.read_text(encoding="utf-8"))
+    doc["schema_version"] = PROJECT_SCHEMA_VERSION + 1
+    file.write_text(tomli_w.dumps(doc), encoding="utf-8")
+    before = file.read_bytes()
+    with pytest.raises(ReadOnlyError):
+        projects.reorder_groups(project.id, ["B", "A"])
+    assert file.read_bytes() == before
