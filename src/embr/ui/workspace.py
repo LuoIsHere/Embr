@@ -964,6 +964,16 @@ class ParamsTab(QWidget):
         layout.addLayout(self.extra)
         layout.addStretch(1)
 
+    def editing(self) -> bool:
+        """Focus is in one of this page's editable text fields. Rebuilding the page now
+        would drop what is typed, and the field losing focus would save a half-typed value."""
+        focused = QApplication.focusWidget()
+        return (
+            isinstance(focused, (QLineEdit, QPlainTextEdit))
+            and not focused.isReadOnly()
+            and self.isAncestorOf(focused)
+        )
+
     def show_firmware(self, firmware: Firmware) -> None:
         self._firmware = firmware
         clear_layout(self.grid)

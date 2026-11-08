@@ -2,12 +2,14 @@
 
 import contextlib
 import html
-from collections.abc import Generator
+import math
+import time
+from collections.abc import Callable, Generator
 from datetime import date, datetime
 from pathlib import Path
 
 import esptool
-from PySide6.QtCore import QEvent, QLocale, QPoint, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QLocale, QObject, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QActionGroup,
     QCloseEvent,
@@ -190,6 +192,18 @@ class EmbrWindow(FrameWindow):
         """Firmware id, state and digest the workspace shows (flash compares the digest)."""
         self._round: list[str] = []
         self._round_changed = False
+        self._clock: Callable[[], float] = time.monotonic
+        """Seconds for the re-check rules; tests replace it to count checks without waiting."""
+        self._recheck_timer = QTimer(self)
+        self._recheck_timer.setSingleShot(True)
+        self._recheck_timer.timeout.connect(self._run_recheck)
+        self._recheck_due: float | None = None
+        """When the queued re-check runs (self._clock time); None when nothing is queued."""
+        self._recheck_settle = False
+        """The queued re-check looks at a settling build."""
+        self._last_recheck: float | None = None
+        self._rechecking = False
+        """A check of the selection, or the refresh it caused, is running."""
         self._closed = False
         """Set by closeEvent: queued refresh rounds stop."""
         self._reported: set[tuple[Path, str]] = set()
@@ -782,7 +796,7 @@ class EmbrWindow(FrameWindow):
             self.note("warning", f"[flash] not started: {exc}")
             self.changed()
             if exc.building:
-                QTimer.singleShot(SETTLE_RECHECK_MS, self._recheck_selected)
+                self._request_recheck(SETTLE_RECHECK_MS, settle=True)
             return
         except (PlanError, BusyError, OSError, ValueError) as exc:
             self.note("error", f"[flash] {exc}")
@@ -905,27 +919,90 @@ class EmbrWindow(FrameWindow):
         self.firmware_view.show_firmware(status)
         self._shown = (status.firmware_id, status.state, status.digest)
         if status.state == ResolveState.BUILDING:
-            QTimer.singleShot(SETTLE_RECHECK_MS, self._recheck_selected)
+            self._request_recheck(SETTLE_RECHECK_MS, settle=True)
 
     def _leave_selection(self) -> None:
         firmware_id = self._selected_firmware_id()
         if firmware_id is not None:
             self._library.tracker.mark_seen(firmware_id)
 
+    def _request_recheck(self, delay_ms: int = 0, *, settle: bool = False) -> None:
+        """The one way to queue a check of the selection: a click, the window activated, a
+        build settling, a flash refused (design D15). One single-shot timer: an earlier queued
+        check stands, a later one is moved up to the new time. At most one check per
+        RECHECK_GAP_S; a request inside the gap waits for it, neither dropped nor repeated.
+        `settle` (a build seen settling) looks again after delay_ms whatever the gap. While the
+        shown build settles, other requests only make sure that look is queued. Nothing else
+        is queued during a refresh round (it checks the selection first) or a job, behind a
+        dialog or menu, or while the window is minimized."""
+        if self._closed:
+            return
+        if not settle:
+            if self._round or self._ops.busy or self.isMinimized() or _modal_open():
+                return
+            if self._shown_building():
+                if self._recheck_timer.isActive():
+                    return
+                delay_ms, settle = SETTLE_RECHECK_MS, True
+        now = self._clock()
+        due = now + delay_ms / 1000
+        if not settle and self._last_recheck is not None:
+            due = max(due, self._last_recheck + RECHECK_GAP_S)
+        queued = self._recheck_timer.isActive() and self._recheck_due is not None
+        if queued and self._recheck_due is not None and self._recheck_due <= due:
+            return
+        self._recheck_settle = settle or (queued and self._recheck_settle)
+        self._recheck_due = due
+        self._recheck_timer.start(max(0, math.ceil((due - now) * 1000)))
+
+    def _run_recheck(self) -> None:
+        """The re-check timer fired: check the selection unless that is not the time now."""
+        settle = self._recheck_settle
+        self._recheck_due = None
+        self._recheck_settle = False
+        if self._closed or self._ops.busy or self.isMinimized() or _modal_open():
+            return  # a job's end, closing the dialog or restoring the window asks again
+        if self._round and not settle:
+            return
+        if self._rechecking:
+            self._request_recheck(SETTLE_RECHECK_MS if settle else 0, settle=settle)
+            return
+        self._recheck_selected()
+
+    def _shown_building(self) -> bool:
+        shown = self._shown
+        return (
+            shown is not None
+            and shown[1] == ResolveState.BUILDING
+            and shown[0] == self._selected_firmware_id()
+        )
+
     def _recheck_selected(self) -> None:
-        """Window activated, a build settling, a flash refused: check the selection and
-        refresh when it differs from what is shown."""
+        """Check the selection and refresh when it differs from what is shown (from
+        _run_recheck, and when a PIO query finished). No refresh while a parameter field is
+        being edited: what is shown stays, so the next check finds the difference again. A
+        build still settling queues the next look."""
         firmware_id = self._selected_firmware_id()
         if firmware_id is None or self.is_locked(firmware_id):
             return
-        try:
-            status = self._library.tracker.check(firmware_id)
-        except KeyError:
+        if self._rechecking:
+            self._request_recheck()
             return
-        if self._shown != (firmware_id, status.state, status.digest):
-            self.changed()
-        else:
-            self.header.show_files_updated(status)
+        self._rechecking = True
+        try:
+            self._last_recheck = self._clock()
+            try:
+                status = self._library.tracker.check(firmware_id)
+            except KeyError:
+                return
+            if self._shown == (firmware_id, status.state, status.digest):
+                self.header.show_files_updated(status)
+            elif not self.firmware_view.params.editing():
+                self.changed()
+            if status.state == ResolveState.BUILDING:
+                self._request_recheck(SETTLE_RECHECK_MS, settle=True)
+        finally:
+            self._rechecking = False
 
     def _start_round(self) -> None:
         if self._closed or self._ops.busy or self.isMinimized() or self._round:
@@ -948,15 +1025,24 @@ class EmbrWindow(FrameWindow):
         except KeyError:
             self._schedule.forget(firmware_id)
         else:
+            selected = firmware_id == self._selected_firmware_id()
+            if selected:
+                self._last_recheck = self._clock()
             if before is None or (before.state, before.digest) != (status.state, status.digest):
                 self._round_changed = True
-            elif firmware_id == self._selected_firmware_id():
+            elif selected:
                 self.header.show_files_updated(status)
+            if selected and status.state == ResolveState.BUILDING:
+                self._request_recheck(SETTLE_RECHECK_MS, settle=True)
         if self._round:
             QTimer.singleShot(0, self._next_in_round)
         elif self._round_changed:
             selected = self._selected_firmware_id()
-            if selected is not None and not self.is_locked(selected):
+            if (
+                selected is not None
+                and not self.is_locked(selected)
+                and not self.firmware_view.params.editing()
+            ):
                 self.changed()
             else:
                 self._refresh_tree()
@@ -964,7 +1050,21 @@ class EmbrWindow(FrameWindow):
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
-            QTimer.singleShot(0, self._recheck_selected)
+            self._request_recheck()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """FrameWindow's filter on the application, plus: a mouse button released anywhere
+        in this window queues a check of the selection (on release, so a refresh does not
+        take the click away)."""
+        if super().eventFilter(watched, event):
+            return True
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and isinstance(watched, QWidget)
+            and watched.window() is self
+        ):
+            self._request_recheck()
+        return False
 
     # ---- stage two actions --------------------------------------------------------------
 
@@ -1483,6 +1583,7 @@ class EmbrWindow(FrameWindow):
         # nothing of this window runs after it closed (its data may be closed next)
         self._closed = True
         self._refresh_timer.stop()
+        self._recheck_timer.stop()
         self._round = []
         event.accept()
 
@@ -1503,6 +1604,15 @@ LANGUAGE_LABELS = (
 
 SETTLE_RECHECK_MS = 2500
 """Look again after a build was seen settling (app.tracking.SETTLE_SECONDS plus margin)."""
+RECHECK_GAP_S = 1.0
+"""At most one check of the selection per this many seconds (clicks, activation)."""
+
+
+def _modal_open() -> bool:
+    """A dialog or a menu is open: a click there is not a click in the window."""
+    return (
+        QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None
+    )
 
 
 def _port_unavailable(message: str) -> bool:
