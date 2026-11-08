@@ -238,9 +238,7 @@ def test_a_renamed_project_is_followed_without_confirmation(
         _build(idf_project)
         assert (idf_project.build / old).is_file()  # left behind by the build
 
-        # "ok" too: each poll clicks the sidebar row, and a click on the selected firmware
-        # clears "updated" (mark_seen); the changes stay and show what was followed
-        status = bk.wait_state(app, name, "updated", "ok")
+        status = bk.wait_state(app, name, "updated")  # polling clicks keep it (§3.4)
         assert [(c.kind, c.before, c.after) for c in status.changes] == [
             (ChangeKind.ENTRY_RENAMED, old, new)
         ], status.changes

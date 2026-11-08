@@ -347,7 +347,11 @@ class EmbrWindow(FrameWindow):
         self.log_panel.log_lines([(level, text)])
 
     def select_firmware(self, firmware_id: str) -> None:
-        self._leave_selection()
+        """Show `firmware_id`. Leaving another firmware ends its "Build updated" state and
+        "content changed" marks (design doc §3.4); selecting the shown one again (a click on
+        its sidebar row) keeps them."""
+        if self._selected_firmware_id() != firmware_id:
+            self._leave_selection()
         self._schedule.touch(firmware_id)
         self._selection = ("firmware", firmware_id)
         self._last_outcome = None

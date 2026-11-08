@@ -250,3 +250,20 @@ def test_the_refresh_comes_once_the_field_is_left(
     window._recheck_selected()
     assert window._shown != shown
     assert window.firmware_view.params.findChild(QLineEdit) is not name
+
+
+def test_a_click_on_the_selected_firmware_keeps_build_updated(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Design doc §3.4: "Build updated" and the "content changed" marks last until the build
+    changes again or another firmware is selected. A click on the selected firmware's row
+    only checks it again."""
+    first, _ = _fixed(window, tmp_path)
+    other = window.library.create_firmware("other")
+    seen: list[str] = []
+    monkeypatch.setattr(window.library.tracker, "mark_seen", seen.append)
+
+    window.sidebar_panel.firmware_selected.emit(first)
+    assert seen == []
+    window.sidebar_panel.firmware_selected.emit(other.id)
+    assert seen == [first]

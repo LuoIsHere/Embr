@@ -62,6 +62,9 @@ idf.py starts, has no job limit of its own)."""
 """A full build from scratch (a new target or ESP-IDF version) on Windows."""
 SETTLE_S = 2.6
 """Embr treats files modified within 2 s as "being built" (design doc §3.4)."""
+ACTIVATION_FAILED = "EMBR: the ESP-IDF activation script left no idf.py"
+ACTIVATION_EXIT = 97
+"""Idf.run's exit code (with ACTIVATION_FAILED) when the activation script left no idf.py."""
 
 _ORIGINAL_ENV = dict(os.environ)
 """The environment before any Embr window ran (start_embr points TMP / TEMP at temp/)."""
@@ -72,9 +75,17 @@ _ORIGINAL_ENV = dict(os.environ)
 
 def tool_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment for idf.py / pio: the original one, without this repository's
-    virtual environment (idf.py's export would otherwise pick up its python.exe)."""
+    virtual environment (idf.py's export would otherwise pick up its python.exe) and
+    without MSYSTEM (set by Git Bash; ESP-IDF's activation refuses to run under it)."""
     env = dict(_ORIGINAL_ENV)
-    for key in ("VIRTUAL_ENV", "PYTHONHOME", "PYTHONPATH", "QT_QPA_PLATFORM", "UV_RUN_RECURSION"):
+    for key in (
+        "VIRTUAL_ENV",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "QT_QPA_PLATFORM",
+        "UV_RUN_RECURSION",
+        "MSYSTEM",
+    ):
         env.pop(key, None)
     venv = str(kit.REPO / ".venv").lower()
     parts = env.get("PATH", "").split(os.pathsep)
@@ -96,20 +107,38 @@ class Idf:
     """IDF_TOOLS_PATH to set before the script; empty: as the script sets it."""
 
     def run(self, project: Path, *args: str, timeout: float = BUILD_TIMEOUT) -> str:
-        """`idf.py <args>` in `project`; pytest.fail with the output's tail on failure."""
+        """`idf.py <args>` in `project`; pytest.fail with the output's tail on failure. The
+        script runs with the execution policy bypassed for this process only; its output is
+        shown only when it leaves no idf.py (ACTIVATION_FAILED, never a silent success). An
+        idf.py that does not run (exit code still 0) fails too."""
         quoted = " ".join(_ps_quote(a) for a in args)
         lines = [
             "$ErrorActionPreference = 'Continue'",
             f"$env:IDF_TOOLS_PATH = {_ps_quote(self.tools)}" if self.tools else "",
-            f". {_ps_quote(str(self.script))} *> $null",
+            f"$activation = . {_ps_quote(str(self.script))} *>&1",
+            "if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) "
+            f"{{ $activation | Out-String -Width 200; '{ACTIVATION_FAILED}'; "
+            f"exit {ACTIVATION_EXIT} }}",
             f"Set-Location -LiteralPath {_ps_quote(str(project))}",
+            "$global:LASTEXITCODE = 0",
+            "$errors = $Error.Count",
             f"idf.py {quoted}",
-            "exit $LASTEXITCODE",
+            "$code = $LASTEXITCODE",
+            "if ($code -eq 0 -and $Error.Count -gt $errors) { $code = 1 }",
+            "exit $code",
         ]
         command = "; ".join(line for line in lines if line)
         started = time.monotonic()
         done = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",

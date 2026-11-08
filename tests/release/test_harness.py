@@ -1,16 +1,20 @@
 """Self-tests of the release harness (no board): operator-step sequencing, the file
-dialog replacement, and driving the real window through its New menu and dialogs in both
-languages."""
+dialog replacement, driving the real window through its New menu and dialogs in both
+languages, and running idf.py through an activation script (a stand-in script, no
+ESP-IDF needed)."""
 
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import builds_kit as bk
 import pytest
 import release_kit as kit
 from PySide6.QtWidgets import QFileDialog
 
 from embr.i18n import Language, tr
+
+# pyright: reportPrivateUsage=false
 
 
 def _press(text: str) -> Callable[[kit.DialogDriver], None]:
@@ -243,3 +247,61 @@ def test_embr_process_kill_ends_exactly_its_verified_processes(tmp_path: Path) -
         assert not process.running()
     for verified in tree.values():
         kit.wait_until(lambda v=verified: not kit.still_running(v), 10, message=f"{verified} alive")
+
+
+# ---- idf.py through the activation script -----------------------------------------------
+
+
+def _activation(tmp_path: Path, body: str) -> bk.Idf:
+    """A stand-in for export.ps1: `body` is dot-sourced the way the real script is."""
+    script = tmp_path / "export.ps1"
+    script.write_text("Write-Host 'Activating stand-in'\n" + body + "\n", encoding="utf-8")
+    return bk.Idf(script)
+
+
+IDF_ECHO = "function idf.py { cmd /c echo idf.py ran with $args }"
+
+
+def test_idf_run_returns_the_output(tmp_path: Path) -> None:
+    out = _activation(tmp_path, IDF_ECHO).run(tmp_path, "build")
+    assert "idf.py ran with build" in out
+    assert "Activating stand-in" not in out  # the activation's own output stays out
+
+
+def test_idf_run_fails_with_the_exit_code_of_idf_py(tmp_path: Path) -> None:
+    idf = _activation(tmp_path, "function idf.py { cmd /c exit 3 }")
+    with pytest.raises(pytest.fail.Exception, match=r"failed \(3\)"):
+        idf.run(tmp_path, "build")
+
+
+def test_idf_run_fails_when_the_activation_leaves_no_idf_py(tmp_path: Path) -> None:
+    """An activation that fails (ESP-IDF refuses MSYS, missing tools) must never pass as a
+    0 s build: the failure and the script's own output are reported."""
+    idf = _activation(tmp_path, "Write-Error 'ERROR: Activation script failed'")
+    with pytest.raises(pytest.fail.Exception) as failed:
+        idf.run(tmp_path, "build")
+    text = str(failed.value)
+    assert f"({bk.ACTIVATION_EXIT})" in text and bk.ACTIVATION_FAILED in text
+    assert "ERROR: Activation script failed" in text
+
+
+def test_idf_run_fails_when_idf_py_does_not_run(tmp_path: Path) -> None:
+    """idf.py defined but failing before any program runs: the exit code alone says 0."""
+    idf = _activation(tmp_path, "function idf.py { Get-Item -LiteralPath 'Z:\\no\\such' }")
+    with pytest.raises(pytest.fail.Exception, match=r"failed \(1\)"):
+        idf.run(tmp_path, "build")
+
+
+def test_idf_run_bypasses_a_restricted_execution_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(bk._ORIGINAL_ENV, "PSExecutionPolicyPreference", "Restricted")
+    assert "idf.py ran with build" in _activation(tmp_path, IDF_ECHO).run(tmp_path, "build")
+
+
+def test_tool_env_drops_msystem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Git Bash sets MSYSTEM; ESP-IDF's activation refuses to run under it."""
+    monkeypatch.setitem(bk._ORIGINAL_ENV, "MSYSTEM", "MINGW64")
+    assert "MSYSTEM" not in bk.tool_env()
+    body = "if ($env:MSYSTEM) { Write-Error 'MSys/Mingw is not supported'; return }\n" + IDF_ECHO
+    assert "idf.py ran with build" in _activation(tmp_path, body).run(tmp_path, "build")
