@@ -73,6 +73,8 @@ def chips_text(mcus: tuple[str, ...]) -> str:
 
 
 INDENT = 8
+SPARE_MIN = 40
+"""Height of the spare row at the end when the rows fill the list (a firmware row's)."""
 NAME_MIN = 72
 """Firmware rows: below this much room for the name, optional meta gives way."""
 """Tree: indent of groups (and of firmware, whose names line up with group names)."""
@@ -254,6 +256,28 @@ class FirmwareTree(QTreeWidget):
         node = self.node(last)
         return last if node is not None and node.kind == "spare" else None
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.fit_spare()
+
+    def fit_spare(self) -> None:
+        """The spare row fills the empty space below the other rows, so a drag over any of
+        it shows the drop highlight on all of it; at least SPARE_MIN high, also when the
+        list scrolls. Content never exceeds the viewport because of it (no scroll bar)."""
+        spare = self._spare_row()
+        if spare is None:
+            return
+        # the heights the view lays out: a row is as tall as its widget needs (a wrapped
+        # placeholder) when that is more than its item's size hint
+        count = self.topLevelItemCount() - 1
+        rows = (self.topLevelItem(i) for i in range(count))
+        others = sum(self.indexRowSizeHint(self.indexFromItem(r)) for r in rows if r is not None)
+        height = max(SPARE_MIN, self.viewport().height() - others)
+        size = spare.sizeHint(0)
+        if size.height() != height:
+            size.setHeight(height)
+            spare.setSizeHint(0, size)
+
     def _highlight(self, item: QTreeWidgetItem | None) -> None:
         row = self.itemWidget(item, 0) if item is not None else None
         if self._drop_row is not None and self._drop_row is not row:
@@ -395,10 +419,11 @@ class Sidebar(QWidget):
             )
         for fw in data.standalone:
             self._firmware(fw, INDENT)
-        # a firmware row's worth of space at the very end, also when the list scrolls, to
+        # the empty space at the very end (a firmware row's worth when the list scrolls), to
         # drop files or firmware on as standalone
-        spare = self._add(Row(INDENT), Node("spare", drop="standalone"), 40)
+        spare = self._add(Row(INDENT), Node("spare", drop="standalone"), SPARE_MIN)
         spare.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDropEnabled)
+        self.tree.fit_spare()
         self.tree.verticalScrollBar().setValue(scroll)
 
     def _header(self, text: str, node: Node | None = None) -> None:
