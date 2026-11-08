@@ -574,7 +574,9 @@ def entries(window: Any) -> list[EntryRow]:
         name_cell = table.cellWidget(r, 3)
         names = name_cell.findChildren(ElidedLabel)
         tags = [
-            plain(w.text()) for w in name_cell.findChildren(QLabel) if w.property("tag") is not None
+            plain(w.text())
+            for w in table.cellWidget(r, 1).findChildren(QLabel)
+            if w.property("tag") is not None
         ]
         note = table.cellWidget(r, 7).findChild(QLineEdit)
         rows.append(

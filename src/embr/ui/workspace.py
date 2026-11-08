@@ -13,8 +13,6 @@ from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
-    QFont,
-    QFontMetrics,
     QFontMetricsF,
 )
 from PySide6.QtWidgets import (
@@ -32,6 +30,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPlainTextEdit,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -292,6 +291,12 @@ class Banner(QFrame):
 
 
 NOTE_MIN_WIDTH = 120
+ADDRESS_PX = 104
+"""Entry table: the address column without status tags."""
+ADDRESS_FIELD_PX = 84
+"""Entry table: the address field, what that column leaves it inside the cell's padding."""
+CELL_TAG_GAP = 4
+"""Entry table: before each status tag in an address cell."""
 CRUMB_MIN = 40
 """Narrowest the header's crumb gets, unless its text is shorter."""
 HEADING_MIN = 80
@@ -314,6 +319,10 @@ _GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80), (2, 110), (1, 84))
 """(column, narrowest width) in the order columns give way; 0 hides the column."""
 """Entry table columns that shrink, in this order and down to these widths, when the
 window is too narrow for all of them (0: the column is hidden)."""
+
+
+_HIDDEN_LAST = (6, 4)
+"""Entry table columns hidden, in this order, when _GIVE_WAY's widths still do not fit."""
 
 
 class EntriesTab(QWidget):
@@ -366,7 +375,7 @@ class EntriesTab(QWidget):
         """Column -> width _fit_columns() last gave it while the user had not dragged it."""
         """Column -> width the user dragged it to (Address to Image requires)."""
         self.table.setColumnWidth(0, 28)
-        self.table.setColumnWidth(1, 104)
+        self.table.setColumnWidth(1, ADDRESS_PX)
         header.sectionResized.connect(self._column_dragged)  # after the initial widths
         self.table.itemChanged.connect(self._toggled)
         self.add_button = button(tr(f"{PLUS} Add entry (or drop bin files here)"), "addrow")
@@ -465,12 +474,13 @@ class EntriesTab(QWidget):
         its content wants (cell widgets do not take part in content sizing, see
         _name_width()); when that is too wide, the name gives way first (elided, the tooltip
         has the full path), then Address source (hidden), then Kind and Image requires
-        (elided). Note gets NOTE_MIN_WIDTH plus whatever is left."""
+        (elided). When the status tags still leave no room, Image requires and then Kind are
+        hidden too (_HIDDEN_LAST). Note gets NOTE_MIN_WIDTH plus whatever is left."""
         if self._firmware is None:
             return
         header = self.table.horizontalHeader()
         mcu = self.table.fontMetrics().horizontalAdvance(MCU_WIDEST) + 34  # frame, arrow
-        widths = {0: 28, 1: 104, 2: mcu, 3: self._name_width()}
+        widths = {0: 28, 1: ADDRESS_PX + self._widest_tags(), 2: mcu, 3: self._name_width()}
         for column in (4, 5, 6):
             # a hidden section's size hint is 0, which would show the column again on the
             # next fit and hide it after that (columns jumping while the window is resized)
@@ -479,23 +489,31 @@ class EntriesTab(QWidget):
             content = self.table.sizeHintForColumn(column)
             widths[column] = max(self._header_hints.get(column, 0), content)
         widths.update(self._chosen)  # dragged by the user
+        floors = self._floors()
+        widths[1] = max(widths[1], floors[1])  # a dragged width does not cut a status tag
         spare = self.table.viewport().width() - sum(widths.values()) - NOTE_MIN_WIDTH
         # columns the user did not drag give way first, so a dragged width is kept if possible
-        order = sorted(_GIVE_WAY, key=lambda item: item[0] in self._chosen)
-        for column, floor in order:
+        order = sorted(floors, key=lambda column: column in self._chosen)
+        for column in order:
             if spare >= 0:
                 break
+            floor = floors[column]
             give = min(widths[column] - floor, -spare) if floor else widths[column]  # 0: hide
             if give > 0:
                 widths[column] -= give
                 spare += give
+        for column in _HIDDEN_LAST:
+            if spare < 0:
+                spare += widths[column]
+                widths[column] = 0
         widths[7] = NOTE_MIN_WIDTH + max(spare, 0)
         for column in _DRAGGABLE:
             if column not in self._chosen:
                 self._auto[column] = widths[column]
         self._sizing = True
         try:
-            self.table.setColumnHidden(5, widths[5] == 0)
+            for column in (4, 5, 6):
+                self.table.setColumnHidden(column, widths[column] == 0)
             for column, width in widths.items():
                 self.table.setColumnWidth(column, width)
         finally:
@@ -508,7 +526,7 @@ class EntriesTab(QWidget):
         if self._sizing or column not in _DRAGGABLE:
             return
         header = self.table.horizontalHeader()
-        floors = dict(_GIVE_WAY)
+        floors = self._floors()
         # other columns that can give way count at their floor: dragging one column wider
         # first takes Note's spare width, then what the others can give (_fit_columns())
         others = sum(
@@ -534,21 +552,31 @@ class EntriesTab(QWidget):
 
     def _name_width(self) -> int:
         """What the name column would like: cell widgets do not take part in content
-        sizing, so name plus status tags are measured with the style sheet's fonts."""
+        sizing, so the name is measured with the style sheet's font."""
         text = self.table.fontMetrics()
-        small = QFont(self.table.font())
-        small.setPixelSize(10)
-        small.setBold(True)
-        tags = QFontMetrics(small)
         widest = self.table.horizontalHeader().sectionSizeHint(3)
         for row in range(self.table.rowCount()):
-            cell = self.table.cellWidget(row, 3)
-            names = [w.full_text() for w in cell.findChildren(ElidedLabel)]
-            labels = [w.text() for w in cell.findChildren(QLabel) if w.property("tag") is not None]
-            width = sum(text.horizontalAdvance(n) for n in names) + 24
-            width += sum(tags.horizontalAdvance(t) + 10 + 4 for t in labels)
-            widest = max(widest, width + 8)
+            for name in self.table.cellWidget(row, 3).findChildren(ElidedLabel):
+                widest = max(widest, text.horizontalAdvance(name.full_text()) + 32)
         return widest
+
+    def _widest_tags(self) -> int:
+        """What the status tags of the widest row add to the address column; 0 without any."""
+        widest = 0
+        for row in range(self.table.rowCount()):
+            width = 0
+            for widget in self.table.cellWidget(row, 1).findChildren(QLabel):
+                if widget.property("tag") is not None:
+                    widget.ensurePolished()
+                    width += widget.sizeHint().width() + CELL_TAG_GAP
+            widest = max(widest, width)
+        return widest
+
+    def _floors(self) -> dict[int, int]:
+        """_GIVE_WAY as column -> narrowest width: the address column keeps its status tags."""
+        floors = dict(_GIVE_WAY)
+        floors[1] += self._widest_tags()
+        return floors
 
     def _typing(self) -> tuple[str, int, str, int] | None:
         """(entry id, column, text, cursor) of an address or note being typed, so that a
@@ -606,9 +634,9 @@ class EntriesTab(QWidget):
             hint += f" (0x{entry.auto_address:X})"
         address.setToolTip(hint)
         address.editingFinished.connect(lambda e=entry, w=address: self._address(e, w))
-        self.table.setCellWidget(row, 1, _cell(address))
+        self.table.setCellWidget(row, 1, self._address_cell(address, entry, mark, remark))
         self.table.setCellWidget(row, 2, self._mcu_cell(entry, mcu, locked, dim))
-        self.table.setCellWidget(row, 3, self._name_cell(entry, mark, dim, remark))
+        self.table.setCellWidget(row, 3, self._name_cell(entry, dim))
         p = self._owner.palette
         for column, text, color in (
             (4, entry.kind.value, p.fg_3 if dim else p.fg_2),
@@ -658,27 +686,43 @@ class EntriesTab(QWidget):
         combo.activated.connect(chosen)
         return _cell(combo, left=0)  # its text starts where the read-only names start
 
-    def _name_cell(
-        self, entry: Entry, mark: EntryMark | None, dim: str | None, note: str = ""
+    def _address_cell(
+        self, address: QLineEdit, entry: Entry, mark: EntryMark | None, note: str
     ) -> QWidget:
+        """The address, and to its right the status tags of the entry. The field keeps its
+        width, so the addresses line up, and gives way only when the column has no room."""
+        address.setMaximumWidth(ADDRESS_FIELD_PX)
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(CELL_TAG_GAP)
+        layout.addWidget(address, 1)  # up to its maximum; what is left goes to the stretch
+        tags: list[QLabel] = []
+        if mark is not None:
+            tags.append(tag(*MARK_TAGS[mark]))
+        if entry.auto_added:
+            tags.append(tag(tr("added automatically"), "gray"))
+        if note:  # PIO: boot_app0 placed by the table, or a listed address the image disputes
+            moved = entry.kind == EntryKind.OTADATA
+            explained = tag(
+                tr("placed by partition table") if moved else tr("address differs"),
+                "info" if moved else "warn",
+            )
+            explained.setToolTip(tr(note))
+            tags.append(explained)
+        for shown in tags:
+            shown.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+            layout.addWidget(shown)
+        layout.addStretch(0)
+        return widget
+
+    def _name_cell(self, entry: Entry, dim: str | None) -> QWidget:
         widget = QWidget()
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(6, 0, 6, 0)
         layout.setSpacing(4)
         name = elided(entry.name, tone=dim)
         layout.addWidget(name, 1)
-        if mark is not None:
-            layout.addWidget(tag(*MARK_TAGS[mark]))
-        if entry.auto_added:
-            layout.addWidget(tag(tr("added automatically"), "gray"))
-        if note:  # PIO: boot_app0 placed by the table, or a listed address the image disputes
-            moved = entry.kind == EntryKind.OTADATA
-            layout.addWidget(
-                tag(
-                    tr("placed by partition table") if moved else tr("address differs"),
-                    "info" if moved else "warn",
-                )
-            )
         scheme, _, rest = entry.file.partition(":")
         where = (
             rest
@@ -687,8 +731,8 @@ class EntriesTab(QWidget):
             if scheme == "archive"
             else tr("0xFF bytes, generated when flashing")
         )
-        widget.setToolTip(f"{where}\n{tr(note)}" if note else where)
-        name.setToolTip(widget.toolTip())
+        widget.setToolTip(where)
+        name.setToolTip(where)
         return widget
 
     def _requires(self, entry: Entry) -> str:
