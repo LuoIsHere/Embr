@@ -1,7 +1,7 @@
 """Icons drawn from SVG text in the current text colour, and the application logo.
 
-menu, panel-left and search are Lucide icons (ISC licence, see THIRD_PARTY_NOTICES); the
-window-control glyphs are drawn here.
+menu, panel-left, search and circle-help are Lucide icons (ISC licence, see
+THIRD_PARTY_NOTICES); the window-control glyphs are drawn here.
 """
 
 from importlib.resources import files
@@ -27,6 +27,11 @@ SHAPES: dict[str, tuple[str, str]] = {
     ),
     "panel-left": (_LUCIDE, '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>'),
     "search": (_LUCIDE, '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>'),
+    "circle-help": (
+        _LUCIDE,
+        '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>'
+        '<path d="M12 17h.01"/>',
+    ),
     "minimize": (_WINDOW, '<path d="M1 5h8"/>'),
     "maximize": (_WINDOW, '<rect x="1.5" y="1.5" width="7" height="7"/>'),
     "restore": (

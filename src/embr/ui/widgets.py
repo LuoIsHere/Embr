@@ -3,9 +3,10 @@
 import html
 from collections.abc import Callable
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QMouseEvent, QResizeEvent
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -205,3 +206,39 @@ def danger_action(menu: QMenu, text: str, slot: Callable[[], None]) -> QWidgetAc
     action.triggered.connect(slot)
     menu.addAction(action)
     return action
+
+
+class Switch(QAbstractButton):
+    """An on/off switch (a checkable button drawn as a track with a knob). Colours come from
+    set_colors() (the palette); toggled() as for any checkable button."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._on, self._off, self._knob, self._dim = "#c8582f", "#d9dde3", "#ffffff", "#8a92a0"
+
+    def set_colors(self, on: str, off: str, knob: str, disabled: str) -> None:
+        self._on, self._off, self._knob, self._dim = on, off, knob, disabled
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        return QSize(30, 16)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        track = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
+        color = self._on if self.isChecked() else self._off
+        if not self.isEnabled():
+            color = self._dim if self.isChecked() else self._off
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+        size = track.height() - 4
+        x = track.right() - 2 - size if self.isChecked() else track.left() + 2
+        painter.setBrush(QColor(self._knob))
+        painter.drawEllipse(QRectF(x, track.top() + 2, size, size))
+        painter.end()

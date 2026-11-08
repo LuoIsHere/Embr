@@ -147,17 +147,20 @@ def can_flash(items: list[CheckItem]) -> bool:
 
 
 def flash_ready(
-    items: list[CheckItem], snapshot: IdentifySnapshot | None, port: PortInfo | None
+    items: list[CheckItem],
+    snapshot: IdentifySnapshot | None,
+    port: PortInfo | None,
+    *,
+    quick_chip_known: bool = False,
 ) -> bool:
     """Whether the Flash button may be pressed (design doc §12 item 5): a port is selected,
     the last identification is a snapshot of that port (same device name), and no item
-    refuses. The flash job still identifies the chip again in its own connection."""
-    return (
-        port is not None
-        and snapshot is not None
-        and snapshot.port.device == port.device
-        and can_flash(items)
-    )
+    refuses. quick_chip_known (Quick flash on, and the firmware has one MCU to plan for,
+    design D7): no identification needed. The flash job still identifies the chip again in
+    its own connection and refuses there what does not fit."""
+    if port is None or not can_flash(items):
+        return False
+    return quick_chip_known or (snapshot is not None and snapshot.port.device == port.device)
 
 
 _TITLES = {

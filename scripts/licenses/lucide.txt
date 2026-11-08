@@ -1,5 +1,5 @@
-Embr draws three Lucide icons (menu, panel-left, search) from their SVG path data
-(https://lucide.dev).
+Embr draws four Lucide icons (menu, panel-left, search, circle-help) from their SVG
+path data (https://lucide.dev).
 
 ISC License
 

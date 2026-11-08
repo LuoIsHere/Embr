@@ -722,4 +722,22 @@ TEXT: dict[str, str] = {
     "Read only": "只读",
     "<b>{0}</b> was created by a newer version of Embr and is read-only here.": "<b>{0}</b> 由更新版本的 Embr 创建，在此版本中只读。",
     "This project was created by a newer version of Embr and is read-only here.": "此项目由更新版本的 Embr 创建，在此版本中只读。",
+    "Quick flash": "快速烧录",
+    "Skip Connect & identify and flash directly. The chip is still identified and checked during the flash; writing is refused if the chip does not match or a security feature is on.": (
+        "跳过“连接并识别”，直接烧录。烧录时仍会识别芯片并进行安全检查；"
+        "芯片不符或已启用安全功能时拒绝写入。"
+    ),
+    "This firmware is for several chips or has no chip selected, so the board must be identified first.": (
+        "此固件包含多种芯片或尚未选择芯片，需要先“连接并识别”设备。"
+    ),
+    "Quick flash over USB-OTG: put the board into download mode as described by its vendor before flashing; Cancel is available while waiting.": (
+        "快速烧录（USB-OTG）：烧录前按设备厂商的说明让设备进入下载模式；等待时可以取消。"
+    ),
+    "Quick flash over USB-Serial/JTAG: automatic reset is tried; if the running firmware does not keep this peripheral, the connect step times out, then enter download mode as described by the board's vendor.": (
+        "快速烧录（USB-Serial/JTAG）：会尝试自动复位；若运行中的固件未保留此外设，"
+        "连接会超时，此时请按设备厂商的说明进入下载模式。"
+    ),
+    "Quick flash with erase on: the whole flash of the board on {0} will be erased without identifying it first.": (
+        "快速烧录且已勾选擦除：将擦除 {0} 上设备的整片 flash，且事先不进行识别。"
+    ),
 }

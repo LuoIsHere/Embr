@@ -35,7 +35,7 @@ from embr.app.archiving import Archiver
 from embr.app.checklist import flash_ready, preflight
 from embr.app.chips import board_revision
 from embr.app.context import AppContext
-from embr.app.flashplan import PlanError, preview_command
+from embr.app.flashplan import PlanError, plan_mcu, preview_command
 from embr.app.identify import IdentifyMemory, IdentifySnapshot
 from embr.app.library import AlreadyTrackedError, Library, TrackingEntriesError
 from embr.app.locations import Location, firmware_location
@@ -62,7 +62,7 @@ from embr.core.firmware.import_pio import (
     built_envs_below,
     env_ref,
 )
-from embr.core.firmware.model import editable_params
+from embr.core.firmware.model import Firmware, editable_params
 from embr.core.firmware.store import ReadOnlyError, default_name_archived
 from embr.core.firmware.tracking import ChangeKind, ResolveState
 from embr.core.flasher.checks import CheckLevel
@@ -140,6 +140,21 @@ HINT_JTAG = N_(
     "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried; if the "
     "running firmware does not keep this peripheral, the connect step times out, then enter "
     "download mode as described by the board's vendor."
+)
+QUICK_KEY = "quick_flash"
+"""settings.ini [ui] quick_flash: the Quick flash switch (design D7), off by default."""
+HINT_QUICK_NEEDS_ID = N_(
+    "This firmware is for several chips or has no chip selected, so the board must be "
+    "identified first."
+)
+HINT_QUICK_OTG = N_(
+    "Quick flash over USB-OTG: put the board into download mode as described by its vendor "
+    "before flashing; Cancel is available while waiting."
+)
+HINT_QUICK_JTAG = N_(
+    "Quick flash over USB-Serial/JTAG: automatic reset is tried; if the running firmware does "
+    "not keep this peripheral, the connect step times out, then enter download mode as "
+    "described by the board's vendor."
 )
 
 
@@ -222,6 +237,7 @@ class EmbrWindow(FrameWindow):
         self._ports_pending = False
         self._scheme = SchemeWatcher(self)
         self._theme = ui_settings.load_choice(context.settings, "theme", THEMES, "system")
+        self._quick = ui_settings.load_flag(context.settings, QUICK_KEY, False)
         self._language = stored_language(context.settings)
         self._language_dialog: dialogs.Dialog | None = None
         self.restart_requested = False
@@ -289,6 +305,8 @@ class EmbrWindow(FrameWindow):
         self.connection.identify_clicked.connect(self._identify)
         self.connection.flash_clicked.connect(self._flash_or_cancel)
         self.connection.erase_all_toggled.connect(self._set_erase_all)
+        self.connection.set_quick(self._quick)
+        self.connection.quick_toggled.connect(self._set_quick)
         self.connection.hint_dismissed.connect(self._dismiss_hint)
         self.log_panel.expand_toggled.connect(self._expand_log)
         self.log_panel.log_folder_clicked.connect(self._open_log_folder)
@@ -585,7 +603,8 @@ class EmbrWindow(FrameWindow):
             firmware = status.firmware
             items = preflight(self._context, firmware, port, snapshot, status)
             self.connection.show_checks(items)
-            ready = flash_ready(items, snapshot, port)
+            quick = self._quick and plan_mcu(self._context, firmware) is not None
+            ready = flash_ready(items, snapshot, port, quick_chip_known=quick)
             self.connection.set_flash_enabled(ready and not busy)
             command = preview_command(
                 self._context,
@@ -609,7 +628,10 @@ class EmbrWindow(FrameWindow):
         self.connection.set_hint("" if key == self._dismissed_hint else text, kind)
 
     def _hint(self, port: PortInfo | None, snapshot: IdentifySnapshot | None) -> tuple[str, str]:
-        """The hint above Flash: what the last job left behind, else what to do first."""
+        """The hint above Flash: what the last job left behind, else what to do first. With
+        Quick flash on and a firmware selected (design D7): why it still needs Connect &
+        identify, or how the connection enters download mode, and a warning when the whole
+        flash would be erased without identifying the board."""
         outcome = self._last_outcome
         if outcome is not None and outcome.result == RecordResult.OK:
             if outcome.kind == JobKind.FLASH and outcome.native_usb:
@@ -622,11 +644,40 @@ class EmbrWindow(FrameWindow):
                 return HINT_DOWNLOAD_MODE, "ok"
         if port is None or (snapshot is not None and snapshot.port.device == port.device):
             return "", "ok"
+        firmware_id = self._selected_firmware_id()
+        if self._quick and firmware_id is not None:
+            return self._quick_hint(port, self._library.firmware(firmware_id))
         if port.connection == ConnectionType.USB_OTG:
             return HINT_OTG, "warn"
         if port.connection == ConnectionType.USB_SERIAL_JTAG:
             return HINT_JTAG, "ok"
         return HINT_IDENTIFY, "ok"
+
+    def _quick_hint(self, port: PortInfo, firmware: Firmware) -> tuple[str, str]:
+        """Quick flash on, this port not identified."""
+        if plan_mcu(self._context, firmware) is None:
+            return HINT_QUICK_NEEDS_ID, "ok"
+        if firmware.erase_all:
+            erase = N_(
+                f"Quick flash with erase on: the whole flash of the board on {port.device} will "
+                "be erased without identifying it first."
+            )
+            return erase, "warn"
+        if port.connection == ConnectionType.USB_OTG:
+            return HINT_QUICK_OTG, "warn"
+        if port.connection == ConnectionType.USB_SERIAL_JTAG:
+            return HINT_QUICK_JTAG, "ok"
+        return "", "ok"
+
+    def _set_quick(self, on: bool) -> None:
+        """The Quick flash switch: kept in settings.ini at once (design D7)."""
+        self._quick = on
+        self.connection.set_quick(on)
+        settings = self._context.settings
+        ui_settings.save_flag(settings, QUICK_KEY, on)
+        settings.save()
+        self.note("dim", f"[flash] quick flash {'on' if on else 'off'}")
+        self._refresh_right()
 
     def _dismiss_hint(self) -> None:
         """Keep a clicked-away hint hidden until the job outcome, port or text changes."""

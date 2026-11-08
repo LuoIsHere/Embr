@@ -20,10 +20,11 @@ from embr.app.checklist import CheckItem, CheckState
 from embr.app.identify import IdentifySnapshot
 from embr.core.serial import ConnectionType, PortInfo, baud_adjustable
 from embr.i18n import N_, tr
+from embr.ui import icons
 from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
 from embr.ui.theme import Palette
-from embr.ui.widgets import button, clear_layout, label, tag
+from embr.ui.widgets import Switch, button, clear_layout, label, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
 CONNECTION_LABELS = {
@@ -32,6 +33,11 @@ CONNECTION_LABELS = {
     ConnectionType.USB_OTG: "USB-OTG",
     ConnectionType.UNKNOWN: N_("serial port"),
 }
+QUICK_TIP = N_(
+    "Skip Connect & identify and flash directly. The chip is still identified and checked "
+    "during the flash; writing is refused if the chip does not match or a security feature "
+    "is on."
+)
 CHECK_TEXT = {
     CheckState.PASS: "PASS",
     CheckState.WARN: "WARN",
@@ -95,6 +101,8 @@ class ConnectionPanel(QWidget):
     """Flash, or Cancel while a job runs."""
     erase_all_toggled = Signal(bool)
     """The "erase the whole flash first" box above Flash (the firmware's erase_all)."""
+    quick_toggled = Signal(bool)
+    """The Quick flash switch next to it (a global setting, design D7)."""
     hint_dismissed = Signal()
 
     def __init__(self) -> None:
@@ -166,6 +174,32 @@ class ConnectionPanel(QWidget):
         self.erase_all.setToolTip(
             tr("Saved with the firmware. Clears NVS (Wi-Fi credentials and other stored data)")
         )
+        self.quick = Switch()
+        self.quick.setToolTip(tr(QUICK_TIP))
+        self.quick.setAccessibleName(tr("Quick flash"))
+        self.quick_text = label(tr("Quick flash"), tone="2")
+        self.quick_help = QLabel()
+        self.quick_help.setToolTip(tr(QUICK_TIP))
+        self._quick_box = QWidget()
+        quick = QHBoxLayout(self._quick_box)
+        quick.setContentsMargins(0, 0, 0, 0)
+        quick.setSpacing(4)
+        quick.addWidget(self.quick_text)
+        quick.addWidget(self.quick_help)
+        quick.addSpacing(2)
+        quick.addWidget(self.quick, 0, Qt.AlignmentFlag.AlignVCenter)
+        # one row: [ ] Erase the whole flash first      Quick flash (?) [switch]; when the
+        # column is too narrow for both, the switch goes to a row of its own (right aligned)
+        self._options = QHBoxLayout()
+        self._options.setSpacing(8)
+        self._options.addWidget(self.erase_all)
+        self._options.addStretch(1)
+        self._options.addWidget(self._quick_box)
+        self._wrapped_row = QWidget()
+        self._wrapped_row.hide()
+        self._wrapped = QHBoxLayout(self._wrapped_row)
+        self._wrapped.setContentsMargins(0, 0, 0, 0)
+        self._wrapped.addStretch(1)
         self.flash = button("", "primary")
         self._flash_text = QLabel()
         self._flash_text.setObjectName("flashtext")
@@ -191,7 +225,8 @@ class ConnectionPanel(QWidget):
         action_layout.setContentsMargins(12, 10, 12, 10)
         action_layout.setSpacing(6)
         action_layout.addWidget(self.hint)
-        action_layout.addWidget(self.erase_all)
+        action_layout.addLayout(self._options)
+        action_layout.addWidget(self._wrapped_row)
         action_layout.addWidget(self.flash)
         action_layout.addSpacing(4)
         action_layout.addWidget(self.progress)
@@ -213,12 +248,22 @@ class ConnectionPanel(QWidget):
         self.board_log.clicked.connect(self.board_log_clicked.emit)
         self.flash.clicked.connect(self.flash_clicked.emit)
         self.erase_all.toggled.connect(self._erase_all_toggled)
+        self.quick.toggled.connect(self.quick_toggled.emit)
         self.hint.dismissed.connect(self.hint_dismissed.emit)
         self.set_running(False)
 
     def apply_palette(self, p: Palette) -> None:
         self._palette = p
         self._paint_keys()
+        self.quick.set_colors(p.accent, p.line, p.panel, p.fg_3)
+        self.quick_help.setPixmap(icons.icon("circle-help", p.fg_3, 14).pixmap(14, 14))
+
+    def set_quick(self, on: bool) -> None:
+        """Show the Quick flash setting; changes come back as quick_toggled."""
+        self.quick.blockSignals(True)
+        self.quick.setChecked(on)
+        self.quick.blockSignals(False)
+        self.quick.update()
 
     # ---- ports and baud ---------------------------------------------------------------
 
@@ -364,6 +409,28 @@ class ConnectionPanel(QWidget):
         self.hint.fit_text()
         self.hint.setVisible(bool(text))
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._fit_options()
+
+    def _fit_options(self) -> None:
+        """The Quick flash switch next to the erase box when both fit, else on a row of its
+        own below it (an English text in the narrowest column)."""
+        room = self.width() - 24  # the action frame's margins
+        need = self._quick_box.sizeHint().width()
+        if not self.erase_all.isHidden():
+            need += self.erase_all.sizeHint().width() + self._options.spacing()
+        wrap = need > room
+        target, other = (self._wrapped, self._options) if wrap else (self._options, self._wrapped)
+        if other.indexOf(self._quick_box) >= 0:
+            other.removeWidget(self._quick_box)
+            target.addWidget(self._quick_box)
+        self._wrapped_row.setVisible(wrap)
+
+    def wrapped(self) -> bool:
+        """Whether the Quick flash switch is on a row of its own."""
+        return self._wrapped.indexOf(self._quick_box) >= 0
+
     def set_erase_all(self, checked: bool, enabled: bool, visible: bool) -> None:
         """Show the selected firmware's erase_all; changes come back as erase_all_toggled."""
         self.erase_all.blockSignals(True)
@@ -372,6 +439,7 @@ class ConnectionPanel(QWidget):
         self.erase_all.setEnabled(enabled and not self._running)
         self.erase_all.setVisible(visible)
         self._mark_erase_all()
+        self._fit_options()
 
     def _erase_all_toggled(self, checked: bool) -> None:
         self._mark_erase_all()
@@ -399,6 +467,7 @@ class ConnectionPanel(QWidget):
             _repolish(widget)
         self._paint_keys()
         self.erase_all.setEnabled(not running and self.erase_all.isEnabled())
+        self.quick.setEnabled(not running)
         self.identify.setEnabled(not running)
         if running:
             self.set_board_actions(False)
