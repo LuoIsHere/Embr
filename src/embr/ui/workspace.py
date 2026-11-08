@@ -282,7 +282,8 @@ class Banner(QFrame):
         self.hide()
 
     def show_text(self, text: str, action: str = "", mode: str = "") -> None:
-        """`mode` tells the owner what the button does ("confirm", "directory")."""
+        """`mode` tells the owner what the button does ("confirm", "directory",
+        "follow_env")."""
         self.mode = mode
         self.text.setText(text)
         self.action.setText(action)
@@ -1452,7 +1453,15 @@ class FirmwareView(QWidget):
             if firmware.source == Source.PIO_BUILD
             else tr("Run <code>idf.py build</code>")
         )
-        if status.state == ResolveState.TARGET_SWITCHED:
+        if status.env_gone:  # design D11: offer the one env it may have been renamed to
+            env = html.escape((firmware.build_ref.env if firmware.build_ref else None) or "")
+            text = tr(f"platformio.ini no longer declares [env:{env}]. It may have been renamed.")
+            candidates = self._owner.library.tracker.env_candidates(firmware.id)
+            if len(candidates) == 1:
+                self.banner.show_text(text, tr(f"Follow env {candidates[0]}"), "follow_env")
+            else:
+                self.banner.show_text(text, tr("Change directory…"), "directory")
+        elif status.state == ResolveState.TARGET_SWITCHED:
             self.banner.show_text(
                 tr(
                     f"Target switched, rebuild needed: the configuration targets "
@@ -1505,8 +1514,8 @@ class FirmwareView(QWidget):
         firmware = self._firmware
         if firmware is None:
             return
-        if self.banner.mode == "directory":
-            self._owner.firmware_action("directory")
+        if self.banner.mode in ("directory", "follow_env"):
+            self._owner.firmware_action(self.banner.mode)
             return
         try:
             self._owner.library.confirm_entries(firmware.id)

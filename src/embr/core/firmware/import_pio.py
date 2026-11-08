@@ -8,6 +8,7 @@ writes into the project; pio is only used for the read-only `pio project config`
 Offline except run_pio(). May use image_sniff, never the reverse.
 """
 
+import contextlib
 import json
 import re
 import subprocess
@@ -107,6 +108,9 @@ class PioImages:
     images: tuple[FlashImage, ...]
     """Everything but the app, as listed (absolute paths)."""
     application_offset: int
+    app_name: str = APP_FILE
+    """The app image's file name: prog_path's name with .bin (a custom PROGNAME), else
+    firmware.bin (design D12)."""
 
 
 @dataclass(frozen=True)
@@ -150,7 +154,7 @@ class PioBuild:
     flash: FlashParams
     """From the bootloader image header ("keep" for an unreadable value)."""
     chip: str | None
-    """From the firmware.bin image header."""
+    """From the app image header."""
     package: PackageChoice | None
     """Arduino only."""
     notes: tuple[str, ...]
@@ -219,7 +223,7 @@ def read_idedata(ref: EnvRef) -> tuple[PioImages | None, str]:
     """idedata.json of the env, or (None, why) when it is missing, unparsable, lacks
     extra.flash_images or extra.application_offset, is older than platformio.ini, or lists
     a file that does not exist. Offsets are read as integers whatever their spelling
-    ("0x1000", "0x0000", 0)."""
+    ("0x1000", "0x0000", 0). The app's name comes from prog_path (the ELF) with .bin."""
     file = ref.build_dir / IDEDATA
     try:
         stamp = file.stat().st_mtime_ns
@@ -248,7 +252,11 @@ def read_idedata(ref: EnvRef) -> tuple[PioImages | None, str]:
     missing = [i.path.name for i in images if not i.path.is_file()]
     if missing:
         return None, N_(f"{IDEDATA} lists missing files: {', '.join(missing)}")
-    return PioImages(tuple(images), offset), ""
+    prog = table.get("prog_path")
+    app_name = APP_FILE
+    if isinstance(prog, str) and prog.strip():
+        app_name = Path(prog.replace("\\", "/").rsplit("/", 1)[-1]).with_suffix(".bin").name
+    return PioImages(tuple(images), offset, app_name), ""
 
 
 def parse_config(text: str) -> dict[str, EnvConfig]:
@@ -424,12 +432,14 @@ def read_env(
     folder has flasher_args.json, else arduino.
     Images: read_idedata(); when it gives None the build folder is scanned and the reason
     goes into notes.
-    - idedata: the listed images plus firmware.bin at application_offset.
+    - idedata: the listed images plus the app (PioImages.app_name) at application_offset.
     - scan, arduino: every .bin, classified with image_sniff against partitions.bin;
       merged images and unrecognised files are left out (noted).
     - scan, espidf: flasher_args.json's flash_files with idf.py names mapped to PlatformIO
       outputs (bootloader -> bootloader.bin, partition table -> partitions.bin, app ->
-      firmware.bin, otadata -> ota_data_initial.bin, others by file name).
+      the app image, otadata -> ota_data_initial.bin, others by file name).
+    A scan takes the newest .bin that reads as an app; older app images are left out and
+    noted (a custom PROGNAME leaves the old firmware.bin behind until a clean, design D12).
     Arduino boot_app0.bin (from the idedata path or locate_package()): placed at the
     table's otadata partition with a note when that is not 0xE000; dropped (noted) when the
     table has no otadata partition; a blank otadata of the partition's size when no package
@@ -446,6 +456,7 @@ def read_env(
     notes: list[str] = []
     problems: list[str] = []
     inputs = [ref.project_root / PLATFORMIO_INI, build_dir / IDEDATA, build_dir]
+    contents: dict[Path, bytes | None] = {}
     images, why = read_idedata(ref)
     listed_boot: Path | None = None
     if images is not None:
@@ -456,20 +467,26 @@ def read_env(
                 listed_boot = image.path
                 continue
             raw.append((image.address, image.path, _kind_by_name(image.path.name), True))
-        app = build_dir / APP_FILE
+        app = build_dir / images.app_name
         raw.append((images.application_offset, app, EntryKind.APP, True))
     else:
         source = ImageSource.SCAN
         notes.append(N_(f"{why}; the build folder was scanned instead"))
         if framework == Framework.ESPIDF and (build_dir / FLASHER_ARGS).is_file():
             inputs.append(build_dir / FLASHER_ARGS)
-            raw = _espidf_files(build_dir)
+            raw = _espidf_files(build_dir, _newest_app(build_dir, notes, contents)[0])
         else:
             raw = []
-    contents = {path: _read(path) for _, path, _, _ in raw}
-    if source == ImageSource.SCAN and not raw:
-        for path in sorted(build_dir.glob("*.bin")):
+    for _, path, _, _ in raw:
+        if path not in contents:
             contents[path] = _read(path)
+    if source == ImageSource.SCAN and not raw:
+        _, older = _newest_app(build_dir, notes, contents)
+        for path in sorted(build_dir.glob("*.bin")):
+            if path in older:
+                continue
+            if path not in contents:
+                contents[path] = _read(path)
             raw.append((-1, path, _kind_by_name(path.name), False))
     table = next(
         (
@@ -641,7 +658,31 @@ def _kind_by_name(name: str) -> EntryKind | None:
     return by_name.get(lowered)
 
 
-def _espidf_files(build_dir: Path) -> list[tuple[int, Path, EntryKind | None, bool]]:
+def _newest_app(
+    build_dir: Path, notes: list[str], contents: dict[Path, bytes | None]
+) -> tuple[Path, tuple[Path, ...]]:
+    """(app image, older app images) of a scanned build folder (design D12): of the .bin
+    files that read as an app, the newest; the older ones are noted. firmware.bin when none
+    reads as an app (then reported missing or unreadable). Files read go into `contents`."""
+    apps: list[tuple[int, Path]] = []
+    for path in sorted(build_dir.glob("*.bin")):
+        if path not in contents:
+            contents[path] = _read(path)
+        data = contents[path]
+        if data is None or sniff(data, path.name).kind != EntryKind.APP:
+            continue
+        with contextlib.suppress(OSError):
+            apps.append((path.stat().st_mtime_ns, path))
+    if not apps:
+        return build_dir / APP_FILE, ()
+    newest = max(apps)[1]
+    older = tuple(path for _, path in apps if path != newest)
+    for path in older:
+        notes.append(N_(f"{path.name}: an older app image; {newest.name} is used"))
+    return newest, older
+
+
+def _espidf_files(build_dir: Path, app: Path) -> list[tuple[int, Path, EntryKind | None, bool]]:
     try:
         args = _table(json.loads((build_dir / FLASHER_ARGS).read_text(encoding="utf-8")))
     except (OSError, ValueError) as exc:
@@ -658,7 +699,7 @@ def _espidf_files(build_dir: Path) -> list[tuple[int, Path, EntryKind | None, bo
             raise PioBuildError(N_(f"{FLASHER_ARGS}: bad flash_files entry {offset!r}"))
         kind = kinds.get(name.replace("\\", "/"))
         mapped = _PIO_NAMES.get(kind) if kind is not None else None
-        path = build_dir / (mapped or Path(name).name)
+        path = app if kind == EntryKind.APP else build_dir / (mapped or Path(name).name)
         if not path.is_file() and (build_dir / name).is_file():
             path = build_dir / name
         files.append((address, path, kind, True))

@@ -603,3 +603,50 @@ def _refusal(driver: kit.DialogDriver) -> bool:
 
 
 _ = (shutil, QCheckBox)
+
+
+# ---- the app file and the env renamed ---------------------------------------------------
+
+
+def test_progname_and_a_renamed_env_are_followed(
+    pio_project: bk.PioProject,
+    embr: Callable[..., kit.EmbrApp],
+    file_dialogs: kit.FileDialogs,
+) -> None:
+    """Design D9, D11, D12: PROGNAME set in an extra script (platformio.ini unchanged, so
+    PlatformIO does not clean the build folder) leaves firmware.bin behind; the newer app
+    image is followed as a rename, never the stale firmware.bin. A renamed env: the banner
+    says platformio.ini no longer declares it and offers the one built env no firmware
+    follows; a click follows it and the firmware keeps its name."""
+    pio_project.reset()
+    app = embr()
+    window = app.window
+    env, renamed = "embr_dev", "embr_dev_v2"
+    progname = "extra_scripts = pre:embr_progname.py"
+    script = pio_project.root / "embr_progname.py"
+    script.write_text('Import("env")\n', encoding="utf-8")
+    _ini(pio_project, bk.ini_env(env, "esp32dev", "pio-name", progname))
+    _build(pio_project, env)
+    bk.import_pio(window, file_dialogs, pio_project.build_dir(env), [env])
+    bk.wait_state(app, env, "ok", "updated")
+
+    script.write_text('Import("env")\nenv.Replace(PROGNAME="embr_app")\n', encoding="utf-8")
+    _build(pio_project, env)
+    build = pio_project.build_dir(env)
+    assert (build / "firmware.bin").is_file() and (build / "embr_app.bin").is_file()
+    status = bk.wait_state(app, env, "updated", "ok")
+    names = [n for _, n, _, _ in bk.entries_of(app, env)]
+    assert "embr_app.bin" in names and "firmware.bin" not in names, names
+    assert any(c.kind == ChangeKind.ENTRY_RENAMED for c in status.changes), status.changes
+
+    _ini(pio_project, bk.ini_env(renamed, "esp32dev", "pio-name", progname))
+    _build(pio_project, renamed)
+    gone = bk.wait_state(app, env, "incomplete")
+    assert gone.env_gone, gone.problems
+    button = window.firmware_view.banner.action
+    assert kit.same_text(button.text(), f"Follow env {renamed}"), bk.banner_text(window)
+    kit.click(button)
+    kit.wait_log(window, f"[build] {env} now follows env {renamed}")
+    bk.wait_state(app, env, "ok", "updated")
+    stored = bk.firmware_by_name(app, env)
+    assert stored.build_ref is not None and stored.build_ref.env == renamed

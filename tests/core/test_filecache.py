@@ -15,16 +15,28 @@ def test_fingerprint_stats_existing_and_missing_files(tmp_path: Path) -> None:
     present = tmp_path / "app.bin"
     present.write_bytes(b"\x01" * 64)
     missing = tmp_path / "missing.bin"
+    folder = tmp_path / "build"
+    folder.mkdir()
+    os.utime(folder, ns=(10**9, 10**9))  # older than the file
     st = present.stat()
 
-    found = fingerprint([present, missing, present, tmp_path])
+    found = fingerprint([present, missing, present, folder])
     assert found.stamps == (
         FileStamp(str(present), st.st_size, st.st_mtime_ns),
         FileStamp(str(missing), None, None),
-        FileStamp(str(tmp_path), None, None),  # not a regular file
+        FileStamp(str(folder), None, 10**9),  # a folder: its time only
     )
     assert found.newest_mtime_ns == st.st_mtime_ns
     assert fingerprint([missing]).newest_mtime_ns is None
+
+
+def test_a_file_added_to_a_folder_changes_its_stamp(tmp_path: Path) -> None:
+    folder = tmp_path / "build"
+    folder.mkdir()
+    os.utime(folder, ns=(10**9, 10**9))
+    before = fingerprint([folder])
+    (folder / "renamed.bin").write_bytes(b"")
+    assert fingerprint([folder]) != before
 
 
 def test_file_is_hashed_again_only_after_its_stat_changed(tmp_path: Path) -> None:

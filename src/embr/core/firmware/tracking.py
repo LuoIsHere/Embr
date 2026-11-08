@@ -43,7 +43,8 @@ class ResolveState(StrEnum):
     OK = "ok"
     """Same as last_resolved."""
     UPDATED = "updated"
-    """Only file contents changed: followed without confirmation (accept() is applied)."""
+    """Only file contents changed, or the app file was renamed (design D9): followed without
+    confirmation (accept() is applied)."""
     NEEDS_CONFIRMATION = "needs_confirmation"
     """Anything else changed since last_resolved; not flashable until confirmed."""
     TARGET_SWITCHED = "target_switched"
@@ -72,6 +73,10 @@ class ChangeKind(StrEnum):
     RESET = "reset"
     PARTITION_TABLE = "partition_table"
     """Content of the partition table file."""
+    ENTRY_RENAMED = "entry_renamed"
+    """The app file has a new name (an ESP-IDF project or PlatformIO PROGNAME renamed): one
+    app entry gone and one new at the same address, same chip (design D9). Listed instead
+    of the added, removed and dropped-override lines; its overrides move to the new name."""
     ENTRY_ADDED = "entry_added"
     ENTRY_REMOVED = "entry_removed"
     ADDRESS = "address"
@@ -82,7 +87,7 @@ class ChangeKind(StrEnum):
     """Manual address of a derived entry, listed on a chip or IDF change for review (on a
     chip change it is dropped on confirmation)."""
     CONTENT = "content"
-    """Same file, new content. The only kind in an UPDATED resolution."""
+    """Same file, new content. With ENTRY_RENAMED the only kinds in an UPDATED resolution."""
     GROUP_HINT = "group_hint"
     """Chip changed: the device group may need adjusting."""
 
@@ -174,9 +179,11 @@ class Resolution:
     build_notes: tuple[str, ...] = ()
     """DerivedBuild.notes."""
     removed: tuple[Entry, ...] = ()
-    """Entries of last_resolved whose file is no longer in the build (renamed or dropped;
-    design doc §3.4 case 2), rebuilt from the snapshot for display and marked MISSING.
-    Never part of `firmware`: not flashed, not accepted."""
+    """Entries of last_resolved whose file is no longer in the build (design doc §3.4 case
+    2; not the old name of a renamed app file), rebuilt from the snapshot for display and
+    marked MISSING. Never part of `firmware`: not flashed, not accepted."""
+    env_gone: bool = False
+    """PlatformIO: platformio.ini no longer declares the followed env (design D11)."""
 
 
 def entry_key(kind: EntryKind, file_name: str) -> str:
@@ -197,7 +204,10 @@ def resolve(
        -> INCOMPLETE
     3. configured_target set and different from the build's chip -> TARGET_SWITCHED
     4. no last_resolved -> OK (first resolve; the importer accepts it)
-    5. only CONTENT changes -> UPDATED; any other change -> NEEDS_CONFIRMATION; else OK
+    5. only CONTENT and ENTRY_RENAMED changes -> UPDATED; any other change ->
+       NEEDS_CONFIRMATION; else OK
+    A renamed app file (_renamed_app(), design D9) keeps the overrides of its old name:
+    note, enabled and manual address apply to the new entry, which is marked CHANGED.
     build.problems make the state INCOMPLETE with those problems (step 1). Blank files
     (DerivedFile.blank_size) become "otadata (blank)" entries that are never missing.
     DerivedFile.note and build.notes are passed on as entry_notes and build_notes.
@@ -244,7 +254,8 @@ def resolve(
     if len({v[:_IDF_VER_CHARS] for _, v in versions}) > 1:
         incomplete.append("ESP-IDF versions differ: " + ", ".join(f"{s} {v}" for s, v in versions))
 
-    resolved = _resolved_firmware(firmware, build, chip, derived)
+    renamed = _renamed_app(last, last_entries, derived, chip or firmware.chip)
+    resolved = _resolved_firmware(firmware, build, chip, derived, renamed)
     if table is not None:
         resolve_partitions(resolved, table)
 
@@ -264,15 +275,16 @@ def resolve(
     changes: list[Change] = []
     removed: list[Entry] = []
     if last is not None:
-        changes = _changes(firmware, resolved, last, snapshot, derived, marks)
+        changes = _changes(firmware, resolved, last, snapshot, derived, marks, renamed)
         current = {d.key for d in derived}
         for key, doc in last_entries.items():
-            if key not in current:
+            if key not in current and (renamed is None or key != renamed[0]):
                 removed.append(_snapshot_entry(doc, firmware))
                 marks[key] = EntryMark.MISSING
     if state == ResolveState.OK and changes:
+        followed = (ChangeKind.CONTENT, ChangeKind.ENTRY_RENAMED)
         content_only = all(
-            c.kind == ChangeKind.CONTENT and c.subject in {d.name for d in derived} for c in changes
+            c.kind in followed and c.subject in {d.name for d in derived} for c in changes
         )
         state = ResolveState.UPDATED if content_only else ResolveState.NEEDS_CONFIRMATION
     changes.sort(key=lambda c: _ORDER.index(c.kind))
@@ -332,8 +344,9 @@ def _snapshot_entry(doc: Document, firmware: Firmware) -> Entry:
 def accept(firmware: Firmware, resolution: Resolution) -> None:
     """Store resolution.snapshot as last_resolved and apply what confirmation implies:
     on a chip change, the chip and flash parameters follow the build and the manual
-    addresses of derived entries are dropped; overrides whose key matches no derived entry
-    are dropped. User entries are kept. Changed user entries take their new hash and size.
+    addresses of derived entries are dropped; the overrides of a renamed app file move to
+    its new name; overrides whose key matches no derived entry are dropped. User entries
+    are kept. Changed user entries take their new hash and size.
     ValueError for states other than OK, UPDATED and NEEDS_CONFIRMATION."""
     if resolution.state not in (
         ResolveState.OK,
@@ -348,6 +361,11 @@ def accept(firmware: Firmware, resolution: Resolution) -> None:
     firmware.before, firmware.after = resolved.before, resolved.after
     keys = {doc_str(e, "key") for e in doc_tables(resolution.snapshot, "entries")}
     chip_changed = any(c.kind == ChangeKind.CHIP for c in resolution.changes)
+    for change in resolution.changes:
+        if change.kind == ChangeKind.ENTRY_RENAMED:
+            moved = firmware.entry_overrides.pop(entry_key(EntryKind.APP, change.before), None)
+            if moved is not None:
+                firmware.entry_overrides.setdefault(entry_key(EntryKind.APP, change.after), moved)
     for key in list(firmware.entry_overrides):
         override = firmware.entry_overrides[key]
         if chip_changed:
@@ -427,8 +445,52 @@ _sniffed: dict[tuple[str, PartitionTable | None], SniffResult] = {}
 """sniff() results by content hash and partition table; both fully determine the result."""
 
 
+def _renamed_app(
+    last: Document | None,
+    last_entries: Mapping[str, Document],
+    derived: list[_Derived],
+    chip: str | None,
+) -> tuple[str, str] | None:
+    """(old key, new key) when the app file was renamed (design D9): against last_resolved
+    exactly one app entry is gone and exactly one is new, at the same address, and the chip
+    did not change. Renaming an ESP-IDF project, or setting a PlatformIO PROGNAME, renames
+    the app file this way. Other entries may change too; they are listed as usual."""
+    if last is None:
+        return None
+    old_chip = doc_str(last, "chip")
+    if old_chip and chip and old_chip != chip:
+        return None
+    current = {d.key for d in derived}
+    gone = [
+        (key, doc)
+        for key, doc in last_entries.items()
+        if doc_str(doc, "kind") == EntryKind.APP.value and key not in current
+    ]
+    new = [d for d in derived if d.kind == EntryKind.APP and d.key not in last_entries]
+    if len(gone) != 1 or len(new) != 1:
+        return None
+    (old_key, old_doc), added = gone[0], new[0]
+    if doc_str(old_doc, "address") != f"{added.file.address:#x}":
+        return None
+    return old_key, added.key
+
+
+def _override(
+    firmware: Firmware, key: str, renamed: tuple[str, str] | None
+) -> EntryOverride | None:
+    """The override of a derived entry; a renamed app file still has its old name's."""
+    found = firmware.entry_overrides.get(key)
+    if found is None and renamed is not None and key == renamed[1]:
+        found = firmware.entry_overrides.get(renamed[0])
+    return found
+
+
 def _resolved_firmware(
-    firmware: Firmware, build: DerivedBuild, chip: str | None, derived: list[_Derived]
+    firmware: Firmware,
+    build: DerivedBuild,
+    chip: str | None,
+    derived: list[_Derived],
+    renamed: tuple[str, str] | None,
 ) -> Firmware:
     resolved = copy.deepcopy(firmware)
     resolved.chip = chip or firmware.chip
@@ -455,7 +517,7 @@ def _resolved_firmware(
             auto_address=d.file.address,
             address_source=AddressSource.AUTO,
         )
-        _apply_override(entry, firmware.entry_overrides.get(d.key))
+        _apply_override(entry, _override(firmware, d.key, renamed))
         entries.append(entry)
     resolved.entries = entries
     return resolved
@@ -520,6 +582,7 @@ def _changes(
     snapshot: Document,
     derived: list[_Derived],
     marks: dict[str, EntryMark],
+    renamed: tuple[str, str] | None,
 ) -> list[Change]:
     changes: list[Change] = []
 
@@ -556,6 +619,12 @@ def _changes(
     for key, doc in new.items():
         name = doc_str(doc, "name")
         before = old.get(key)
+        moved = before is None and renamed is not None and key == renamed[1]
+        if moved and renamed is not None:
+            before = old[renamed[0]]
+            was = doc_str(before, "name")
+            add(ChangeKind.ENTRY_RENAMED, name, was, name, N_(f"App file renamed: {was} -> {name}"))
+            marks.setdefault(key, EntryMark.CHANGED)  # a rename always means a new build
         if before is None:
             add(ChangeKind.ENTRY_ADDED, name, "", doc_str(doc, "address"), N_(f"New file: {name}"))
             marks.setdefault(key, EntryMark.NEW)
@@ -571,7 +640,7 @@ def _changes(
             )
         old_addr, new_addr = doc_str(before, "address"), doc_str(doc, "address")
         if old_addr != new_addr:
-            override = firmware.entry_overrides.get(key)
+            override = _override(firmware, key, renamed)
             if override and override.address is not None:
                 manual = f"{override.address:#x}"
                 text = N_(
@@ -580,14 +649,17 @@ def _changes(
             else:
                 text = N_(f"{name}: address {old_addr} -> {new_addr}")
             add(ChangeKind.ADDRESS, name, old_addr, new_addr, text)
-        if doc_str(before, "sha256") != doc_str(doc, "sha256") and doc_str(doc, "sha256"):
+        changed = doc_str(before, "sha256") != doc_str(doc, "sha256") and doc_str(doc, "sha256")
+        if changed and not moved:
             add(ChangeKind.CONTENT, name, "", "", N_(f"{name}: content changed"))
             marks.setdefault(key, EntryMark.CHANGED)
     for key, doc in old.items():
-        if key not in new:
+        if key not in new and (renamed is None or key != renamed[0]):
             name = doc_str(doc, "name")
             add(ChangeKind.ENTRY_REMOVED, name, doc_str(doc, "address"), "", N_(f"Removed: {name}"))
     for key, override in firmware.entry_overrides.items():
+        if renamed is not None and key == renamed[0] and renamed[1] not in firmware.entry_overrides:
+            key = renamed[1]  # moves to the new name on acceptance
         if key not in new:
             add(
                 ChangeKind.OVERRIDE_DROPPED,

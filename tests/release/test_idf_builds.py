@@ -20,7 +20,8 @@ import builds_kit as bk
 import pytest
 import release_kit as kit
 
-from embr.core.firmware.tracking import ChangeKind
+from embr.core.firmware.kinds import EntryKind
+from embr.core.firmware.tracking import ChangeKind, entry_key
 from embr.core.history import RecordResult
 
 APP = 0x10000
@@ -210,3 +211,44 @@ def test_set_target_s3_to_p4_blocks_then_confirms_then_flashes_tab5_only(
 
 
 _ = pytest
+
+
+def test_a_renamed_project_is_followed_without_confirmation(
+    idf_project: bk.IdfProject,
+    embr: Callable[..., kit.EmbrApp],
+    file_dialogs: kit.FileDialogs,
+) -> None:
+    """Design D9, D10: renaming the project renames the app file. Same address and chip:
+    followed without confirmation, the entry note moves to the new name, the firmware keeps
+    its name and the log says so. The old app file left in the build folder is not used."""
+    idf_project.reset()
+    time.sleep(bk.SETTLE_S)
+    app = embr()
+    window = app.window
+    name = _import(app, file_dialogs, idf_project)
+    old, new = f"{name}.bin", f"{name}_renamed.bin"
+    firmware = bk.firmware_by_name(app, name)
+    window.library.set_entry_note(firmware.id, entry_key(EntryKind.APP, old), "kept")
+
+    cmake = idf_project.root / "CMakeLists.txt"
+    text = cmake.read_text(encoding="utf-8")
+    assert f"project({name})" in text, text
+    cmake.write_text(text.replace(f"project({name})", f"project({name}_renamed)"), "utf-8")
+    try:
+        _build(idf_project)
+        assert (idf_project.build / old).is_file()  # left behind by the build
+
+        # "ok" too: each poll clicks the sidebar row, and a click on the selected firmware
+        # clears "updated" (mark_seen); the changes stay and show what was followed
+        status = bk.wait_state(app, name, "updated", "ok")
+        assert [(c.kind, c.before, c.after) for c in status.changes] == [
+            (ChangeKind.ENTRY_RENAMED, old, new)
+        ], status.changes
+        entry = next(e for e in status.firmware.entries if e.kind is EntryKind.APP)
+        assert (entry.name, entry.note) == (new, "kept")
+        assert status.removed == ()
+        kit.wait_log(window, f"[track] {name}: app file renamed {old} -> {new}")
+        assert name in kit.sidebar_names(window)
+    finally:  # the session restore rebuilds the original name; drop the renamed products
+        for product in idf_project.build.glob(f"{name}_renamed.*"):
+            product.unlink()

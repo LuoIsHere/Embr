@@ -84,6 +84,7 @@ TEXT: dict[str, str] = {
     "{0}; the build folder was scanned instead": "{0}；已改为扫描构建文件夹",
     "{0}: a merged image; left out": "{0}：合成镜像，未加入",
     "{0}: not recognised; left out": "{0}：无法识别，未加入",
+    "{0}: an older app image; {1} is used": "{0}：较旧的应用镜像，已改用 {1}",
     "{0} left out: the partition table has no otadata partition": (
         "未加入 {0}：分区表中没有 otadata 分区"
     ),
@@ -111,6 +112,7 @@ TEXT: dict[str, str] = {
     "{0}: address {1} -> {2}": "{0}：地址 {1} -> {2}",
     "{0}: content changed": "{0}：内容已变化",
     "Removed: {0}": "已移除：{0}",
+    "App file renamed: {0} -> {1}": "应用文件已改名：{0} -> {1}",
     "{0}: your changes no longer match a file and are dropped": (
         "{0}：所做的修改已无对应的文件，将被丢弃"
     ),
@@ -616,6 +618,10 @@ TEXT: dict[str, str] = {
         "{0}。上次解析于 {1}；下面的条目是那次的快照，目录恢复之前不能烧录。"
     ),
     "Change directory…": "更改目录…",
+    "platformio.ini no longer declares [env:{0}]. It may have been renamed.": (
+        "platformio.ini 已不再声明 [env:{0}]，可能已改名。"
+    ),
+    "Follow env {0}": "改为跟随 env：{0}",
     "<br>The device group may need adjusting.": "<br>设备分组可能需要调整。",
     "The build output changed since it was last confirmed:{0}{1}{2}<br>Flashing is blocked until you confirm.": (
         "构建产物在上次确认后已变化：{0}{1}{2}<br>确认之前不能烧录。"

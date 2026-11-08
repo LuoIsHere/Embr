@@ -4,6 +4,7 @@ tmp_path from tests/fixtures/pio; expected values come from the samples' idedata
 flasher_args.json, SOURCE.toml and the PIO merge command, never from Embr."""
 
 import json
+import os
 import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path, PureWindowsPath
@@ -353,6 +354,57 @@ def test_espidf_scan_maps_idf_file_names(tmp_path: Path) -> None:
     ]
     assert all(f.path is not None and f.path.parent == ref.build_dir for f in build.files)
     assert ref.build_dir / "flasher_args.json" in build.inputs
+
+
+def _custom_app(ref: EnvRef, name: str = "my_app.bin") -> Path:
+    """A PROGNAME build without a clean: the app image under `name`, 5 s newer than the
+    firmware.bin left behind (one byte differs)."""
+    old = ref.build_dir / "firmware.bin"
+    data = bytearray(old.read_bytes())
+    data[-1] ^= 0xFF
+    new = ref.build_dir / name
+    new.write_bytes(bytes(data))
+    stamp = old.stat().st_mtime_ns + 5 * 10**9
+    os.utime(new, ns=(stamp, stamp))
+    return new
+
+
+def test_the_app_name_comes_from_prog_path(tmp_path: Path) -> None:
+    ref = _project(tmp_path, *ARDUINO)
+    idedata = ref.build_dir / "idedata.json"
+    stamp = idedata.stat().st_mtime_ns
+    data = json.loads(idedata.read_text(encoding="utf-8"))
+    data["prog_path"] = data["prog_path"].replace("firmware.elf", "my_app.elf")
+    idedata.write_text(json.dumps(data), encoding="utf-8")
+    os.utime(idedata, ns=(stamp, stamp))
+    (ref.build_dir / "firmware.bin").rename(ref.build_dir / "my_app.bin")
+
+    images, _ = read_idedata(ref)
+    assert images is not None and images.app_name == "my_app.bin"
+    build = read_env(ref, core=_core(tmp_path))
+    assert build.source is ImageSource.IDEDATA
+    assert _named(build, "my_app.bin").kind is EntryKind.APP
+    assert build.chip == "esp32"
+
+
+@pytest.mark.parametrize(("sample", "env"), [ARDUINO, ESPIDF])
+def test_a_scan_takes_the_newest_app(tmp_path: Path, sample: str, env: str) -> None:
+    ref = _project(tmp_path, sample, env)
+    (ref.build_dir / "idedata.json").unlink()
+    _custom_app(ref)
+
+    build = read_env(ref, core=_core(tmp_path))
+    apps = [f.name for f in build.files if f.kind is EntryKind.APP]
+    assert apps == ["my_app.bin"]
+    assert "firmware.bin: an older app image; my_app.bin is used" in build.notes
+
+
+def test_only_firmware_bin_needs_no_note(tmp_path: Path) -> None:
+    ref = _project(tmp_path, *ARDUINO)
+    (ref.build_dir / "idedata.json").unlink()
+    build = read_env(ref, core=_core(tmp_path))
+    assert [f.name for f in build.files if f.kind is EntryKind.APP] == ["firmware.bin"]
+    assert not any("older app image" in n for n in build.notes)
 
 
 @pytest.mark.parametrize(

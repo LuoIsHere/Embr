@@ -145,6 +145,11 @@ def _remove_otadata(args: dict[str, Any]) -> None:
     del args["otadata"]
 
 
+def _rename_and_move(build: Path) -> None:
+    rename_app(build, "renamed.bin")
+    move_file(build, 0x20000, 0x30000)
+
+
 CHANGES: dict[str, tuple[Callable[[Path], None], set[ChangeKind]]] = {
     "address": (lambda b: move_file(b, 0x20000, 0x1A0000), {ChangeKind.ADDRESS}),
     "entry_added": (_add_extra, {ChangeKind.ENTRY_ADDED}),
@@ -152,8 +157,8 @@ CHANGES: dict[str, tuple[Callable[[Path], None], set[ChangeKind]]] = {
         lambda b: edit_json(b / "flasher_args.json", _remove_otadata),
         {ChangeKind.ENTRY_REMOVED},
     ),
-    "app_renamed": (
-        lambda b: rename_app(b, "renamed.bin"),
+    "app_renamed_and_moved": (
+        _rename_and_move,
         {ChangeKind.ENTRY_ADDED, ChangeKind.ENTRY_REMOVED, ChangeKind.OVERRIDE_DROPPED},
     ),
 }
@@ -176,12 +181,93 @@ def test_build_changes_need_confirmation(tmp_path: Path, case: str) -> None:
     assert kinds == sorted(kinds, key=order.index)
     if case == "entry_added":
         assert EntryMark.NEW in resolution.marks.values()
-    if case == "app_renamed":
+    if case == "app_renamed_and_moved":  # a new address: not a rename (design D9)
         assert resolution.marks[entry_key(EntryKind.APP, "renamed.bin")] is EntryMark.NEW
 
     accept(firmware, resolution)
     assert (app in firmware.entry_overrides) is (ChangeKind.OVERRIDE_DROPPED not in expected)
     assert _resolve(firmware, build).state is ResolveState.OK
+
+
+OTA_APP = entry_key(EntryKind.APP, "ota_custom.bin")
+RENAMED = entry_key(EntryKind.APP, "renamed.bin")
+
+
+def _renamed(tmp_path: Path) -> tuple[Firmware, Path]:
+    """The esp32s3_ota_custom build with overrides on its app, then its app file renamed."""
+    firmware, build = _follow(tmp_path, "esp32s3_ota_custom")
+    firmware.entry_overrides[OTA_APP] = EntryOverride(address=0x30000, enabled=False, note="rel")
+    rename_app(build, "renamed.bin")
+    return firmware, build
+
+
+def test_a_renamed_app_file_is_followed(tmp_path: Path) -> None:
+    firmware, build = _renamed(tmp_path)
+
+    renamed = _resolve(firmware, build)
+    assert renamed.state is ResolveState.UPDATED
+    (change,) = renamed.changes
+    assert (change.kind, change.before, change.after) == (
+        ChangeKind.ENTRY_RENAMED,
+        "ota_custom.bin",
+        "renamed.bin",
+    )
+    assert change.message == "App file renamed: ota_custom.bin -> renamed.bin"
+    assert dict(renamed.marks) == {RENAMED: EntryMark.CHANGED}
+    assert renamed.removed == ()
+    (app,) = [e for e in renamed.firmware.entries if e.id == RENAMED]
+    assert (app.address, app.enabled, app.note) == (0x30000, False, "rel")
+
+    accept(firmware, renamed)
+    assert set(firmware.entry_overrides) == {RENAMED}
+    again = _resolve(firmware, build)
+    assert (again.state, again.changes) == (ResolveState.OK, ())
+
+
+def test_a_renamed_app_with_new_content_is_one_line(tmp_path: Path) -> None:
+    firmware, build = _renamed(tmp_path)
+    flip_last_byte(build / "renamed.bin")
+
+    renamed = _resolve(firmware, build)
+    assert renamed.state is ResolveState.UPDATED
+    assert [c.kind for c in renamed.changes] == [ChangeKind.ENTRY_RENAMED]
+
+
+def test_a_rename_with_other_changes_still_needs_confirmation(tmp_path: Path) -> None:
+    firmware, build = _renamed(tmp_path)
+    _add_extra(build)
+
+    renamed = _resolve(firmware, build)
+    assert renamed.state is ResolveState.NEEDS_CONFIRMATION
+    assert _kinds(renamed) == {ChangeKind.ENTRY_RENAMED, ChangeKind.ENTRY_ADDED}
+    accept(firmware, renamed)
+    assert firmware.entry_overrides[RENAMED] == EntryOverride(
+        address=0x30000, enabled=False, note="rel"
+    )
+
+
+def test_two_new_apps_are_no_rename(tmp_path: Path) -> None:
+    firmware, build = _renamed(tmp_path)
+    write_newer(build / "second.bin", (build / "renamed.bin").read_bytes())
+    edit_json(
+        build / "flasher_args.json",
+        lambda a: a["flash_files"].update({"0x200000": "second.bin"}),
+    )
+
+    resolution = _resolve(firmware, build)
+    assert resolution.state is ResolveState.NEEDS_CONFIRMATION
+    assert ChangeKind.ENTRY_RENAMED not in _kinds(resolution)
+    assert {ChangeKind.ENTRY_ADDED, ChangeKind.ENTRY_REMOVED} <= _kinds(resolution)
+
+
+def test_a_rename_on_another_chip_is_no_rename(tmp_path: Path) -> None:
+    firmware, build = _renamed(tmp_path)
+    assert firmware.last_resolved is not None
+    firmware.last_resolved["chip"] = "esp32"  # last confirmed for another chip
+
+    resolution = _resolve(firmware, build)
+    assert ChangeKind.ENTRY_RENAMED not in _kinds(resolution)
+    assert {ChangeKind.CHIP, ChangeKind.ENTRY_ADDED, ChangeKind.ENTRY_REMOVED} <= _kinds(resolution)
 
 
 def test_manual_address_is_kept_when_the_build_moves_the_entry(tmp_path: Path) -> None:

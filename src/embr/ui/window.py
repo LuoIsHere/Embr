@@ -57,13 +57,14 @@ from embr.core.firmware.import_idf import IdfBuildError, build_dir_below
 from embr.core.firmware.import_pio import (
     PLATFORMIO_INI,
     EnvDirError,
+    EnvRef,
     PioBuildError,
     built_envs_below,
     env_ref,
 )
 from embr.core.firmware.model import editable_params
 from embr.core.firmware.store import default_name_archived
-from embr.core.firmware.tracking import ResolveState
+from embr.core.firmware.tracking import ChangeKind, ResolveState
 from embr.core.flasher.checks import CheckLevel
 from embr.core.flasher.merge import MergeError
 from embr.core.flasher.protocol import (
@@ -116,7 +117,7 @@ RESULT_TEXT = {
 COMMAND_UNKNOWN = N_("(identify the board, or add entries with addresses, to see the command)")
 READ_FOLDER = "read_folder"
 """settings.ini [ui]: the folder the last read flash was saved to."""
-CHANGES_FIRMWARE = ("rename", "move", "delete", "directory")
+CHANGES_FIRMWARE = ("rename", "move", "delete", "directory", "follow_env")
 """Firmware menu actions that would change a firmware's own file."""
 PACKAGE_FOLDER = "package_folder"
 """settings.ini [ui]: the folder of the last .embr package exported or imported."""
@@ -207,6 +208,8 @@ class EmbrWindow(FrameWindow):
         self._closed = False
         """Set by closeEvent: queued refresh rounds stop."""
         self._reported: set[tuple[Path, str]] = set()
+        self._renames_logged: set[tuple[str, datetime]] = set()
+        """(firmware id, checked_at) of resolutions whose app rename was logged (design D10)."""
         """Damaged files already shown this session (design doc §12.8)."""
         self._job_kind: JobKind | None = None
         self._signals = JobSignals(self)
@@ -450,6 +453,9 @@ class EmbrWindow(FrameWindow):
             return
         elif name == "directory":
             self._change_build_dir(firmware_id)
+            return
+        elif name == "follow_env":
+            self._follow_env(firmware_id)
             return
         elif name == "delete":
             accepted, _ = dialogs.confirm(
@@ -918,8 +924,24 @@ class EmbrWindow(FrameWindow):
         self.header.show_firmware(status, self._library.flag(status.firmware_id))
         self.firmware_view.show_firmware(status)
         self._shown = (status.firmware_id, status.state, status.digest)
+        self._log_renames(status)
         if status.state == ResolveState.BUILDING:
             self._request_recheck(SETTLE_RECHECK_MS, settle=True)
+
+    def _log_renames(self, status: TrackStatus) -> None:
+        """One log line per renamed app file, once per resolution (design D10: the
+        firmware keeps its name, the entries show the new file name)."""
+        renames = [c for c in status.changes if c.kind == ChangeKind.ENTRY_RENAMED]
+        seen = (status.firmware_id, status.checked_at)
+        if not renames or seen in self._renames_logged:
+            return
+        self._renames_logged.add(seen)
+        for change in renames:
+            self.note(
+                "note",
+                f"[track] {status.firmware.name}: app file renamed "
+                f"{change.before} -> {change.after}",
+            )
 
     def _leave_selection(self) -> None:
         firmware_id = self._selected_firmware_id()
@@ -1293,6 +1315,24 @@ class EmbrWindow(FrameWindow):
             self.note("error", f"[build] {exc}")
             return
         self.note("dim", f"[build] {firmware.name} now follows {chosen} ({status.state.value})")
+        self.changed()
+
+    def _follow_env(self, firmware_id: str) -> None:
+        """The banner's "Follow env" (design D11): follow the one built env platformio.ini
+        still declares and no other firmware follows. The firmware keeps its name (D10)."""
+        firmware = self._library.firmware(firmware_id)
+        candidates = self._library.tracker.env_candidates(firmware_id)
+        if len(candidates) != 1 or firmware.build_ref is None:
+            self.changed()  # the project changed since the banner was shown
+            return
+        (env,) = candidates
+        build_dir = EnvRef(Path(firmware.build_ref.path), env).build_dir
+        try:
+            status = self._library.tracker.set_build_dir(firmware_id, build_dir)
+        except ValueError as exc:
+            self.note("error", f"[build] {exc}")
+            return
+        self.note("dim", f"[build] {firmware.name} now follows env {env} ({status.state.value})")
         self.changed()
 
     def _clean_archive(self) -> None:

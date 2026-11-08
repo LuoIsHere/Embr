@@ -367,9 +367,10 @@ def test_content_change_is_followed_automatically(
 def test_build_changes_that_need_confirmation(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.4 cases 2 and 3 and manual addresses: a renamed, added or removed file or a
-    moved entry needs confirmation (banner listing the changes, "needs confirmation",
-    "!", Flash blocked); Confirm entries accepts it once."""
+    """§3.4 cases 2 and 3 and manual addresses: an added or removed file or a moved entry
+    needs confirmation (banner listing the changes, "needs confirmation", "!", Flash
+    blocked); Confirm entries accepts it once. A renamed app file at the same address is
+    followed without confirmation and logged (design D9, D10)."""
     build = kit.idf_build_copy("esp32s3_hello", tmp_path / "proj")
     app = embr(language=language)
     window, root = app.window, app.paths.root
@@ -401,15 +402,19 @@ def test_build_changes_that_need_confirmation(
         if not ui.has_check(window, "Build resolved", "PASS"):
             problems.append(f"checks after confirming {ui.checks(window)}")
 
+    ui.click_row(window, "Other")  # the user works elsewhere while the project rebuilds
     _move_app(build, APP, "hello_renamed.bin")
-    ui.reselect(window, name, "Other")
+    ui.click_row(window, name)
+    kit.wait_log(window, f"[track] {name}: app file renamed {APP} -> hello_renamed.bin")
     tags = {e.name: e.tags for e in ui.entries(window)}
-    if tr("new file") not in tags.get("hello_renamed.bin", []):
+    if tr("content changed") not in tags.get("hello_renamed.bin", []):
         problems.append(f"renamed app: entry tags {tags}")
-    if tr("file missing") not in tags.get(APP, []):
-        problems.append(f"old app entry not marked missing: {tags}")
-    expect_confirmation(f"Removed: {APP}", "New file: hello_renamed.bin")
+    if APP in tags:
+        problems.append(f"old app entry still listed: {tags}")
+    if ui.banner(window) or tr("needs confirmation") in ui.header_tags(window):
+        problems.append(f"renamed app needs confirmation: {ui.banner(window)!r}")
     assert [e.name for e in ui.entries(window)][-1] == "hello_renamed.bin"
+    assert name in ui.row_texts(window, name)  # the firmware keeps its name
 
     _move_app(build, "hello_renamed.bin", "hello_renamed.bin", "0x20000")
     expect_confirmation("hello_renamed.bin: address 0x10000 -> 0x20000")

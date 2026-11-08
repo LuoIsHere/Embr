@@ -30,13 +30,17 @@ from embr.core.firmware.import_idf import (
     read_build,
 )
 from embr.core.firmware.import_pio import (
+    APP_FILE,
     PLATFORMIO_INI,
     EnvRef,
     PioBuildError,
     env_ref,
+    ini_envs,
+    is_built,
     read_env,
 )
 from embr.core.firmware.import_pio import BuildMissingError as PioBuildMissingError
+from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware, FlashParams, Source
 from embr.core.firmware.tracking import (
     Change,
@@ -50,6 +54,7 @@ from embr.core.firmware.tracking import (
     missing,
     resolve,
 )
+from embr.core.storage.documents import doc_str, doc_tables
 from embr.i18n import N_
 
 SETTLE_SECONDS = 2.0
@@ -84,6 +89,8 @@ class TrackStatus:
     files_updated: datetime.datetime | None = None
     """Newest modification time of the firmware's own files; None when it has none outside
     the archive."""
+    env_gone: bool = False
+    """Resolution.env_gone: platformio.ini no longer declares the followed env."""
 
 
 def _files_updated(firmware: Firmware) -> datetime.datetime | None:
@@ -193,17 +200,43 @@ class Tracker:
     def invalidate_project(self, project_root: Path) -> list[str]:
         """A `pio project config` result for `project_root` arrived (PioConfigs on_ready):
         invalidate every PIO firmware following an env of it and return their ids."""
+        found = [f.id for f in self._following(project_root)]
+        for firmware_id in found:
+            self.invalidate(firmware_id)
+        return found
+
+    def env_candidates(self, firmware_id: str) -> tuple[str, ...]:
+        """For a PIO firmware whose env platformio.ini no longer declares (design D11): the
+        envs it does declare that are built and that no other firmware follows, in file
+        order. One candidate is offered as "Follow env"; () while its env is still declared
+        and for any other firmware."""
+        firmware = self._ctx.firmware.get(firmware_id)
+        ref = firmware.build_ref
+        if firmware.source != Source.PIO_BUILD or ref is None or not ref.env:
+            return ()
+        root = Path(ref.path)
+        declared = ini_envs(root)
+        if ref.env in declared:
+            return ()
+        taken = {
+            f.build_ref.env.lower()
+            for f in self._following(root)
+            if f.id != firmware_id and f.build_ref is not None and f.build_ref.env
+        }
+        return tuple(
+            env for env in declared if env.lower() not in taken and is_built(EnvRef(root, env))
+        )
+
+    def _following(self, project_root: Path) -> list[Firmware]:
+        """PIO firmware following an env of `project_root`."""
         key = os.path.normcase(str(project_root.resolve()))
-        found = [
-            f.id
+        return [
+            f
             for f in self._ctx.firmware.all()
             if f.source == Source.PIO_BUILD
             and f.build_ref is not None
             and os.path.normcase(str(Path(f.build_ref.path).resolve())) == key
         ]
-        for firmware_id in found:
-            self.invalidate(firmware_id)
-        return found
 
     def mark_seen(self, firmware_id: str) -> None:
         """The user left the firmware: clear updated_at and, after a followed content
@@ -311,6 +344,7 @@ class Tracker:
             entry_notes=resolution.entry_notes,
             build_notes=resolution.build_notes,
             removed=resolution.removed,
+            env_gone=resolution.env_gone,
         )
         return status, inputs, resolution
 
@@ -354,8 +388,9 @@ class Tracker:
         """import_pio.read_env() of build_ref (project root + env) with the env's config and
         configured target from the PioConfigs cache and the manual framework package
         (firmware.framework_pkg, else the global default, Library.framework_pkg_default()),
-        then core tracking.resolve(). Build folder gone -> MISSING; env no longer in
-        platformio.ini or an unreadable build -> INCOMPLETE. Inputs always include
+        then core tracking.resolve(). Env no longer in platformio.ini -> INCOMPLETE with
+        env_gone (design D11; checked first, so also when its build folder is gone); build
+        folder gone -> MISSING; an unreadable build -> INCOMPLETE. Inputs always include
         platformio.ini, so editing it re-resolves."""
         if firmware.build_ref is None or not firmware.build_ref.env:
             return missing(firmware, N_("No PlatformIO project and env")), ()
@@ -365,9 +400,16 @@ class Tracker:
         fallback = (
             ref.project_root / PLATFORMIO_INI,
             ref.build_dir,
-            ref.build_dir / "firmware.bin",
+            *(ref.build_dir / name for name in _app_names(firmware)),
             ref.build_dir / "partitions.bin",
         )
+        ini = ref.project_root / PLATFORMIO_INI
+        if ini.is_file() and ref.env not in ini_envs(ref.project_root):
+            gone = missing(firmware, N_(f"{PLATFORMIO_INI} no longer declares [env:{ref.env}]"))
+            return (
+                dataclasses.replace(gone, state=ResolveState.INCOMPLETE, env_gone=True),
+                fallback,
+            )
         manual = (
             firmware.framework_pkg or self._ctx.settings.get(PIO_SECTION, FRAMEWORK_PKG_KEY) or ""
         )
@@ -460,6 +502,17 @@ class Tracker:
             return FileState.OK if sha == entry.sha256 else FileState.CHANGED
         same = path.name == entry.name and size == entry.size and sha == entry.sha256
         return FileState.OK if same else FileState.CHANGED
+
+
+def _app_names(firmware: Firmware) -> tuple[str, ...]:
+    """File names of the app images last_resolved lists, else firmware.bin: the files a
+    rebuild rewrites (a custom PROGNAME names the app after it)."""
+    names = {
+        doc_str(e, "name")
+        for e in doc_tables(firmware.last_resolved or {}, "entries")
+        if doc_str(e, "kind") == EntryKind.APP.value
+    }
+    return tuple(sorted(names)) or (APP_FILE,)
 
 
 STATE_TEXT = {

@@ -14,8 +14,11 @@ class FileStamp:
     path: str
     """Absolute path as given."""
     size: int | None
-    """None when the file does not exist (or is not a regular file)."""
+    """None when the file does not exist or is not a regular file."""
     mtime_ns: int | None
+    """None when the path does not exist. A folder has its own (it changes when a file is
+    added, removed or renamed in it: a PlatformIO build folder gaining a renamed app image,
+    design D12); other non-regular files have None."""
 
 
 @dataclass(frozen=True)
@@ -25,7 +28,8 @@ class Fingerprint:
 
     @property
     def newest_mtime_ns(self) -> int | None:
-        """Latest modification time among existing files, None when none exists."""
+        """Latest modification time among existing files and folders, None when none
+        exists."""
         times = [s.mtime_ns for s in self.stamps if s.mtime_ns is not None]
         return max(times, default=None)
 
@@ -124,6 +128,8 @@ def _stamp(path: Path) -> FileStamp:
         st = path.stat()
     except OSError:
         return FileStamp(str(path), None, None)
+    if stat.S_ISDIR(st.st_mode):
+        return FileStamp(str(path), None, st.st_mtime_ns)
     if not stat.S_ISREG(st.st_mode):
         return FileStamp(str(path), None, None)
     return FileStamp(str(path), st.st_size, st.st_mtime_ns)

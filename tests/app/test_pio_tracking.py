@@ -4,6 +4,7 @@ framework package path. pio is never run: PioConfigs gets a FakePio and runs its
 synchronously; tests call load() where the app would wait for the background query."""
 
 import hashlib
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -211,6 +212,101 @@ def test_rebuild_with_new_content_is_followed(context: AppContext, tmp_path: Pat
     status = rig.tracker.check(firmware.id)
     assert status.state is ResolveState.UPDATED
     assert status.marks[entry_key(EntryKind.APP, "firmware.bin")] is EntryMark.CHANGED
+
+
+def test_a_progname_rename_is_followed(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    [firmware] = rig.library.import_pio(rig.root, [ESP32])
+    rig.library.set_entry_note(firmware.id, entry_key(EntryKind.APP, "firmware.bin"), "main")
+    rig.tracker.check(firmware.id)
+
+    build = rig.build(ESP32)
+    old = build / "firmware.bin"
+    data = bytearray(old.read_bytes())
+    data[-1] ^= 0xFF
+    (build / "my_app.bin").write_bytes(bytes(data))  # PROGNAME set, no clean
+    stamp = old.stat().st_mtime_ns + 5 * 10**9
+    os.utime(build / "my_app.bin", ns=(stamp, stamp))
+    text = (rig.root / "platformio.ini").read_text()
+    write_ini(rig.root, text + "\n; custom_prog_name = my_app\n")  # idedata.json is now old
+
+    status = rig.tracker.check(firmware.id)
+    assert status.state is ResolveState.UPDATED
+    assert [(c.kind, c.before, c.after) for c in status.changes] == [
+        (ChangeKind.ENTRY_RENAMED, "firmware.bin", "my_app.bin")
+    ]
+    app = next(e for e in status.firmware.entries if e.kind is EntryKind.APP)
+    assert (app.name, app.note) == ("my_app.bin", "main")
+    stored = rig.library.firmware(firmware.id)
+    assert stored.name == ESP32  # the firmware keeps its name (D10)
+    assert set(stored.entry_overrides) == {entry_key(EntryKind.APP, "my_app.bin")}
+
+
+def test_a_new_app_image_alone_is_noticed(context: AppContext, tmp_path: Path) -> None:
+    """PROGNAME set in an extra script: platformio.ini unchanged (PlatformIO does not clean),
+    firmware.bin left as it was. Only the build folder gains an app image; that is enough
+    for the next check to follow it (the folder's own time is in the fingerprint)."""
+    rig = _rig(context, tmp_path)
+    build = rig.build(ESP32)
+    (build / "idedata.json").unlink()
+    [firmware] = rig.library.import_pio(rig.root, [ESP32])
+    assert rig.tracker.check(firmware.id).state is ResolveState.OK
+
+    old = build / "firmware.bin"
+    (build / "my_app.bin").write_bytes(old.read_bytes())
+    stamp = old.stat().st_mtime_ns + 5 * 10**9
+    os.utime(build / "my_app.bin", ns=(stamp, stamp))
+
+    status = rig.tracker.check(firmware.id)
+    assert status.state is ResolveState.UPDATED
+    assert [c.kind for c in status.changes] == [ChangeKind.ENTRY_RENAMED]
+    assert "firmware.bin: an older app image; my_app.bin is used" in status.build_notes
+
+
+def _rename_env(rig: Rig, old: str, new: str, *, built: bool = True) -> None:
+    text = (rig.root / "platformio.ini").read_text()
+    write_ini(rig.root, text.replace(f"[env:{old}]", f"[env:{new}]"))
+    if built:
+        shutil.copytree(rig.build(old), rig.build(new))
+
+
+def test_a_renamed_env_offers_its_new_name(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    esp32, s3 = rig.library.import_pio(rig.root, ENVS)
+    rig.tracker.check(esp32.id)
+    _rename_env(rig, ESP32, "esp32dev_v2")
+
+    status = rig.tracker.check(esp32.id)
+    assert (status.state, status.env_gone) == (ResolveState.INCOMPLETE, True)
+    assert status.problems == (f"platformio.ini no longer declares [env:{ESP32}]",)
+    assert rig.tracker.env_candidates(esp32.id) == ("esp32dev_v2",)  # S3 is followed
+    assert rig.tracker.env_candidates(s3.id) == ()  # its env is still declared
+
+    followed = rig.tracker.set_build_dir(esp32.id, EnvRef(rig.root, "esp32dev_v2").build_dir)
+    assert (followed.state, followed.env_gone) == (ResolveState.OK, False)
+    stored = rig.library.firmware(esp32.id)
+    assert stored.build_ref is not None and stored.build_ref.env == "esp32dev_v2"
+    assert stored.name == ESP32
+
+
+def test_env_candidates_none_or_several(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    [esp32] = rig.library.import_pio(rig.root, [ESP32])
+    _rename_env(rig, ESP32, "esp32dev_v2", built=False)
+    assert rig.tracker.check(esp32.id).env_gone
+    assert rig.tracker.env_candidates(esp32.id) == (S3,)  # built, followed by nothing
+
+    shutil.copytree(rig.build(ESP32), rig.build("esp32dev_v2"))
+    assert set(rig.tracker.env_candidates(esp32.id)) == {"esp32dev_v2", S3}
+
+
+def test_an_env_gone_with_its_build_folder(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    [esp32] = rig.library.import_pio(rig.root, [ESP32])
+    _rename_env(rig, ESP32, "esp32dev_v2")
+    shutil.rmtree(rig.build(ESP32))
+    status = rig.tracker.check(esp32.id)
+    assert (status.state, status.env_gone) == (ResolveState.INCOMPLETE, True)
 
 
 def test_notes_reach_the_status(context: AppContext, tmp_path: Path) -> None:
