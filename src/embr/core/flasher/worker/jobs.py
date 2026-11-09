@@ -33,6 +33,8 @@ from embr.core.flasher.protocol import (
     EntryStatus,
     Event,
     InfoEvent,
+    LogEvent,
+    LogLevel,
     ResultEvent,
     ResultStatus,
 )
@@ -40,6 +42,18 @@ from embr.core.flasher.worker.logger import EntryCursor
 from embr.core.serial import ConnectionType
 
 Send = Callable[[Event], None]
+
+
+def _refuse_secured(esp: ESPLoader, after: str, send: Send, outcome: str) -> None:
+    """A chip with security features is refused, then reset as `after` like after any other
+    refusal, so it is not left in download mode while the window shows it reset (a hard
+    reset only toggles RTS and writes nothing). A reset that fails (most ROM commands are
+    unavailable in Secure Download Mode) is a warning; the refusal stands."""
+    try:
+        reset_chip(esp, after)
+    except Exception as exc:  # reported; the refusal is the result
+        send(LogEvent(LogLevel.WARNING, f"reset after the refusal failed: {exc}"))
+    send(ResultEvent(ResultStatus.REFUSED, f"security features enabled; {outcome}"))
 
 
 def identify(plan: IdentifyPlan, send: Send) -> None:
@@ -79,7 +93,7 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
         esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
         send(info)
         if _send_checks(send, checks.check_security(state.security)):
-            send(ResultEvent(ResultStatus.REFUSED, "security features enabled; nothing written"))
+            _refuse_secured(esp, plan.after, send, "nothing written")
             return
         found = [
             checks.check_chip(state.chip, plan.chip, plan.entries),
@@ -123,7 +137,7 @@ def erase(plan: ErasePlan, send: Send) -> None:
         esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
         send(info)
         if _send_checks(send, checks.check_security(state.security)):
-            send(ResultEvent(ResultStatus.REFUSED, "security features enabled; nothing erased"))
+            _refuse_secured(esp, plan.after, send, "nothing erased")
             return
         erase_flash(esp)
         reset_chip(esp, plan.after)
@@ -142,7 +156,7 @@ def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
         esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
         send(info)
         if _send_checks(send, checks.check_security(state.security)):
-            send(ResultEvent(ResultStatus.REFUSED, "security features enabled; nothing read"))
+            _refuse_secured(esp, plan.after, send, "nothing read")
             return
         total = checks.flash_size_bytes(info.flash_size) if info.flash_size else None
         size = plan.size if plan.size is not None else total
