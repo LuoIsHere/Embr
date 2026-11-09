@@ -1,5 +1,5 @@
 """core/logs/crash: exceptions no code handled are written to logs/crash-<date>.log; on the
-main thread the window is told as well (review M1)."""
+main thread the window is told as well."""
 
 import datetime
 import faulthandler

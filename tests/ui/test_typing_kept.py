@@ -1,4 +1,4 @@
-"""Text being typed in the workspace survives a refresh (review H3): showing another page
+"""Text being typed in the workspace survives a refresh: showing another page
 saves it first, as leaving the field does; a refresh of the same page (a job ended, a port
 changed, a check) waits until the field is left."""
 

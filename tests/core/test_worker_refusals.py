@@ -1,4 +1,4 @@
-"""Worker jobs refusing a chip with security features (review M9): the chip is reset as the
+"""Worker jobs refusing a chip with security features: the chip is reset as the
 plan's `after` mode, like after any other refusal, and nothing is written, erased or read.
 The connection is faked; no port is opened."""
 

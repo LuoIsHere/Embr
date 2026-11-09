@@ -212,7 +212,7 @@ class EmbrWindow(FrameWindow):
         self._built_for: tuple[str, str] | None = None
         """The selection the workspace page was last built for."""
         self._workspace_stale = False
-        """A refresh waited for a text field being edited (review H3)."""
+        """A refresh waited for a text field being edited."""
         self._round: list[str] = []
         self._round_changed = False
         self._clock: Callable[[], float] = time.monotonic
@@ -617,7 +617,7 @@ class EmbrWindow(FrameWindow):
         """Build the page of the selection. While a text field of it is being edited, a
         refresh of the same page waits until the field is left (job ended, port changed, a
         check), so nothing typed is lost; showing another page first lets the field save what
-        was typed, as leaving it does (review H3)."""
+        was typed, as leaving it does."""
         field = self._editing_field()
         if field is not None:
             if self._selection == self._built_for:

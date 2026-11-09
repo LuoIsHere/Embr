@@ -613,8 +613,8 @@ def _pick(window: EmbrWindow, device: str) -> None:
 def test_a_port_away_for_a_moment_is_kept_and_selected_again(
     window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A USB-Serial/JTAG board re-enumerates after a reset: while it is away, nothing else
-    is selected (Flash on another board, quick flash on, review H2)."""
+    """The chosen port is away for a moment (a cable unplugged, a board re-enumerating):
+    meanwhile nothing else is selected (Flash on another board, quick flash on)."""
     _single(_quiet(window), tmp_path)
     _quick(window, True)
     _hotplug(window, monkeypatch, (UART, JTAG))
