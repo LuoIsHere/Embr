@@ -109,6 +109,17 @@ def crumb(owner: Owner, firmware: Firmware) -> str:
     return f"{project} / {firmware.device or tr('Ungrouped')}"
 
 
+def entry_error(exc: Exception) -> str:
+    """Why an entry action changed nothing, for a dialog (rich text)."""
+    if isinstance(exc, FolderError):
+        names = html.escape(", ".join(p.name for p in exc.outside))
+        return tr(f"{names} is not in this firmware's folder {html.escape(exc.folder)}.")
+    if isinstance(exc, OSError) and exc.strerror:
+        where = f"{exc.filename}: " if exc.filename else ""
+        return html.escape(f"{where}{exc.strerror}")
+    return html.escape(str(exc))
+
+
 def kept_notes(result: AddedFiles) -> list[str]:
     """Log lines for files that were already entries of the firmware (added nothing)."""
     lines = [f"[entry] {e.name}: changed content accepted" for e in result.updated]
@@ -903,9 +914,8 @@ class EntriesTab(QWidget):
             name, _ = QFileDialog.getOpenFileName(
                 self, tr(f"Re-locate {entry.name}"), "", tr("All files (*)")
             )
-            if name:
-                self._owner.library.relocate_entry(firmware.id, entry.id, Path(name))
-                self._owner.note("dim", f"[entry] {entry.name} now points at {name}")
+            if not name or not self._relocate_to(firmware, entry, Path(name)):
+                return
         elif chosen is archive:
             self.archive_requested.emit(entry.id)
             return
@@ -920,6 +930,17 @@ class EntriesTab(QWidget):
         else:
             return
         self._owner.changed()
+
+    def _relocate_to(self, firmware: Firmware, entry: Entry, path: Path) -> bool:
+        """Re-locate… with the file chosen: False (and why, in a dialog) when nothing
+        changed, e.g. a file outside the firmware's folder."""
+        try:
+            self._owner.library.relocate_entry(firmware.id, entry.id, path)
+        except (OSError, ValueError) as exc:
+            dialogs.notice(self, tr("Not re-located"), [entry_error(exc)])
+            return False
+        self._owner.note("dim", f"[entry] {entry.name} now points at {path}")
+        return True
 
     def _copy_to(self, firmware: Firmware, entry: Entry) -> None:
         targets = [
@@ -940,6 +961,9 @@ class EntriesTab(QWidget):
                 self._owner.library.copy_entry_to(firmware.id, entry.id, target.id)
             except AlreadyInFirmwareError as exc:
                 self._owner.note("note", f"[entry] not copied: {exc}")
+                return
+            except (OSError, ValueError) as exc:
+                dialogs.notice(self, tr("Not copied"), [entry_error(exc)])
                 return
             self._owner.note("dim", f"[entry] copied {entry.name} to '{target.name}'")
 

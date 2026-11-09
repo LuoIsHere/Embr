@@ -125,3 +125,39 @@ def test_copying_an_entry_to_a_firmware_that_has_its_file_says_so(
     window.firmware_view.entries._copy_to(source, entry)
     assert "[entry] not copied: a.bin is already in 'other'" in window.log_panel.log.toPlainText()
     assert _names(window, other.id) == ["a.bin"]
+
+
+def test_re_locating_outside_the_folder_says_why(
+    window: EmbrWindow, tmp_path: Path, notices: list[list[str]]
+) -> None:
+    firmware_id, _files = _fixed(window, tmp_path)
+    elsewhere = tmp_path / "elsewhere" / "a.bin"
+    elsewhere.parent.mkdir()
+    elsewhere.write_bytes(b"\x09" * 64)
+    source = window.library.firmware(firmware_id)
+    (entry,) = [e for e in source.entries if e.name == "a.bin"]
+
+    assert not window.firmware_view.entries._relocate_to(source, entry, elsewhere)
+    folder = str(tmp_path / "fw")
+    assert notices == [[f"a.bin is not in this firmware's folder {folder}."]]
+    (kept,) = [e for e in window.library.firmware(firmware_id).entries if e.id == entry.id]
+    assert kept.file == entry.file
+
+
+def test_copying_to_a_firmware_with_another_folder_says_why(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, notices: list[list[str]]
+) -> None:
+    firmware_id, _files = _fixed(window, tmp_path)
+    other_file = tmp_path / "other" / "c.bin"
+    other_file.parent.mkdir()
+    other_file.write_bytes(b"\x03" * 64)
+    window.library.create_from_files([other_file], name="other")
+
+    def first(*_args: object) -> int:
+        return 0
+
+    monkeypatch.setattr(dialogs, "ask_choice", first)
+    source = window.library.firmware(firmware_id)
+    window.firmware_view.entries._copy_to(source, source.entries[0])
+    folder = str(tmp_path / "other")
+    assert notices == [[f"{source.entries[0].name} is not in this firmware's folder {folder}."]]

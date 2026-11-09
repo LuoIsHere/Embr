@@ -454,6 +454,9 @@ TEXT: dict[str, str] = {
         "Embr 遇到了意外错误，相关操作可能没有完成。"
     ),
     "Details were written to logs/{0}.": "详细信息已写入 logs/{0}。",
+    "Not re-located": "未重新定位",
+    "Not copied": "未复制",
+    "{0} is not in this firmware's folder {1}.": "{0} 不在此固件的文件夹 {1} 内。",
     "Name shown in the sidebar": "在侧栏中显示的名称",
     "{0} file(s) from {1}": "来自 {1} 的 {0} 个文件",
     "{0}: drop a build folder on a project or group": "{0}：请将构建文件夹拖到项目或分组上",
