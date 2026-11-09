@@ -80,6 +80,7 @@ def run_gui() -> int:
     the folders Embr needs (design doc §12.8), instance lock, clear temp/, data folders,
     TMP/TEMP to temp/ before Qt starts, open the data (migrations; a damaged database is
     offered a backup), window."""
+    from embr.core.logs.crash import CrashLog
     from embr.core.storage.lock import InstanceLock
     from embr.core.storage.paths import AppPaths, clear_temp, default_root, is_writable, prepare
 
@@ -94,9 +95,11 @@ def run_gui() -> int:
     lock = InstanceLock(paths.lock_file)
     if not lock.acquire():
         return _fatal(tr(ALREADY_RUNNING).format(root=paths.root))
+    crash = CrashLog(paths.logs)
     try:
         clear_temp(paths)
         prepare(paths)
+        crash.install()  # from here on, no unexpected exception goes unrecorded
         # Qt's temporary folder and every child process (the worker) follow these
         os.environ["TMP"] = os.environ["TEMP"] = str(paths.temp)
         from PySide6.QtCore import QLocale
@@ -121,6 +124,7 @@ def run_gui() -> int:
         set_language(effective(stored_language(context.settings), QLocale.system().uiLanguages()))
         try:
             window = EmbrWindow(context)
+            crash.on_error = window.report_internal_error
             window.show()
             code = app.exec()
             restart = window.restart_requested
@@ -128,6 +132,7 @@ def run_gui() -> int:
         finally:
             context.close()
     finally:
+        crash.uninstall()
         lock.release()
         if restart:
             _relaunch()

@@ -410,6 +410,15 @@ class EmbrWindow(FrameWindow):
     def busy(self) -> bool:
         return self._ops.busy
 
+    def report_internal_error(self, summary: str, crash_log: Path) -> None:
+        """An exception no code handled (core.logs.crash): one line in the log panel; the
+        traceback is in the crash log."""
+        if not self._closed:
+            self.note(
+                "error",
+                f"[internal] unexpected error: {summary}; details in logs/{crash_log.name}",
+            )
+
     def show_log_segment(self, file_name: str, segment_id: str) -> None:
         line = self._context.logs.find_segment(file_name, segment_id)
         if line is None:
