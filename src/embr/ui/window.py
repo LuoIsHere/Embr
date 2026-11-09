@@ -407,6 +407,9 @@ class EmbrWindow(FrameWindow):
     def is_locked(self, firmware_id: str) -> bool:
         return self._ops.running_firmware_id == firmware_id
 
+    def busy(self) -> bool:
+        return self._ops.busy
+
     def show_log_segment(self, file_name: str, segment_id: str) -> None:
         line = self._context.logs.find_segment(file_name, segment_id)
         if line is None:
@@ -956,6 +959,9 @@ class EmbrWindow(FrameWindow):
         if outcome.result == RecordResult.FAILED and _port_unavailable(outcome.message):
             self._memory.select_port(None)
             self.note("warning", "The port could not be opened (in use or disconnected).")
+        for problem in outcome.problems:
+            self.note("error", f"[finish] could not save {problem}")
+        recorded = "Record saved" if outcome.record_id is not None else "Record NOT saved"
         if outcome.kind in (JobKind.ERASE, JobKind.READ_FLASH):
             done = outcome.result == RecordResult.OK
             self.connection.show_progress(
@@ -963,7 +969,7 @@ class EmbrWindow(FrameWindow):
             )
             self.note(
                 "ok" if done else "warning",
-                f"{RESULT_TEXT[outcome.result]}. Record saved. Port released.",
+                f"{RESULT_TEXT[outcome.result]}. {recorded}. Port released.",
             )
             if outcome.message.startswith(SAVE_FAILED):
                 self.note("error", f"[read] {outcome.message}")
@@ -984,7 +990,7 @@ class EmbrWindow(FrameWindow):
             self.connection.show_progress(percent, RESULT_TEXT[outcome.result])
             self.note(
                 "ok" if outcome.result == RecordResult.OK else "warning",
-                f"{RESULT_TEXT[outcome.result]}. Record saved: "
+                f"{RESULT_TEXT[outcome.result]}. {recorded}: "
                 f"result={outcome.result.value}. Port released.",
             )
             if outcome.result == RecordResult.CANCELLED:

@@ -86,6 +86,7 @@ class ProjectView(QScrollArea):
         export.clicked.connect(lambda: self._owner.export_project(project_id))
         delete = button(tr("Delete project…"))
         delete.clicked.connect(self._delete)
+        self._wait_for_job(delete)
         row = QHBoxLayout()
         row.addWidget(export)
         row.addWidget(delete)
@@ -112,6 +113,20 @@ class ProjectView(QScrollArea):
         self._grid.addWidget(widget, self._row, 1)
         self._fields.append(widget)
         self._row += 1
+
+    def _job_running(self) -> bool:
+        """A job started after the page was built: the button is still enabled."""
+        if self._owner.busy():
+            self._owner.note("note", "[project] wait for the running job to finish")
+            return True
+        return False
+
+    def _wait_for_job(self, action: QWidget) -> None:
+        """Deleting a project or removing a group waits for a running job: a read may be
+        saving its content into them. The page is rebuilt when the job ends."""
+        if self._owner.busy():
+            action.setEnabled(False)
+            action.setToolTip(tr("Available when the running job has finished"))
 
     def _with_note(self, widget: QWidget, note: str) -> QWidget:
         box = QWidget()
@@ -174,6 +189,7 @@ class ProjectView(QScrollArea):
                 tr("Remove"), "ibtn", tooltip=tr("Remove group (its firmware becomes ungrouped)")
             )
             remove.clicked.connect(lambda _c=False, g=group, n=count: self._remove_group(g, n))
+            self._wait_for_job(remove)
             column.addLayout(
                 self._group_row(name, remove, label(tr(f"{count} firmware"), tone="3"))
             )
@@ -294,7 +310,7 @@ class ProjectView(QScrollArea):
 
     def _remove_group(self, group: str, count: int) -> None:
         project = self._project
-        if project is None:
+        if project is None or self._job_running():
             return
         effect = (
             tr(
@@ -319,7 +335,7 @@ class ProjectView(QScrollArea):
 
     def _delete(self) -> None:
         project = self._project
-        if project is None:
+        if project is None or self._job_running():
             return
         count = len(self._owner.library.project_firmware(project.id))
         accepted, delete_all = dialogs.confirm(

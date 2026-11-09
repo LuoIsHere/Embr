@@ -43,6 +43,10 @@ class Owner(Protocol):
         """True while the firmware is being flashed (editing is locked)."""
         ...
 
+    def busy(self) -> bool:
+        """True while any job runs (a read may be saving into a project)."""
+        ...
+
     def show_log_segment(self, file_name: str, segment_id: str) -> None:
         """Show a record's section of its day's log in the log panel."""
         ...

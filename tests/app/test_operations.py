@@ -515,3 +515,54 @@ def test_job_without_a_mac_stays_in_the_daily_log(library: Library, context: App
     assert outcome.result == RecordResult.FAILED
     assert context.logs.find_segment(outcome.log_file, outcome.segment_id) is not None
     assert not (context.paths.logs / BOARDS_FOLDER).exists()
+
+
+def _fail(*_args: object, **_kwargs: object) -> None:
+    raise OSError("disk full")
+
+
+def test_a_record_that_cannot_be_saved_still_ends_the_job(
+    library: Library, context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware = fixed_firmware(library, HELLO)
+    setup = Setup(context, FakeWorker(FLASH_OK))
+    monkeypatch.setattr(context.history, "add", _fail)
+    outcome = setup.flash(firmware.id)
+
+    assert (outcome.result, outcome.record_id) == (RecordResult.OK, None)  # what the board did
+    assert outcome.problems == ("record: disk full",)
+    assert not setup.ops.busy
+    assert _log_lines(context.logs.board_log_path(MAC))  # the later steps still ran
+
+
+def test_a_read_that_cannot_be_kept_fails_and_is_recorded(
+    context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = b"\xa5" * 64
+    events: list[Event] = [INFO, ResultEvent(ResultStatus.OK, f"{len(data)} bytes read")]
+    setup = Setup(context, DumpWorker(events, data))
+    monkeypatch.setattr(context.archive, "add", _fail)
+    setup.ops.read_flash(BRIDGE, None, setup.recorder, size=len(data))
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert (outcome.result, outcome.firmware_id) == (RecordResult.FAILED, None)
+    assert outcome.problems == ("read: disk full",)
+    (record,) = context.history.query()
+    assert (record.id, record.result) == (outcome.record_id, RecordResult.FAILED)
+    assert not setup.ops.busy
+
+
+def test_a_read_into_a_project_deleted_meanwhile_is_kept_standalone(
+    library: Library, context: AppContext
+) -> None:
+    project = library.create_project("p")
+    data = b"\x5a" * 64
+    events: list[Event] = [INFO, ResultEvent(ResultStatus.OK, f"{len(data)} bytes read")]
+    setup = Setup(context, DumpWorker(events, data))
+    setup.ops.read_flash(BRIDGE, None, setup.recorder, size=len(data), project_id=project.id)
+    library.delete_project(project.id)  # before the result is handled
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    assert (outcome.result, outcome.problems) == (RecordResult.OK, ())
+    assert outcome.firmware_id is not None
+    assert library.firmware(outcome.firmware_id).project_id is None

@@ -10,6 +10,7 @@ thread; tests run it at once). Everything else - log writes, the record, listene
 happens there, so the sqlite connection is only used from one thread.
 """
 
+import contextlib
 import datetime
 import hashlib
 import os
@@ -103,6 +104,10 @@ class JobOutcome:
     """read_flash that ended OK with import: the dump firmware created from it."""
     saved_to: str = ""
     """read_flash that ended OK: the file the content was written to."""
+    problems: tuple[str, ...] = ()
+    """Steps after the board was done that failed (saving the record or the settings,
+    keeping a read, the board log), each "<step>: <reason>". The result stays what the
+    board did, except a read whose content could not be kept (FAILED)."""
 
 
 class Listener(Protocol):
@@ -340,59 +345,91 @@ class Operations:
             self._finish(job, event)
 
     def _finish(self, job: _Job, event: ResultEvent | ErrorEvent) -> None:
+        """Record, settings and logs after the worker's result. Each step is guarded on its
+        own: one failing (disk full, a file in use, the target project deleted) is reported
+        in JobOutcome.problems and the others still run; the job always ends and
+        on_finished is always called, so the window never stays busy."""
         job.finished = True
         result = result_from_event(event)
         message = event.message
-        job.segment.write(f"[result] {result}: {message}")
         record_id: str | None = None
         dump_id: str | None = None
         saved = ""
-        if job.kind == JobKind.FLASH and job.plan is not None and job.firmware is not None:
-            record = self._record(job, result, event.message)
-            self._ctx.history.add(record)
-            record_id = record.id
-            job.segment.write(
-                f"[record] {record.id} {result}, {len(record.entries)} entries, "
-                f"{record.duration_ms} ms"
+        problems: list[str] = []
+
+        def attempt[T](step: str, run: Callable[[], T]) -> T | None:
+            try:
+                return run()
+            except Exception as exc:  # reported in problems; the job still ends
+                problems.append(f"{step}: {exc}")
+                with contextlib.suppress(Exception):
+                    job.segment.write(f"[error] {step} failed: {exc!r}")
+                return None
+
+        try:
+            attempt("log", lambda: job.segment.write(f"[result] {result}: {message}"))
+            if job.kind == JobKind.FLASH and job.plan is not None and job.firmware is not None:
+                record_id = attempt("record", lambda: self._save_record(job, result, message))
+                baud = job.plan.baud or 0
+                if result == RecordResult.OK:
+                    attempt("settings", lambda: self._remember_baud(job.port, baud))
+            elif job.other is not None:
+                plan = job.other
+                kept = _Kept()
+                if isinstance(plan, ReadPlan):
+                    found = attempt("read", lambda: self._keep_read(job, plan, result, message))
+                    if found is None:  # the content is lost unless it was saved to a file
+                        result, message = RecordResult.FAILED, f"read not kept: {problems[-1]}"
+                    else:
+                        result, message, kept = found
+                        saved = kept.saved_to
+                outcome = (result, message)
+                record = attempt("record", lambda: self._save_other(job, *outcome, kept))
+                record_id = record.id if record is not None else None
+                dump_id = kept.dump.id if kept.dump is not None else None
+                baud = plan.baud if isinstance(plan, ReadPlan) else None
+                if result == RecordResult.OK and baud:
+                    attempt("settings", lambda: self._remember_baud(job.port, baud))
+            attempt("log", job.segment.close)
+            if job.kind != JobKind.IDENTIFY and job.info is not None and job.info.mac:
+                mac = job.info.mac
+                attempt("board log", lambda: self._ctx.logs.copy_to_board(job.segment, mac))
+        finally:
+            self._job = None
+            job.listener.on_finished(
+                JobOutcome(
+                    kind=job.kind,
+                    result=result,
+                    message=message,
+                    record_id=record_id,
+                    log_file=job.segment.file_name,
+                    segment_id=job.segment_id,
+                    native_usb=not baud_adjustable(job.port),
+                    firmware_id=dump_id,
+                    saved_to=saved,
+                    problems=tuple(problems),
+                )
             )
-            if result == RecordResult.OK and remember_baud(
-                self._ctx.settings, job.port, job.plan.baud or 0
-            ):
-                self._ctx.settings.save()
-        elif job.other is not None:
-            kept = _Kept()
-            if isinstance(job.other, ReadPlan):
-                result, message, kept = self._keep_read(job, job.other, result, message)
-                saved = kept.saved_to
-            record = self._other_record(job, result, message, kept)
-            self._ctx.history.add(record)
-            record_id = record.id
-            dump_id = record.firmware_id
-            job.segment.write(f"[record] {record.id} {result}, {record.duration_ms} ms")
-            baud = job.other.baud if isinstance(job.other, ReadPlan) else None
-            if (
-                result == RecordResult.OK
-                and baud
-                and remember_baud(self._ctx.settings, job.port, baud)
-            ):
-                self._ctx.settings.save()
-        job.segment.close()
-        if job.kind != JobKind.IDENTIFY and job.info is not None and job.info.mac:
-            self._ctx.logs.copy_to_board(job.segment, job.info.mac)
-        self._job = None
-        job.listener.on_finished(
-            JobOutcome(
-                kind=job.kind,
-                result=result,
-                message=message,
-                record_id=record_id,
-                log_file=job.segment.file_name,
-                segment_id=job.segment_id,
-                native_usb=not baud_adjustable(job.port),
-                firmware_id=dump_id,
-                saved_to=saved,
-            )
+
+    def _save_record(self, job: _Job, result: RecordResult, message: str) -> str:
+        record = self._record(job, result, message)
+        self._ctx.history.add(record)
+        job.segment.write(
+            f"[record] {record.id} {result}, {len(record.entries)} entries, {record.duration_ms} ms"
         )
+        return record.id
+
+    def _save_other(
+        self, job: _Job, result: RecordResult, message: str, kept: "_Kept"
+    ) -> FlashRecord:
+        record = self._other_record(job, result, message, kept)
+        self._ctx.history.add(record)
+        job.segment.write(f"[record] {record.id} {result}, {record.duration_ms} ms")
+        return record
+
+    def _remember_baud(self, port: PortInfo, baud: int) -> None:
+        if remember_baud(self._ctx.settings, port, baud):
+            self._ctx.settings.save()
 
     def _start_other(
         self,
@@ -488,6 +525,9 @@ class Operations:
             data, original_name=f"{name}.bin", note=f"Read from {plan.port} at {plan.address:#x}"
         )
         project_id, device = job.target
+        if project_id is not None and not self._project_exists(project_id):
+            job.segment.write("[read] the target project is gone; kept as standalone firmware")
+            project_id = None
         if project_id is None:
             dump = self._ctx.firmware.create(name)
         else:
@@ -584,6 +624,13 @@ class Operations:
             return self._ctx.projects.get(project_id).name
         except KeyError:
             return ""
+
+    def _project_exists(self, project_id: str) -> bool:
+        try:
+            self._ctx.projects.get(project_id)
+        except KeyError:
+            return False
+        return True
 
 
 @dataclass
