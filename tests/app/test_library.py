@@ -26,6 +26,7 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import (
     UNTITLED,
+    AlreadyInFirmwareError,
     AlreadyTrackedError,
     FirmwareFlag,
     Library,
@@ -174,6 +175,14 @@ def test_copied_entry_is_independent_of_the_source(library: Library) -> None:
     (kept,) = library.firmware(target.id).entries
     assert kept.id == copied.id != entry.id
     assert (kept.file, kept.address, kept.note) == (entry.file, entry.address, "release build")
+
+
+def test_an_entry_is_not_copied_to_a_firmware_that_has_its_file(library: Library) -> None:
+    source = fixed_firmware(library, [APP], "source")
+    target = fixed_firmware(library, [APP], "target")
+    with pytest.raises(AlreadyInFirmwareError):
+        library.copy_entry_to(source.id, source.entries[0].id, target.id)
+    assert len(library.firmware(target.id).entries) == 1
 
 
 def test_missing_file_is_flagged_and_can_be_relocated(

@@ -105,6 +105,10 @@ class TrackingEntriesError(ValueError):
     """Entries of tracking firmware come from the build; nothing can be added to it."""
 
 
+class AlreadyInFirmwareError(ValueError):
+    """The target firmware already has an entry for the same file."""
+
+
 @dataclass(frozen=True)
 class AddedFiles:
     """What Library.add_files() did with the files given."""
@@ -872,14 +876,22 @@ class Library:
 
     def copy_entry_to(self, firmware_id: str, entry_id: str, target_id: str) -> Entry:
         """Copy an entry (same file, address, note, chosen MCU) into another firmware. A
-        "path:" entry must fit the target's folder as in add_files() (FolderError). A
-        tracking target raises TrackingEntriesError."""
+        "path:" entry must fit the target's folder as in add_files() (FolderError); one the
+        target already has an entry for (same resolved path, as in add_files()) raises
+        AlreadyInFirmwareError. A tracking target raises TrackingEntriesError."""
         source = self._ctx.firmware.get(firmware_id)
         entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
         target = self._ctx.firmware.get(target_id)
         _refuse_tracking(target)
         if entry.file.startswith("path:"):
             file = Path(entry.file.removeprefix("path:"))
+            key = _path_key(file)
+            if any(
+                _path_key(Path(e.file.removeprefix("path:"))) == key
+                for e in target.entries
+                if e.file.startswith("path:")
+            ):
+                raise AlreadyInFirmwareError(f"{entry.name} is already in '{target.name}'")
             target.folder = _check_folder(_root(target, file), [file])
         copy = copy_entry(entry)
         if copy.address_source == AddressSource.AUTO:  # no detection outside its firmware

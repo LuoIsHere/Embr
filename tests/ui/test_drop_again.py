@@ -107,3 +107,21 @@ def test_a_rebuild_during_a_drag_keeps_the_drop_target(
     tree.dropEvent(event(QDropEvent))
     assert sorted(_names(window, firmware_id)) == ["a.bin", "b.bin", "c.bin"]
     assert notices == []
+
+
+def test_copying_an_entry_to_a_firmware_that_has_its_file_says_so(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware_id, files = _fixed(window, tmp_path)
+    other = window.library.create_from_files(files[:1], name="other")
+
+    def first(*_args: object) -> int:
+        return 0
+
+    monkeypatch.setattr(dialogs, "ask_choice", first)
+    source = window.library.firmware(firmware_id)
+    (entry,) = [e for e in source.entries if e.name == "a.bin"]
+
+    window.firmware_view.entries._copy_to(source, entry)
+    assert "[entry] not copied: a.bin is already in 'other'" in window.log_panel.log.toPlainText()
+    assert _names(window, other.id) == ["a.bin"]

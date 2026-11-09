@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from embr.app.chips import Mcu, chip_choosable, entry_mcu, firmware_mcus, fits, image_header
-from embr.app.library import AddedFiles, FirmwareFlag
+from embr.app.library import AddedFiles, AlreadyInFirmwareError, FirmwareFlag
 from embr.app.locations import entry_location, firmware_location
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
@@ -936,7 +936,11 @@ class EntriesTab(QWidget):
         )
         if index is not None:
             target = targets[index]
-            self._owner.library.copy_entry_to(firmware.id, entry.id, target.id)
+            try:
+                self._owner.library.copy_entry_to(firmware.id, entry.id, target.id)
+            except AlreadyInFirmwareError as exc:
+                self._owner.note("note", f"[entry] not copied: {exc}")
+                return
             self._owner.note("dim", f"[entry] copied {entry.name} to '{target.name}'")
 
     # ---- dropping files from Explorer ---------------------------------------------------
