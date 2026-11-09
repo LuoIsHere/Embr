@@ -445,6 +445,7 @@ TEXT: dict[str, str] = {
     "Nothing added": "没有添加任何内容",
     "This firmware is being flashed.": "此固件正在烧录。",
     "No files were dropped.": "没有拖入文件。",
+    "Already in this firmware, content unchanged: {0}": "已在此固件中，内容未变：{0}",
     "Name shown in the sidebar": "在侧栏中显示的名称",
     "{0} file(s) from {1}": "来自 {1} 的 {0} 个文件",
     "{0}: drop a build folder on a project or group": "{0}：请将构建文件夹拖到项目或分组上",

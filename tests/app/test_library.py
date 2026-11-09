@@ -90,6 +90,38 @@ def test_idf_build_files_get_addresses_and_one_blank_otadata(library: Library) -
     assert kinds.count(EntryKind.OTADATA) == 1
 
 
+def test_adding_a_file_again_adds_no_second_entry(library: Library, tmp_path: Path) -> None:
+    boot, table, app = copy_files(build_files("esp32s3_hello"), tmp_path / "fw")
+    firmware = library.create_from_files([boot, table, app], name="fw")
+    before = library.firmware(firmware.id).entries
+    # the same files again, one of them twice and spelled differently
+    again = library.add_files(firmware.id, [app, boot, tmp_path / "fw" / ".." / "fw" / app.name])
+    assert (again.added, again.updated) == ([], [])
+    assert {e.name for e in again.unchanged} == {app.name, boot.name}
+    assert [e.id for e in library.firmware(firmware.id).entries] == [e.id for e in before]
+
+
+def test_adding_a_changed_file_again_accepts_its_content(library: Library, tmp_path: Path) -> None:
+    boot, table, app = copy_files(build_files("esp32s3_hello"), tmp_path / "fw")
+    firmware = library.create_from_files([boot, table, app], name="fw")
+    (old,) = [e for e in library.firmware(firmware.id).entries if e.name == app.name]
+    library.set_entry_address(firmware.id, old.id, "0x20000")
+    library.set_entry_note(firmware.id, old.id, "kept")
+    write_newer(app, build_files("esp32s3_hello_v61")[2].read_bytes())
+    assert library.tracker.check(firmware.id).state == ResolveState.NEEDS_CONFIRMATION
+
+    nested = tmp_path / "fw" / "sub" / app.name  # same name, another file: a new entry
+    nested.parent.mkdir()
+    nested.write_bytes(app.read_bytes())
+    result = library.add_files(firmware.id, [app, nested])
+
+    assert [e.id for e in result.updated] == [old.id]
+    assert [e.file for e in result.added] == [f"path:{nested.resolve()}"]
+    (entry,) = [e for e in library.firmware(firmware.id).entries if e.id == old.id]
+    assert (entry.size, entry.address, entry.note) == (app.stat().st_size, 0x20000, "kept")
+    assert library.tracker.check(firmware.id).state == ResolveState.OK
+
+
 def test_rename_and_move_make_names_unique(library: Library) -> None:
     project = library.create_project("p")
     library.create_firmware("a", project.id)

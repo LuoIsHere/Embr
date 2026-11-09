@@ -9,6 +9,7 @@ ValueError. Every change to a tracking firmware invalidates its tracker status.
 """
 
 import dataclasses
+import hashlib
 import os
 import re
 from collections.abc import Sequence
@@ -102,6 +103,19 @@ class FirmwareFlag(StrEnum):
 
 class TrackingEntriesError(ValueError):
     """Entries of tracking firmware come from the build; nothing can be added to it."""
+
+
+@dataclass(frozen=True)
+class AddedFiles:
+    """What Library.add_files() did with the files given."""
+
+    added: list[Entry]
+    """New entries (a blank otadata entry added with a partition table included)."""
+    updated: list[Entry]
+    """Entries already pointing at one of the files, whose changed content was accepted
+    (as "Confirm entries" does)."""
+    unchanged: list[Entry]
+    """Entries already pointing at one of the files, content as recorded: nothing done."""
 
 
 class AlreadyTrackedError(PlanError):
@@ -673,24 +687,50 @@ class Library:
         self.add_files(firmware.id, paths)
         return self._ctx.firmware.get(firmware.id)
 
-    def add_files(self, firmware_id: str, paths: Sequence[Path]) -> list[Entry]:
-        """Add one entry per file, classified by image_sniff. Partition tables are added
-        first so the other files get addresses from them (or from the firmware's enabled
-        table). When this adds a partition table with an otadata partition and no enabled
-        otadata entry exists, a blank otadata entry is added too. Entries placed by
-        partition are re-resolved. A firmware still named UNTITLED with no entries takes
-        the first file's name (without extension). Returns the new entries. Folder rule
-        (design doc §12 item 8): a firmware without a folder takes the folder of the first
-        of `paths`; every file must be in that folder or below it, otherwise FolderError and
-        nothing changes. Tracking firmware:
-        TrackingEntriesError, nothing changes."""
+    def add_files(self, firmware_id: str, paths: Sequence[Path]) -> AddedFiles:
+        """Add one entry per file, classified by image_sniff. A file an entry of the
+        firmware already points at (same resolved path; a path given twice counts once)
+        adds nothing: changed content is accepted as confirm_entry() does, the rest of the
+        entry is kept. Partition tables are added first so the other files get addresses
+        from them (or from the firmware's enabled table). When this adds a partition table
+        with an otadata partition and no enabled otadata entry exists, a blank otadata
+        entry is added too. Entries placed by partition are re-resolved. A firmware still
+        named UNTITLED with no entries takes the first file's name (without extension).
+        Folder rule (design doc §12 item 8): a firmware without a folder takes the folder of
+        the first of `paths`; every file must be in that folder or below it, otherwise
+        FolderError and nothing changes. An unreadable file: OSError, nothing changes.
+        Tracking firmware: TrackingEntriesError, nothing changes."""
         firmware = self._ctx.firmware.get(firmware_id)
         _refuse_tracking(firmware)
         if paths:
             firmware.folder = _check_folder(_root(firmware, Path(paths[0])), paths)
         was_empty = not firmware.entries
+        known = {
+            _path_key(Path(e.file[len("path:") :])): e
+            for e in firmware.entries
+            if e.file.startswith("path:")
+        }
+        fresh: list[Path] = []
+        updated: list[Entry] = []
+        unchanged: list[Entry] = []
+        seen: set[str] = set()
+        for path in paths:
+            key = _path_key(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            data = path.read_bytes()  # unreadable files fail here, before anything changes
+            entry = known.get(key)
+            if entry is None:
+                fresh.append(path)
+            elif entry.size == len(data) and entry.sha256 == hashlib.sha256(data).hexdigest():
+                unchanged.append(entry)
+            else:
+                updated.append(entry)
+        for entry in updated:
+            confirm_entry(entry, self._ctx.paths.archive)
         # tables first, so the files after them get addresses from the table
-        ordered = sorted(paths, key=lambda p: parse_partition_table(p.read_bytes()) is None)
+        ordered = sorted(fresh, key=lambda p: parse_partition_table(p.read_bytes()) is None)
         added: list[Entry] = []
         for path in ordered:
             table, _ = enabled_partition_table(firmware, self._read)
@@ -706,10 +746,10 @@ class Library:
                 added.append(blank)
         if was_empty and added and _is_untitled(firmware.name):
             taken = [f.name for f in self._ctx.firmware.in_scope(firmware.project_id)]
-            stem = default_name_from_files([p.name for p in paths])
+            stem = default_name_from_files([p.name for p in fresh])
             firmware.name = unique_name(stem, [n for n in taken if n != firmware.name])
         self._save_entries(firmware)
-        return added
+        return AddedFiles(added, updated, unchanged)
 
     def add_attachment(
         self,

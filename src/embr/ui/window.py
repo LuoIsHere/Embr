@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QCloseEvent,
     QColor,
     QDesktopServices,
+    QDragEnterEvent,
     QKeySequence,
     QPalette,
     QShortcut,
@@ -99,7 +100,7 @@ from embr.ui.project_view import ProjectView
 from embr.ui.sidebar import PLUS, Node, Sidebar
 from embr.ui.theme import Palette, load_fonts, palette, style_sheet, ui_font
 from embr.ui.widgets import label
-from embr.ui.workspace import FirmwareView, Header
+from embr.ui.workspace import FirmwareView, Header, kept_notes
 
 LOG_LEVELS = {
     LogLevel.INFO: "info",
@@ -1149,13 +1150,18 @@ class EmbrWindow(FrameWindow):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """FrameWindow's filter on the application, plus: a mouse button released anywhere
         in this window queues a check of the selection (on release, so a refresh does not
-        take the click away)."""
+        take the click away). So do files dragged into it: a drop from Explorer neither
+        activates the window nor releases a button in it, and files overwritten just before
+        should show as changed while they are dragged (internal drags carry no URLs and
+        never refresh the sidebar under them)."""
         if super().eventFilter(watched, event):
             return True
-        if (
-            event.type() == QEvent.Type.MouseButtonRelease
-            and isinstance(watched, QWidget)
-            and watched.window() is self
+        if not isinstance(watched, QWidget) or watched.window() is not self:
+            return False
+        if event.type() == QEvent.Type.MouseButtonRelease or (
+            event.type() == QEvent.Type.DragEnter
+            and isinstance(event, QDragEnterEvent)
+            and event.mimeData().hasUrls()
         ):
             self._request_recheck()
         return False
@@ -1551,13 +1557,23 @@ class EmbrWindow(FrameWindow):
             dialogs.notice(self, tr("Nothing added"), problems or [tr("No files were dropped.")])
             return
         try:
-            added = self._library.add_files(firmware_id, files)
+            result = self._library.add_files(firmware_id, files)
         except (TrackingEntriesError, FolderError, OSError, ValueError) as exc:
             dialogs.notice(self, tr("Nothing added"), [_text(exc)])
             return
         name = self._library.firmware(firmware_id).name
-        self.note("dim", f"[entry] {len(added)} entries added to '{name}'")
+        if result.added:
+            self.note("dim", f"[entry] {len(result.added)} entries added to '{name}'")
+        for line in kept_notes(result):
+            self.note("dim", line)
         self.select_firmware(firmware_id)
+        if not result.added and not result.updated:
+            names = html.escape(", ".join(e.name for e in result.unchanged))
+            dialogs.notice(
+                self,
+                tr("Nothing added"),
+                [tr(f"Already in this firmware, content unchanged: {names}")],
+            )
 
     def _erase(self) -> None:
         self._board_job(JobKind.ERASE)

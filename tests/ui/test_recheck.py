@@ -8,12 +8,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
+from PySide6.QtGui import QDragEnterEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLineEdit, QMenu, QWidget
 
 from embr.app.tracking import TrackStatus
 from embr.core.firmware.tracking import ResolveState
+from embr.ui.sidebar import MIME
 from embr.ui.window import RECHECK_GAP_S, SETTLE_RECHECK_MS, EmbrWindow
 
 # pyright: reportPrivateUsage=false
@@ -177,6 +179,37 @@ def test_a_click_in_the_window_queues_a_check(
     other.close()
 
     QTest.mouseClick(window.log_panel, Qt.MouseButton.LeftButton, pos=QPoint(20, 20))
+    assert timer.isActive()
+
+
+def test_files_dragged_into_the_window_queue_a_check(
+    window: EmbrWindow, tmp_path: Path, clock: Clock
+) -> None:
+    """A drop from Explorer neither activates the window nor releases a button in it."""
+    _, file = _fixed(window, tmp_path)
+    window.show()
+    QApplication.processEvents()
+    timer = window._recheck_timer
+    timer.stop()
+
+    def drag(mime: QMimeData) -> None:
+        event = QDragEnterEvent(
+            QPointF(10, 10),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(window.firmware_view, event)
+
+    internal = QMimeData()  # a firmware dragged inside the sidebar
+    internal.setData(MIME, b"id")
+    drag(internal)
+    assert not timer.isActive()
+
+    files = QMimeData()
+    files.setUrls([QUrl.fromLocalFile(str(file))])
+    drag(files)
     assert timer.isActive()
 
 

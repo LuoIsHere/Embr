@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from embr.app.chips import Mcu, chip_choosable, entry_mcu, firmware_mcus, fits, image_header
-from embr.app.library import FirmwareFlag
+from embr.app.library import AddedFiles, FirmwareFlag
 from embr.app.locations import entry_location, firmware_location
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
@@ -107,6 +107,15 @@ def crumb(owner: Owner, firmware: Firmware) -> str:
     except KeyError:
         project = "?"
     return f"{project} / {firmware.device or tr('Ungrouped')}"
+
+
+def kept_notes(result: AddedFiles) -> list[str]:
+    """Log lines for files that were already entries of the firmware (added nothing)."""
+    lines = [f"[entry] {e.name}: changed content accepted" for e in result.updated]
+    if result.unchanged:
+        names = ", ".join(e.name for e in result.unchanged)
+        lines.append(f"[entry] already in this firmware, unchanged: {names}")
+    return lines
 
 
 class Header(QWidget):
@@ -811,13 +820,15 @@ class EntriesTab(QWidget):
         if self._firmware is None:
             return
         try:
-            added = self._owner.library.add_files(self._firmware.id, paths)
+            result = self._owner.library.add_files(self._firmware.id, paths)
         except (OSError, ValueError) as exc:
             self._owner.note("error", f"[entry] {exc}")
             return
-        for entry in added:
+        for entry in result.added:
             where = tr("no address") if entry.address is None else f"0x{entry.address:X}"
             self._owner.note("dim", f"[entry] added {entry.name} as {entry.kind.value} at {where}")
+        for line in kept_notes(result):
+            self._owner.note("dim", line)
         self._owner.changed()
 
     def _add_attachment(self) -> None:
