@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QFileDialog,
+    QLineEdit,
     QMenu,
+    QPlainTextEdit,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -207,6 +209,10 @@ class EmbrWindow(FrameWindow):
         self._schedule.seed(context.history)
         self._shown: tuple[str, ResolveState, str] | None = None
         """Firmware id, state and digest the workspace shows (flash compares the digest)."""
+        self._built_for: tuple[str, str] | None = None
+        """The selection the workspace page was last built for."""
+        self._workspace_stale = False
+        """A refresh waited for a text field being edited (review H3)."""
         self._round: list[str] = []
         self._round_changed = False
         self._clock: Callable[[], float] = time.monotonic
@@ -223,6 +229,9 @@ class EmbrWindow(FrameWindow):
         """A check of the selection, or the refresh it caused, is running."""
         self._closed = False
         """Set by closeEvent: queued refresh rounds stop."""
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.focusChanged.connect(self._focus_moved)
         self._reported: set[tuple[Path, str]] = set()
         self._renames_logged: set[tuple[str, datetime]] = set()
         """(firmware id, checked_at) of resolutions whose app rename was logged (design D10)."""
@@ -565,7 +574,47 @@ class EmbrWindow(FrameWindow):
             self.note("warning", f"[data] {d.path} cannot be read: {d.reason}")
         dialogs.notice(self, tr("Files that cannot be read"), text)
 
+    def _editing_field(self) -> QWidget | None:
+        """The text field of the firmware or project page being edited (it has the focus).
+        Such a field saves what was typed only when it loses the focus."""
+        focused = QApplication.focusWidget()
+        pages = (self.firmware_view, self.project_view)
+        if (
+            isinstance(focused, (QLineEdit, QPlainTextEdit))
+            and not focused.isReadOnly()
+            and any(page.isAncestorOf(focused) for page in pages)
+        ):
+            return focused
+        return None
+
+    def _focus_moved(self, _old: QWidget | None, _new: QWidget | None) -> None:
+        if self._workspace_stale:
+            QTimer.singleShot(0, self._refresh_if_stale)  # after the field's own save
+
+    def _refresh_if_stale(self) -> None:
+        """Rebuild a page that waited for its field, once no field is edited and no button
+        is held (a rebuild between press and release would take the click away)."""
+        if (
+            self._workspace_stale
+            and not self._closed
+            and self._editing_field() is None
+            and QApplication.mouseButtons() == Qt.MouseButton.NoButton
+        ):
+            self._refresh_workspace()
+
     def _refresh_workspace(self) -> None:
+        """Build the page of the selection. While a text field of it is being edited, a
+        refresh of the same page waits until the field is left (job ended, port changed, a
+        check), so nothing typed is lost; showing another page first lets the field save what
+        was typed, as leaving it does (review H3)."""
+        field = self._editing_field()
+        if field is not None:
+            if self._selection == self._built_for:
+                self._workspace_stale = True
+                return
+            field.clearFocus()  # its save may refresh (and build the new page) already
+        self._workspace_stale = False
+        self._built_for = self._selection
         selection = self._selection
         try:
             if selection is not None and selection[0] == "firmware":
@@ -582,7 +631,7 @@ class EmbrWindow(FrameWindow):
                 self.pages.setCurrentWidget(self.project_view)
                 return
         except KeyError:  # deleted meanwhile
-            self._selection = None
+            self._selection = self._built_for = None
         self._shown = None
         self.header.hide()
         self.pages.setCurrentWidget(self.empty_view)
@@ -1185,6 +1234,8 @@ class EmbrWindow(FrameWindow):
             and event.mimeData().hasUrls()
         ):
             self._request_recheck()
+        if event.type() == QEvent.Type.MouseButtonRelease and self._workspace_stale:
+            QTimer.singleShot(0, self._refresh_if_stale)  # after the click is handled
         return False
 
     # ---- stage two actions --------------------------------------------------------------
