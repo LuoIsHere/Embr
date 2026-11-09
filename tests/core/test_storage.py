@@ -18,6 +18,7 @@ import tomli_w
 from embr_testkit import FIXTURES, REPO
 
 from embr.core.history import History, Operation, RecordEntry
+from embr.core.storage import database
 from embr.core.storage.database import (
     DB_SCHEMA_VERSION,
     NewerSchemaError,
@@ -172,6 +173,43 @@ def test_open_database_migrates_old_file_with_backup(tmp_path: Path) -> None:
         connection.close()
     backups = _backup_files(tmp_path / "backup")
     assert [b.read_bytes() for b in backups] == [original]
+
+
+def test_open_database_in_a_folder_named_with_uri_characters(tmp_path: Path) -> None:
+    """Embr keeps its data next to Embr.exe, wherever the user put it."""
+    folder = tmp_path / "C# tools 100%"
+    for _ in range(2):  # the second start probes the existing file read-only
+        connection = open_database(folder / "embr.sqlite", folder / "backup")
+        try:
+            assert schema_version(connection) == DB_SCHEMA_VERSION
+        finally:
+            connection.close()
+    assert sorted(p.name for p in tmp_path.iterdir()) == [folder.name]  # no stray "C"
+
+
+def test_a_migration_step_stopped_half_way_keeps_the_old_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "embr.sqlite"
+    _make_db(path, 0)
+    connection = open_database(path, tmp_path / "backup")  # to the current version
+    connection.close()
+    connection = sqlite3.connect(path)
+    connection.execute(f"PRAGMA user_version = {DB_SCHEMA_VERSION - 1}")
+    connection.commit()
+    connection.close()
+    broken = {DB_SCHEMA_VERSION - 1: "CREATE TABLE half_done (x); NOT SQL;"}
+    monkeypatch.setattr(database, "_MIGRATIONS", broken)
+    with pytest.raises(sqlite3.Error):
+        open_database(path, tmp_path / "backup")
+
+    connection = sqlite3.connect(path)
+    try:
+        assert schema_version(connection) == DB_SCHEMA_VERSION - 1
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master")}
+    finally:
+        connection.close()
+    assert "half_done" not in tables
 
 
 def test_open_database_refuses_newer_schema(tmp_path: Path) -> None:

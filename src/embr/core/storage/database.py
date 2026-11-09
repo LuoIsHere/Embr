@@ -28,7 +28,8 @@ def open_database(path: Path, backup_root: Path) -> sqlite3.Connection:
     existing = path.is_file() and path.stat().st_size > 0
     version = 0
     if existing:
-        probe = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        # as_uri() escapes "#", "%" and spaces; a raw "file:" string would cut the path
+        probe = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         try:
             version = schema_version(probe)
             result = probe.execute("PRAGMA quick_check").fetchone()
@@ -48,11 +49,22 @@ def open_database(path: Path, backup_root: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.execute("PRAGMA foreign_keys = ON")
     while version < DB_SCHEMA_VERSION:
-        connection.executescript(_MIGRATIONS[version])
+        _migrate(connection, version)
         version += 1
-        connection.execute(f"PRAGMA user_version = {version}")
-        connection.commit()
     return connection
+
+
+def _migrate(connection: sqlite3.Connection, version: int) -> None:
+    """One migration step and its user_version in one transaction: a step stopped half way
+    leaves the database at `version`, never with new tables and the old version."""
+    try:
+        connection.executescript(
+            f"BEGIN; {_MIGRATIONS[version]} PRAGMA user_version = {version + 1}; COMMIT;"
+        )
+    except BaseException:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
 
 
 def schema_version(connection: sqlite3.Connection) -> int:
