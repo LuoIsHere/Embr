@@ -1,9 +1,13 @@
 """Files dropped again on the firmware that already has them, in the workspace or on its
-sidebar row: no second entry; changed content is accepted, unchanged files are named."""
+sidebar row: no second entry; changed content is accepted, unchanged files are named. A
+refresh of the sidebar during a drag keeps the drop target."""
 
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, QMimeData, QPointF, Qt, QUrl
+from PySide6.QtGui import QDragMoveEvent, QDropEvent
+from PySide6.QtWidgets import QApplication, QTreeWidgetItem, QTreeWidgetItemIterator
 
 from embr.ui import dialogs
 from embr.ui.window import EmbrWindow
@@ -61,3 +65,45 @@ def test_a_dropped_changed_file_is_confirmed_not_added(
     window.firmware_view.entries._add_paths([files[0]])  # the workspace drop
     assert sorted(_names(window, firmware_id)) == ["a.bin", "b.bin"]
     assert not window.firmware_view.banner.isVisible()
+
+
+def test_a_rebuild_during_a_drag_keeps_the_drop_target(
+    window: EmbrWindow, tmp_path: Path, notices: list[list[str]]
+) -> None:
+    """A check while files are dragged in may rebuild the sidebar under the cursor."""
+    firmware_id, files = _fixed(window, tmp_path)
+    window.show()
+    QApplication.processEvents()
+    tree = window.sidebar_panel.tree
+    extra = files[0].with_name("c.bin")
+    extra.write_bytes(b"\x05" * 64)
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(extra))])
+
+    def row() -> QTreeWidgetItem:
+        found = QTreeWidgetItemIterator(tree)
+        while item := found.value():  # None after the last row
+            node = tree.node(item)
+            if node is not None and node.firmware_id == firmware_id:
+                return item
+            found += 1
+        raise AssertionError("no firmware row")
+
+    def event[E: QDropEvent](kind: type[E]) -> E:
+        at = QPointF(tree.visualItemRect(row()).center())
+        return kind(
+            at,
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+    tree.dragMoveEvent(event(QDragMoveEvent))
+    window.changed()  # the rows are rebuilt mid-drag
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert tree.itemWidget(row(), 0).property("dropping") == "1"
+
+    tree.dropEvent(event(QDropEvent))
+    assert sorted(_names(window, firmware_id)) == ["a.bin", "b.bin", "c.bin"]
+    assert notices == []

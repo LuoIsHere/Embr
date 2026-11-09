@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QTreeWidget,
     QTreeWidgetItem,
+    QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
 )
@@ -209,6 +210,8 @@ class FirmwareTree(QTreeWidget):
         self._current: QTreeWidgetItem | None = None
         """The current row before the last press (put back when the press starts a reorder)."""
         self._drop_row: QWidget | None = None
+        self._drop_node: Node | None = None
+        """What the highlighted drop row stands for, to find its new row after a rebuild."""
         self.sortable = True
         self.read_only: frozenset[str] = frozenset()
         self.colors = Colors("#f6f7f9", "#ffffff", "#d9dde3", "#e4e8ee")
@@ -349,8 +352,25 @@ class FirmwareTree(QTreeWidget):
         if row is not None:  # a Row, or the STANDALONE FIRMWARE header
             set_prop(row, "dropping", "1")
             self._drop_row = row
+            self._drop_node = self.node(item)
         else:
             self._drop_row = None
+            self._drop_node = None
+
+    def rows_rebuilt(self) -> None:
+        """The rows were rebuilt (a refresh during a drag): the highlighted row widget is
+        gone; highlight the new row of the same node, if there is one."""
+        node = self._drop_node
+        self._drop_row = None
+        self._drop_node = None
+        if node is None:
+            return
+        found = QTreeWidgetItemIterator(self)
+        while item := found.value():  # None after the last row
+            if self.node(item) == node:
+                self._highlight(item)
+                return
+            found += 1
 
     # ---- reordering projects and groups -----------------------------------------------
 
@@ -704,6 +724,7 @@ class Sidebar(QWidget):
         spare.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDropEnabled)
         self.tree.fit_spare()
         self.tree.verticalScrollBar().setValue(scroll)
+        self.tree.rows_rebuilt()
 
     def _header(self, text: str, node: Node | None = None) -> None:
         widget = QWidget()
