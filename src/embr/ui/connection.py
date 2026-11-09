@@ -2,7 +2,7 @@
 §6.1 "右侧栏"). The log is in the centre column (log_panel)."""
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QMouseEvent, QResizeEvent
+from PySide6.QtGui import QMouseEvent, QResizeEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -111,6 +111,9 @@ class ConnectionPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self._palette: Palette | None = None
         self._ports: tuple[PortInfo, ...] = ()
+        self._wanted: PortInfo | None = None
+        """The port last chosen (by the user, or picked when there was none): kept while it
+        is away, e.g. a USB-Serial/JTAG board re-enumerating after a reset."""
         self._running = False
         self._keys: tuple[str, ...] = ("Ctrl", "Enter")
 
@@ -267,25 +270,49 @@ class ConnectionPanel(QWidget):
 
     # ---- ports and baud ---------------------------------------------------------------
 
+    @property
+    def wanted(self) -> PortInfo | None:
+        """The chosen port, also while it is away (selected_port() is None then)."""
+        return self._wanted
+
     def set_ports(self, ports: tuple[PortInfo, ...]) -> None:
-        """Replace the list, keeping the selected device when it is still there."""
-        current = self.selected_port()
+        """Replace the list. The chosen port stays selected; while it is away a disabled
+        "<device> · unavailable" item is shown and selected instead (no port selected, so
+        nothing can run on another board), and the port is selected again when it comes
+        back. Another port is only chosen by the user, or when none was chosen yet."""
         self._ports = ports
         self.port.clear()
-        if not ports:
-            self.port.addItem(tr("No serial port found"), None)
-            self.port.setEnabled(False)
-            return
-        self.port.setEnabled(not self._running)
         for index, port in enumerate(ports):
             self.port.addItem(port_text(port), index)
             self.port.setItemData(index, port.description, Qt.ItemDataRole.ToolTipRole)
-        keep = [
-            i for i, p in enumerate(ports) if current is not None and p.device == current.device
-        ]
-        # without a previous choice prefer a USB device over e.g. Bluetooth serial ports
-        usb = [i for i, p in enumerate(ports) if p.vid is not None]
-        self.port.setCurrentIndex((keep or usb or [0])[0])
+        wanted = self._wanted
+        if wanted is not None:
+            back = [i for i, p in enumerate(ports) if p.device == wanted.device]
+            if back:
+                self._wanted = ports[back[0]]
+                self.port.setCurrentIndex(back[0])
+            else:
+                self.port.insertItem(0, f"{wanted.device} · {tr('unavailable')}", None)
+                model = self.port.model()
+                if isinstance(model, QStandardItemModel):  # QComboBox's own model
+                    model.item(0).setEnabled(False)  # shown, never picked
+                self.port.setCurrentIndex(0)
+        elif ports:
+            # nothing chosen yet: prefer a USB device over e.g. Bluetooth serial ports
+            usb = [i for i, p in enumerate(ports) if p.vid is not None]
+            self.port.setCurrentIndex((usb or [0])[0])
+            self._wanted = self.selected_port()
+        else:
+            self.port.addItem(tr("No serial port found"), None)
+        self.port.setEnabled(not self._running and bool(ports))
+
+    def keep_selection(self) -> None:
+        """The selected port was picked (port_changed): it becomes the chosen one, and the
+        placeholder of one chosen before goes."""
+        picked = self.selected_port()
+        if picked is not None and picked != self._wanted:
+            self._wanted = picked
+            self.set_ports(self._ports)
 
     def selected_port(self) -> PortInfo | None:
         index = self.port.currentData()

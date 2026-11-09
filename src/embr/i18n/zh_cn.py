@@ -159,6 +159,7 @@ TEXT: dict[str, str] = {
     ),
     "Idle": "空闲",
     "No serial port found": "未找到串口",
+    "unavailable": "不可用",
     "not applicable": "不适用",
     "Native USB: baud rate not applicable": "原生 USB：不适用波特率",
     "Not identified yet. After identifying, firmware for other chips is dimmed in the sidebar.": (

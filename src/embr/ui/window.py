@@ -820,16 +820,22 @@ class EmbrWindow(FrameWindow):
 
     def _apply_ports(self) -> None:
         self._ports_pending = False
-        had = self.connection.selected_port()
+        before = self.connection.wanted
         self.connection.set_ports(self.ports.ports)
-        now = self.connection.selected_port()
-        if had is None or now is None or had.device != now.device:
+        after = self.connection.wanted
+        if before is None or after is None or before.device != after.device:
             self._port_changed()
-        else:
-            self._refresh_tree()
-            self._refresh_right()
+            return
+        # the chosen port stayed, is away for now (a board re-enumerating after a reset) or
+        # came back: its identification and the last job's hint stay
+        now = self.connection.selected_port()
+        if now is not None:
+            self._memory.select_port(now)  # another device under the same name: forgotten
+        self._refresh_tree()
+        self._refresh_right()
 
     def _port_changed(self) -> None:
+        self.connection.keep_selection()
         port = self.connection.selected_port()
         self._memory.select_port(port)
         self._last_outcome = None

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QApplication
 
 from embr.app.checklist import can_flash, preflight
@@ -197,8 +198,12 @@ def _multi(window: EmbrWindow, tmp_path: Path) -> str:
 
 
 def _port(window: EmbrWindow, port: PortInfo | None) -> None:
-    """Select `port` (None: no serial port) as a hotplug would."""
+    """`port` is the only one (None: no serial port), and the user picked it."""
     window.connection.set_ports(() if port is None else (port,))
+    combo = window.connection.port
+    picked = [i for i in range(combo.count()) if isinstance(combo.itemData(i), int)]
+    if picked:  # past the placeholder of a port chosen before
+        combo.setCurrentIndex(picked[0])
     window._port_changed()
 
 
@@ -582,3 +587,69 @@ def test_chinese_panel(tmp_path: Path, qapp: QCoreApplication) -> None:
         text, kind = _hint(shown)
         assert (text, kind) == (tr(QUICK_OTG), "warn")
         assert text != QUICK_OTG
+
+
+def _hotplug(
+    window: EmbrWindow, monkeypatch: pytest.MonkeyPatch, ports: tuple[PortInfo, ...]
+) -> None:
+    """The port monitor now reports `ports`."""
+    monkeypatch.setattr(type(window.ports), "ports", property(lambda _self: ports))
+    window._apply_ports()
+
+
+def _pick(window: EmbrWindow, device: str) -> None:
+    """The user picks `device` in the port list."""
+    combo = window.connection.port
+    (index,) = [
+        i
+        for i in range(combo.count())
+        if isinstance(data := combo.itemData(i), int)
+        and window.connection._ports[data].device == device
+    ]
+    combo.setCurrentIndex(index)
+    window._port_changed()
+
+
+def test_a_port_away_for_a_moment_is_kept_and_selected_again(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A USB-Serial/JTAG board re-enumerates after a reset: while it is away, nothing else
+    is selected (Flash on another board, quick flash on, review H2)."""
+    _single(_quiet(window), tmp_path)
+    _quick(window, True)
+    _hotplug(window, monkeypatch, (UART, JTAG))
+    combo = window.connection.port
+    _pick(window, JTAG.device)
+    _identify(window, JTAG)
+    outcome = JobOutcome(JobKind.FLASH, RecordResult.OK, "", "r1", "", "r1", native_usb=True)
+    window._last_outcome = outcome
+    assert window.connection.flash.isEnabled()
+
+    _hotplug(window, monkeypatch, (UART,))
+    assert combo.currentText() == "COM8 · unavailable"
+    assert window.connection.selected_port() is None
+    assert not window.connection.flash.isEnabled()
+    assert not window.connection.identify.isEnabled()
+    assert window._last_outcome is outcome and window._memory.snapshot is not None
+
+    _hotplug(window, monkeypatch, (UART, JTAG))
+    assert window.connection.selected_port() == JTAG
+    assert window._last_outcome is outcome and window._memory.snapshot is not None
+    assert window.connection.flash.isEnabled()
+
+
+def test_picking_another_port_while_one_is_away_drops_it(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _single(_quiet(window), tmp_path)
+    _hotplug(window, monkeypatch, (UART, JTAG))
+    combo = window.connection.port
+    _pick(window, JTAG.device)
+    _hotplug(window, monkeypatch, (UART,))
+    model = combo.model()
+    assert isinstance(model, QStandardItemModel) and not model.item(0).isEnabled()
+
+    _pick(window, UART.device)
+    assert [combo.itemText(i).split(" ")[0] for i in range(combo.count())] == ["COM7"]
+    _hotplug(window, monkeypatch, (UART, JTAG))  # back, but no longer the chosen one
+    assert window.connection.selected_port() == UART
