@@ -167,6 +167,15 @@ def notice(parent: QWidget, title: str, lines: list[str]) -> None:
     dialog.exec()
 
 
+def internal_error(parent: QWidget, crash_log: str) -> bool:
+    """An exception no code handled (shown once per run). True: open the log folder."""
+    dialog = Dialog(parent, tr("Unexpected error"), tr("Open log folder"), danger=False)
+    dialog.cancel.setText(tr("Close"))
+    dialog.text(tr("Embr ran into an unexpected error; the action may not have finished."))
+    dialog.text(tr(f"Details were written to logs/{html.escape(crash_log)}."))
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
 def ask_choice(
     parent: QWidget, title: str, caption: str, choices: list[str], ok: str
 ) -> int | None:

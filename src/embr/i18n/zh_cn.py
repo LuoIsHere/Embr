@@ -448,6 +448,12 @@ TEXT: dict[str, str] = {
     "No files were dropped.": "没有拖入文件。",
     "Already in this firmware, content unchanged: {0}": "已在此固件中，内容未变：{0}",
     "Available when the running job has finished": "当前任务结束后可用",
+    "Unexpected error": "意外错误",
+    "Open log folder": "打开日志文件夹",
+    "Embr ran into an unexpected error; the action may not have finished.": (
+        "Embr 遇到了意外错误，相关操作可能没有完成。"
+    ),
+    "Details were written to logs/{0}.": "详细信息已写入 logs/{0}。",
     "Name shown in the sidebar": "在侧栏中显示的名称",
     "{0} file(s) from {1}": "来自 {1} 的 {0} 个文件",
     "{0}: drop a build folder on a project or group": "{0}：请将构建文件夹拖到项目或分组上",

@@ -229,6 +229,8 @@ class EmbrWindow(FrameWindow):
         """A check of the selection, or the refresh it caused, is running."""
         self._closed = False
         """Set by closeEvent: queued refresh rounds stop."""
+        self._error_shown = False
+        """An unexpected error was shown in a dialog this run (later ones: log panel only)."""
         app = QApplication.instance()
         if isinstance(app, QApplication):
             app.focusChanged.connect(self._focus_moved)
@@ -420,13 +422,22 @@ class EmbrWindow(FrameWindow):
         return self._ops.busy
 
     def report_internal_error(self, summary: str, crash_log: Path) -> None:
-        """An exception no code handled (core.logs.crash): one line in the log panel; the
-        traceback is in the crash log."""
-        if not self._closed:
-            self.note(
-                "error",
-                f"[internal] unexpected error: {summary}; details in logs/{crash_log.name}",
-            )
+        """An exception no code handled (core.logs.crash): one line in the log panel (the
+        traceback is in the crash log), and the first one of a run also in a dialog."""
+        if self._closed:
+            return
+        self.note(
+            "error",
+            f"[internal] unexpected error: {summary}; details in logs/{crash_log.name}",
+        )
+        if not self._error_shown:
+            self._error_shown = True
+            # not from inside the exception hook: the dialog runs its own event loop
+            QTimer.singleShot(0, lambda: self._show_internal_error(crash_log.name))
+
+    def _show_internal_error(self, crash_log: str) -> None:
+        if not self._closed and dialogs.internal_error(self, crash_log):
+            self._open_log_folder()
 
     def show_log_segment(self, file_name: str, segment_id: str) -> None:
         line = self._context.logs.find_segment(file_name, segment_id)
