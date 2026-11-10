@@ -180,7 +180,10 @@ class Tracker:
         status = dataclasses.replace(status, updated_at=self._updated.get(firmware_id))
         self._status[firmware_id] = status
         self._inputs[firmware_id] = inputs
-        self._prints[firmware_id] = print_
+        if all(self._cache.agrees(stamp) for stamp in print_.stamps):
+            self._prints[firmware_id] = print_
+        else:  # a file changed after it was read: this status is already out of date
+            self._prints.pop(firmware_id, None)
         return status
 
     @property
@@ -494,8 +497,7 @@ class Tracker:
     def _fixed_state(self, entry: Entry, path: Path) -> FileState:
         """files.entry_state() through the cache."""
         try:
-            sha = self._cache.sha256(path)
-            size = self._cache.size(path)
+            sha, size = self._cache.digest(path)
         except OSError:
             return FileState.MISSING
         if entry.file.startswith("archive:"):

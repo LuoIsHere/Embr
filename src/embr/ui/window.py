@@ -1193,23 +1193,33 @@ class EmbrWindow(FrameWindow):
         if self._closed or not self._round or self._ops.busy:
             self._round = []
             return
-        firmware_id = self._round.pop(0)
+        try:
+            self._check_in_round(self._round.pop(0))
+        finally:
+            # an unexpected error goes on to the crash log; the round still goes on and
+            # ends, or every later check would wait for it until a restart
+            self._continue_round()
+
+    def _check_in_round(self, firmware_id: str) -> None:
         tracker = self._library.tracker
         before = tracker.cached(firmware_id)
         try:
             status = tracker.check(firmware_id)
         except KeyError:
             self._schedule.forget(firmware_id)
-        else:
-            selected = firmware_id == self._selected_firmware_id()
-            if selected:
-                self._last_recheck = self._clock()
-            if before is None or (before.state, before.digest) != (status.state, status.digest):
-                self._round_changed = True
-            elif selected:
-                self.header.show_files_updated(status)
-            if selected and status.state == ResolveState.BUILDING:
-                self._request_recheck(SETTLE_RECHECK_MS, settle=True)
+            return
+        selected = firmware_id == self._selected_firmware_id()
+        if selected:
+            self._last_recheck = self._clock()
+        if before is None or (before.state, before.digest) != (status.state, status.digest):
+            self._round_changed = True
+        elif selected:
+            self.header.show_files_updated(status)
+        if selected and status.state == ResolveState.BUILDING:
+            self._request_recheck(SETTLE_RECHECK_MS, settle=True)
+
+    def _continue_round(self) -> None:
+        """The next firmware of the round, or its end: refresh what changed."""
         if self._round:
             QTimer.singleShot(0, self._next_in_round)
         elif self._round_changed:

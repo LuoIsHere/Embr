@@ -267,6 +267,32 @@ def test_no_refresh_under_a_half_typed_parameter(
     assert window._shown == shown  # the next check still finds the difference
 
 
+def test_an_error_in_one_firmware_does_not_end_the_checks(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, _ = _fixed(window, tmp_path)
+    second = window.library.create_firmware("other").id
+    tracker = window.library.tracker
+    real: Callable[..., TrackStatus] = tracker.check
+    checked: list[str] = []
+    failing = [first]
+
+    def check(firmware_id: str, **kwargs: bool) -> TrackStatus:
+        checked.append(firmware_id)
+        if firmware_id in failing:
+            failing.remove(firmware_id)
+            raise RuntimeError("unexpected")
+        return real(firmware_id, **kwargs)
+
+    monkeypatch.setattr(tracker, "check", check)
+    window._round = [first, second]
+    with pytest.raises(RuntimeError):  # reaches the crash log through sys.excepthook
+        window._next_in_round()
+    QApplication.processEvents()
+    assert checked[:2] == [first, second]
+    assert window._round == []  # later rounds and checks are not held back
+
+
 def test_the_refresh_comes_once_the_field_is_left(
     window: EmbrWindow, tmp_path: Path, clock: Clock
 ) -> None:

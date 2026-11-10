@@ -120,6 +120,32 @@ def test_first_resolve_takes_everything_from_the_build(tmp_path: Path) -> None:
     assert digest(again.firmware) == digest(first.firmware)
 
 
+def test_a_half_written_read_is_not_remembered_for_the_finished_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware, build = _follow(tmp_path)
+    app = app_file(build)
+    finished = app.read_bytes()[:-8] + b"race-tst"  # content no other test produces
+    write_newer(app, finished)
+    cache = FileCache()
+    real = cache.digest
+    pending = [finished[: len(finished) // 2]]
+
+    def digest_then_rewritten(path: Path) -> tuple[str, int]:
+        found = real(path)
+        if path.name == app.name and pending:
+            write_newer(app, pending.pop())  # a build truncates the file and writes again
+        return found
+
+    monkeypatch.setattr(cache, "digest", digest_then_rewritten)
+    resolve(firmware, _derive(build), cache, archive_dir=tmp_path / "archive", now=NOW)
+
+    write_newer(app, finished)  # the build is done: the content hashed first is back
+    again = _resolve(firmware, build)
+    assert again.state is ResolveState.UPDATED
+    assert again.marks[APP] is EntryMark.CHANGED
+
+
 def test_content_only_change_is_updated(tmp_path: Path) -> None:
     firmware, build = _follow(tmp_path)
     flip_last_byte(app_file(build))

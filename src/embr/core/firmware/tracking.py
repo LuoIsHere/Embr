@@ -427,16 +427,17 @@ def _classify(
         return _Derived(file, BLANK_NAME, EntryKind.OTADATA, key, sha, file.blank_size, None, False)
     name = file.path.name
     try:
-        sha = cache.sha256(file.path)
-        size = cache.size(file.path)
+        sha, size = cache.digest(file.path)
+        found = _sniffed.get((sha, table))
+        if found is None:  # hash, size and sniff from one read: the key matches the result
+            loaded = cache.load(file.path)
+            sha, size = loaded.sha256, loaded.size
+            found = sniff(loaded.data, name, table)
+            _sniffed[(sha, table)] = found
     except OSError:
         known = last_kinds.get(name)
         kind = EntryKind(known) if known else (file.expected or EntryKind.UNKNOWN)
         return _Derived(file, name, kind, entry_key(kind, name), "", 0, None, True)
-    found = _sniffed.get((sha, table))
-    if found is None:
-        found = sniff(cache.read(file.path), name, table)
-        _sniffed[(sha, table)] = found
     kind, header = found.kind, found.header
     return _Derived(file, name, kind, entry_key(kind, name), sha, size, header, False)
 

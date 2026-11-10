@@ -179,6 +179,32 @@ def test_fixed_firmware_with_a_changed_file_needs_confirmation(
     assert sha in {e.sha256 for e in context.firmware.get(firmware.id).entries}
 
 
+def test_a_file_changed_right_after_it_was_hashed_is_checked_again(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock, cache = Clock(), FileCache()
+    tracker = Tracker(context, cache=cache, clock=clock)
+    library = Library(context, tracker)
+    files = copy_files(build_files("esp32s3_hello"), tmp_path / "files")
+    firmware = fixed_firmware(library, files)
+    assert tracker.check(firmware.id).state is ResolveState.OK
+    app = files[2]
+    real = cache.digest
+    pending = [app]
+
+    def digest_then_changed(path: Path) -> tuple[str, int]:
+        found = real(path)
+        if path.name == app.name and pending:
+            flip_last_byte(pending.pop())  # changed between the hash and the stat
+        return found
+
+    monkeypatch.setattr(cache, "digest", digest_then_changed)
+    tracker.invalidate(firmware.id)
+    assert tracker.check(firmware.id).state is ResolveState.OK  # hashed before the change
+    clock.advance(10)
+    assert tracker.check(firmware.id).state is ResolveState.NEEDS_CONFIRMATION
+
+
 # ---- what the workspace shows follows the stored firmware ----------------------------------
 
 
