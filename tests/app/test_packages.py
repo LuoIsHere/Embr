@@ -69,7 +69,7 @@ from embr.core.package import (
     PackageError,
     read_manifest,
 )
-from embr.core.project import ProjectDefaults
+from embr.core.project import ProjectDefaults, ProjectStore
 from embr.core.storage import paths as storage_paths
 from embr.core.storage.ids import new_id
 from embr.core.storage.paths import AppPaths
@@ -867,6 +867,42 @@ def test_failed_import_removes_what_it_created(
     assert len(saved) == 2
     after = _state(other)
     assert (after.projects, after.firmwares) == (before.projects, before.firmwares)
+    assert other.context.projects.all() == []
+    assert other.context.firmware.all() == []
+
+
+@pytest.mark.parametrize("store", [FirmwareStore, ProjectStore], ids=["firmware", "project"])
+def test_an_import_failing_after_a_create_removes_it(
+    rig: Rig,
+    other: Rig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    store: type[FirmwareStore] | type[ProjectStore],
+) -> None:
+    if store is FirmwareStore:  # loose firmware: no project removal takes them along
+        destination, _ = _two_loose(rig, tmp_path)
+    else:
+        project_id, _ = _alpha(rig, tmp_path)
+        destination = tmp_path / "alpha.embr"
+        rig.packager.export_project(project_id, destination)
+    package = other.packager.open(destination)
+    original_save = store.save
+    saves: dict[str, int] = {}
+
+    def failing_save(self: Any, document: Any) -> None:
+        saves[document.id] = saves.get(document.id, 0) + 1
+        if saves[document.id] == 2:  # created and saved, then its details fail to save
+            raise OSError("disk full")
+        original_save(self, document)
+
+    monkeypatch.setattr(store, "save", failing_save)
+    try:
+        with pytest.raises(OSError, match="disk full"):
+            other.packager.import_package(package, destination.name, Placement(None))
+    finally:
+        monkeypatch.undo()
+        package.discard()
+
     assert other.context.projects.all() == []
     assert other.context.firmware.all() == []
 

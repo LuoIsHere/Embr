@@ -253,9 +253,14 @@ class Packager:
         created = self._ctx.projects.create(
             project.name, notes=project.notes, defaults=dataclasses.replace(project.defaults)
         )
-        created.tags = list(project.tags)
-        created.devices = list(project.devices)
-        self._ctx.projects.save(created)
+        try:
+            created.tags = list(project.tags)
+            created.devices = list(project.devices)
+            self._ctx.projects.save(created)
+        except BaseException:  # created but not yet known to the caller's rollback
+            with contextlib.suppress(KeyError, OSError):
+                self._ctx.projects.delete(created.id, self._ctx.firmware, delete_firmware=True)
+            raise
         return created
 
     def _create_firmware(
@@ -270,12 +275,17 @@ class Packager:
             after=firmware.after,
             erase_all=firmware.erase_all,
         )
-        created.notes = firmware.notes
-        created.tags = list(firmware.tags)
-        created.flash = dataclasses.replace(firmware.flash)
-        created.entries = [dataclasses.replace(e) for e in firmware.entries]
-        created.archived_from = origin
-        self._ctx.firmware.save(created)
+        try:
+            created.notes = firmware.notes
+            created.tags = list(firmware.tags)
+            created.flash = dataclasses.replace(firmware.flash)
+            created.entries = [dataclasses.replace(e) for e in firmware.entries]
+            created.archived_from = origin
+            self._ctx.firmware.save(created)
+        except BaseException:  # created but not yet known to the caller's rollback
+            with contextlib.suppress(KeyError, OSError):
+                self._ctx.firmware.delete(created.id)
+            raise
         return created
 
 

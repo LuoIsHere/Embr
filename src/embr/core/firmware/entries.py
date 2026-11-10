@@ -115,11 +115,18 @@ def set_address(entry: Entry, text: str) -> None:
         entry.address = entry.auto_address
         entry.address_source = detected
         return
-    if not _HEX.fullmatch(text):
-        raise AddressError(f"{text!r} is not a hexadecimal address")
-    value = int(text, 16)
+    value = parse_address(text)
     entry.address = value
     entry.address_source = detected if value == entry.auto_address else AddressSource.MANUAL
+
+
+def parse_address(text: str) -> int:
+    """A hexadecimal flash address as typed ("0x10000" or "10000", surrounding spaces
+    ignored). Anything else (empty, negative, other characters) raises AddressError."""
+    text = text.strip()
+    if not _HEX.fullmatch(text):
+        raise AddressError(f"{text!r} is not a hexadecimal address")
+    return int(text, 16)
 
 
 def copy_entry(entry: Entry) -> Entry:

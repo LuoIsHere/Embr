@@ -289,6 +289,24 @@ def test_a_renamed_env_offers_its_new_name(context: AppContext, tmp_path: Path) 
     assert stored.name == ESP32
 
 
+def test_an_env_from_extra_configs_is_followed(context: AppContext, tmp_path: Path) -> None:
+    rig = _rig(context, tmp_path)
+    text = (rig.root / "platformio.ini").read_text()
+    start = text.index(f"[env:{S3}]")
+    extra = rig.root / "boards.ini"
+    extra.write_text(text[start:], encoding="utf-8")
+    os.utime(extra, ns=((old := extra.stat().st_mtime_ns - 3600 * 10**9), old))
+    write_ini(rig.root, "[platformio]\nextra_configs = boards.ini\n\n" + text[:start])
+    [s3] = rig.library.import_pio(rig.root, [S3])
+    assert rig.tracker.check(s3.id).state is ResolveState.OK
+
+    renamed = text[start:].replace(f"[env:{S3}]", "[env:s3_v2]")  # an edit of that file only
+    extra.write_text(renamed, encoding="utf-8")
+    os.utime(extra, ns=(old + 10**9, old + 10**9))
+    status = rig.tracker.check(s3.id)
+    assert (status.state, status.env_gone) == (ResolveState.INCOMPLETE, True)
+
+
 def test_env_candidates_none_or_several(context: AppContext, tmp_path: Path) -> None:
     rig = _rig(context, tmp_path)
     [esp32] = rig.library.import_pio(rig.root, [ESP32])

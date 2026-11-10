@@ -19,6 +19,7 @@ from embr.core.firmware.entries import (
     enabled_partition_table,
     entry_from_file,
     in_folder,
+    parse_address,
     resolve_partitions,
     set_address,
 )
@@ -104,6 +105,13 @@ def test_set_address_rejects_non_hex() -> None:
         with pytest.raises(AddressError):
             set_address(entry, text)
         assert asdict(entry) == before
+
+
+def test_parse_address_takes_only_hexadecimal() -> None:
+    assert [parse_address(t) for t in ("0x10000", "10000", " 0X1a ")] == [0x10000, 0x10000, 0x1A]
+    for text in ("", "-0x10", "0x-10", "1_000", "+10", "0x", "10 00"):
+        with pytest.raises(AddressError):
+            parse_address(text)
 
 
 def test_clearing_partition_placed_address_restores_partition() -> None:

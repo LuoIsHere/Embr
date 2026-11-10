@@ -476,12 +476,15 @@ class Library:
             firmware = self._ctx.projects.create_firmware(
                 self._ctx.firmware, project_id, stem, device=device, source=Source.IDF_BUILD
             )
-        firmware.build_ref = BuildRef(str(build.build_dir))
-        self._ctx.firmware.save(firmware)
-        status = self._tracker.check(firmware.id, settle=False)
-        if status.state != ResolveState.OK:
+        try:  # whatever fails from here on, nothing stays created (as import_pio does)
+            firmware.build_ref = BuildRef(str(build.build_dir))
+            self._ctx.firmware.save(firmware)
+            status = self._tracker.check(firmware.id, settle=False)
+            if status.state != ResolveState.OK:
+                raise PlanError(f"{build.build_dir}: " + "; ".join(status.problems))
+        except BaseException:
             self.delete_firmware(firmware.id)
-            raise PlanError(f"{build.build_dir}: " + "; ".join(status.problems))
+            raise
         return self._ctx.firmware.get(firmware.id)
 
     def tracking_firmware_for(self, build_dir: Path) -> Firmware | None:

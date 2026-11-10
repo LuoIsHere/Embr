@@ -43,7 +43,7 @@ from embr.app.library import AddedFiles, AlreadyInFirmwareError, FirmwareFlag
 from embr.app.locations import entry_location, firmware_location
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
-from embr.core.firmware.entries import AddressError, FolderError
+from embr.core.firmware.entries import AddressError, FolderError, parse_address
 from embr.core.firmware.files import read_entry
 from embr.core.firmware.image_header import format_revision
 from embr.core.firmware.image_sniff import parse_partition_table
@@ -865,7 +865,7 @@ class EntriesTab(QWidget):
                 )
                 if text is None:
                     return
-                address = int(text, 16)
+                address = parse_address(text)  # AddressError is a ValueError
                 self._owner.library.add_attachment(firmware.id, Path(name), address=address)
         except (OSError, ValueError) as exc:
             self._owner.note("error", f"[entry] {exc}")

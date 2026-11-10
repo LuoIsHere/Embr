@@ -30,6 +30,7 @@ from embr.app.library import Library, PioPreview
 from embr.app.merging import MergeOptions, Merger
 from embr.app.packages import ExportCheck, default_group, default_package_name
 from embr.build import build_time
+from embr.core.firmware.entries import AddressError, parse_address
 from embr.core.firmware.import_idf import (
     IdfBuild,
     IdfBuildError,
@@ -851,8 +852,8 @@ def merge(
 
     def options() -> MergeOptions | None:
         try:
-            start = int(offset.text().strip(), 16)
-        except ValueError:
+            start = parse_address(offset.text())
+        except AddressError:
             return None
         return MergeOptions(start, pad.isChecked(), add.isChecked())
 

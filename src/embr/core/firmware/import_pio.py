@@ -8,7 +8,9 @@ writes into the project; pio is only used for the read-only `pio project config`
 Offline except run_pio(). May use image_sniff, never the reverse.
 """
 
+import configparser
 import contextlib
+import glob
 import json
 import re
 import subprocess
@@ -202,13 +204,55 @@ def built_envs_below(path: Path) -> tuple[EnvRef, ...]:
 
 
 def ini_envs(project_root: Path) -> tuple[str, ...]:
-    """Names of the `[env:<name>]` sections of platformio.ini in file order, read
-    offline (no interpolation). () when the file is missing or unreadable."""
-    try:
-        text = (project_root / PLATFORMIO_INI).read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    """Names of the `[env:<name>]` sections of platformio.ini and of the files its
+    `[platformio] extra_configs` adds (ini_files()), in file order, each name once; read
+    offline (no interpolation). () when platformio.ini is missing or unreadable."""
+    main, *extra = ini_files(project_root)
+    text = _ini_text(main)
+    if text is None:
         return ()
-    return tuple(m[1].strip() for m in _ENV_SECTION.finditer(text))
+    names = dict.fromkeys(m[1].strip() for m in _ENV_SECTION.finditer(text))
+    for path in extra:
+        if (more := _ini_text(path)) is not None:
+            names.update(dict.fromkeys(m[1].strip() for m in _ENV_SECTION.finditer(more)))
+    return tuple(names)
+
+
+def ini_files(project_root: Path) -> tuple[Path, ...]:
+    """platformio.ini, then the files `[platformio] extra_configs` names (one per line or
+    comma separated, relative to the project root, glob patterns expanded in sorted order,
+    as PlatformIO reads them). A plain name is listed even when it does not exist yet, so
+    creating it counts as a change. Only platformio.ini when it cannot be parsed."""
+    main = project_root / PLATFORMIO_INI
+    text = _ini_text(main)
+    if text is None:
+        return (main,)
+    parser = configparser.ConfigParser(
+        interpolation=None, strict=False, inline_comment_prefixes=(";",)
+    )
+    try:
+        parser.read_string(text)
+        value = parser.get("platformio", "extra_configs", fallback="")
+    except configparser.Error:
+        return (main,)
+    files: dict[Path, None] = {main: None}
+    for pattern in (p.strip() for p in re.split(r"[\n,]", value)):
+        if not pattern:
+            continue
+        if not any(c in pattern for c in "*?["):
+            files[project_root / pattern] = None  # an absolute name replaces the root
+            continue
+        if not Path(pattern).is_absolute():  # the root's own characters match literally
+            pattern = str(Path(glob.escape(str(project_root))) / pattern)
+        files.update(dict.fromkeys(Path(p) for p in sorted(glob.glob(pattern))))
+    return tuple(files)
+
+
+def _ini_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def is_built(ref: EnvRef) -> bool:
@@ -455,7 +499,7 @@ def read_env(
     framework = _framework(build_dir, config)
     notes: list[str] = []
     problems: list[str] = []
-    inputs = [ref.project_root / PLATFORMIO_INI, build_dir / IDEDATA, build_dir]
+    inputs = [*ini_files(ref.project_root), build_dir / IDEDATA, build_dir]
     contents: dict[Path, bytes | None] = {}
     images, why = read_idedata(ref)
     listed_boot: Path | None = None

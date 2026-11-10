@@ -32,7 +32,7 @@ from embr.app.library import (
     Library,
     TrackingEntriesError,
 )
-from embr.app.tracking import Tracker
+from embr.app.tracking import Tracker, TrackStatus
 from embr.core.firmware.entries import AddressError, FolderError, attachment_entry
 from embr.core.firmware.files import FileState
 from embr.core.firmware.import_idf import BuildMissingError
@@ -297,6 +297,23 @@ def test_import_idf_creates_nothing_for_an_unusable_build(
     with pytest.raises(error):
         library.import_idf(build)
     assert context.firmware.all() == []
+
+
+def test_import_idf_creates_nothing_when_the_check_fails(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library, tracker = _tracked(context)
+    build = idf_project("esp32s3_hello", tmp_path / "hello")
+
+    def failing_check(_firmware_id: str, **_kwargs: bool) -> TrackStatus:
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(tracker, "check", failing_check)
+    with pytest.raises(RuntimeError):
+        library.import_idf(build)
+    assert context.firmware.all() == []
+    monkeypatch.undo()
+    assert library.import_idf(build).build_ref is not None  # not "already followed"
 
 
 def test_entry_changes_on_tracking_firmware(context: AppContext, tmp_path: Path) -> None:

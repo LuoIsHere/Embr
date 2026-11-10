@@ -5,6 +5,7 @@ flasher_args.json, SOURCE.toml and the PIO merge command, never from Embr."""
 
 import json
 import os
+import re
 import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path, PureWindowsPath
@@ -44,6 +45,7 @@ from embr.core.firmware.import_pio import (
     env_ref,
     find_pio,
     ini_envs,
+    ini_files,
     is_built,
     locate_package,
     parse_config,
@@ -192,6 +194,48 @@ def test_ini_envs_and_built_envs(tmp_path: Path) -> None:
 
     (root / "platformio.ini").unlink()
     assert ini_envs(root) == () and built_envs_below(root) == ()
+
+
+def _move_last_env(root: Path, to: str) -> str:
+    """Move the last [env:...] section of platformio.ini into root/`to`; its env name."""
+    ini = root / "platformio.ini"
+    text = ini.read_text(encoding="utf-8")
+    *_, last = re.finditer(r"^\[env:([^\]]+)\]", text, re.MULTILINE)
+    (root / to).parent.mkdir(parents=True, exist_ok=True)
+    (root / to).write_text(text[last.start() :], encoding="utf-8")
+    ini.write_text(text[: last.start()], encoding="utf-8")
+    return last[1]
+
+
+def test_envs_of_extra_configs_are_declared(tmp_path: Path) -> None:
+    ref = _project(tmp_path, *MULTI_ESP32)
+    root = ref.project_root
+    moved = _move_last_env(root, "envs/s3.ini")
+    ini = root / "platformio.ini"
+    ini.write_text(
+        "[platformio]\nextra_configs =\n  envs/*.ini  ; every env file\n  local.ini\n"
+        + ini.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    assert ini_files(root) == (ini, root / "envs" / "s3.ini", root / "local.ini")
+    assert ini_envs(root) == ("esp32dev", moved)  # local.ini does not exist yet
+    assert env_ref(pio_build(root, moved)) == EnvRef(root, moved)
+    assert {r.env for r in built_envs_below(root)} == {"esp32dev", moved}
+
+
+def test_extra_configs_in_a_folder_named_like_a_pattern(tmp_path: Path) -> None:
+    root = tmp_path / "board [rev 2]"
+    (root / "envs").mkdir(parents=True)
+    (root / "envs" / "b.ini").write_text("[env:b]\n", encoding="utf-8")
+    (root / "envs" / "a.ini").write_text("[env:a]\n", encoding="utf-8")
+    (root / "platformio.ini").write_text(
+        "[platformio]\nextra_configs = envs/*.ini, envs/a.ini\n[env:main]\n", encoding="utf-8"
+    )
+    assert ini_envs(root) == ("main", "a", "b")  # sorted, each file and env once
+
+    (root / "platformio.ini").write_text("[platformio\nbroken", encoding="utf-8")
+    assert ini_files(root) == (root / "platformio.ini",)
 
 
 # ---- idedata.json ------------------------------------------------------------------------

@@ -36,6 +36,7 @@ from embr.core.firmware.import_pio import (
     PioBuildError,
     env_ref,
     ini_envs,
+    ini_files,
     is_built,
     read_env,
 )
@@ -394,14 +395,14 @@ class Tracker:
         then core tracking.resolve(). Env no longer in platformio.ini -> INCOMPLETE with
         env_gone (design D11; checked first, so also when its build folder is gone); build
         folder gone -> MISSING; an unreadable build -> INCOMPLETE. Inputs always include
-        platformio.ini, so editing it re-resolves."""
+        platformio.ini and its extra_configs files, so editing them re-resolves."""
         if firmware.build_ref is None or not firmware.build_ref.env:
             return missing(firmware, N_("No PlatformIO project and env")), ()
         ref = EnvRef(Path(firmware.build_ref.path), firmware.build_ref.env)
         # a folder has no stamp of its own: the files every build writes make a rebuild
         # after `pio run -t clean` (or a deleted build folder) visible
         fallback = (
-            ref.project_root / PLATFORMIO_INI,
+            *ini_files(ref.project_root),
             ref.build_dir,
             *(ref.build_dir / name for name in _app_names(firmware)),
             ref.build_dir / "partitions.bin",
