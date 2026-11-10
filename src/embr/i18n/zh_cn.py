@@ -716,6 +716,7 @@ TEXT: dict[str, str] = {
     "{path} could not be renamed ({detail}). Nothing else was changed.": "{path} 无法改名（{detail}）。未作其他改动。",
     "The records database cannot be read:\n\n{detail}\n\nBack up and start anew: the damaged file is copied to a place you choose, then Embr starts with an empty records database (flash records and the names of archived files stay in the copy; the archived files themselves are kept). Exit: nothing is changed.": "记录数据库无法读取：\n\n{detail}\n\n备份后新建：将损坏的文件复制到指定位置，然后以空的记录数据库启动 Embr（烧录记录与归档文件的名称记录保留在副本中，归档文件本身不受影响）。退出：不作任何改动。",
     "The database could not be copied to {target} ({detail}). Nothing was changed.": "数据库无法复制到 {target}（{detail}）。未作任何改动。",
+    "The damaged database was copied to {target} but could not be removed ({detail}). Close any program using it and try again.": "损坏的数据库已复制到 {target}，但无法删除（{detail}）。请关闭正在使用它的程序后重试。",
     "Rename and continue": "改名后继续",
     "Back up and start anew": "备份后新建",
     "Exit": "退出",

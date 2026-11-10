@@ -1510,8 +1510,14 @@ class EmbrWindow(FrameWindow):
         names = {f.id: f.name for f in self._context.firmware.all()}
         doomed = dialogs.clean_archive(self, self._archiver.usage(), names, self.select_firmware)
         if doomed:
-            self._archiver.clean(doomed)
-            self.note("warning", f"[archive] {len(doomed)} unreferenced files deleted")
+            cleaned = self._archiver.clean(doomed)
+            self.note("warning", f"[archive] {cleaned.deleted} unreferenced files deleted")
+            if cleaned.in_use:
+                self.note(
+                    "warning",
+                    f"[archive] {cleaned.in_use} files in use were kept;"
+                    " Clean archive tries them again next time",
+                )
 
     def _merge(self) -> None:
         firmware_id = self._selected_firmware_id()

@@ -30,6 +30,13 @@ class ArchiveUsage:
     nothing refers to it (Clean archive deletes exactly those)."""
 
 
+@dataclasses.dataclass(frozen=True)
+class Cleaned:
+    deleted: int
+    in_use: int
+    """Files that could not be removed; they stay in the archive and its index."""
+
+
 class Archiver:
     def __init__(
         self,
@@ -109,6 +116,8 @@ class Archiver:
             note=entry.note,
             source_firmware=firmware.name,
         )
+        if record.sha256 != entry.sha256:  # changed between the check and the copy
+            raise PlanError(f"{entry.name} changed while it was being archived")
         entry.file = _ARCHIVE + record.sha256
         self._ctx.firmware.save(firmware)
         self._tracker.invalidate(firmware_id)
@@ -138,10 +147,13 @@ class Archiver:
         """Archive files no firmware refers to (entries and user entries of all firmware)."""
         return self._ctx.archive.unreferenced(self._referenced())
 
-    def clean(self, sha256s: list[str]) -> None:
-        """Delete the given archive files; hashes still referenced are skipped."""
+    def clean(self, sha256s: list[str]) -> Cleaned:
+        """Delete the given archive files; hashes still referenced are skipped. A file that
+        cannot be removed (in use) stays indexed, so the next Clean archive lists it again."""
         referenced = self._referenced()
-        self._ctx.archive.delete(s for s in sha256s if s not in referenced)
+        wanted = {s for s in sha256s if s not in referenced}
+        in_use = self._ctx.archive.delete(wanted)
+        return Cleaned(deleted=len(wanted) - len(in_use), in_use=len(in_use))
 
     def _referenced(self) -> set[str]:
         return {

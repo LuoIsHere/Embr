@@ -25,7 +25,7 @@ from embr.core.storage.database import (
     open_database,
     schema_version,
 )
-from embr.core.storage.documents import Document, load_document, save_document
+from embr.core.storage.documents import Document, damage_reason, load_document, save_document
 from embr.core.storage.ids import is_id, new_id, unique_name
 from embr.core.storage.lock import InstanceLock
 from embr.core.storage.paths import AppPaths, clear_temp, is_writable, prepare
@@ -316,6 +316,20 @@ def test_newer_document_is_read_only_and_untouched(tmp_path: Path) -> None:
     loaded = load_document(path, current=1, migrations={}, backup_root=tmp_path / "backup")
     assert loaded.read_only
     assert loaded.data["future"] == 1
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("version", [0, 1], ids=["below 1", "no migration"])
+def test_a_document_that_cannot_be_migrated_is_not_backed_up(tmp_path: Path, version: int) -> None:
+    path = tmp_path / "doc.toml"
+    path.write_text(tomli_w.dumps({"schema_version": version}), encoding="utf-8")
+    original = path.read_bytes()
+    backup = tmp_path / "backup"
+    for _ in range(2):  # read again on the next refresh: still no backup
+        with pytest.raises(ValueError, match="schema_version") as raised:
+            load_document(path, current=2, migrations={}, backup_root=backup)
+        assert damage_reason(raised.value) == "empty, or not an Embr project or firmware file"
+    assert not backup.exists()
     assert path.read_bytes() == original
 
 

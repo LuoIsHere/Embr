@@ -76,23 +76,23 @@ def keep_damaged_copy(path: Path, backup_root: Path) -> Path | None:
 def load_document(
     path: Path, *, current: int, migrations: Mapping[int, Migration], backup_root: Path
 ) -> LoadedDocument:
-    """Read a TOML file. A lower schema_version is migrated step by step: the original file
-    is copied to backup_root/<timestamp>/ first, then the migrated document is written back.
-    A higher version is returned read-only and the file is not modified."""
+    """Read a TOML file. A lower schema_version is migrated step by step in memory; only
+    when that succeeds is the original copied to backup_root/<timestamp>/ and the migrated
+    document written back. A higher version is returned read-only and the file is not
+    modified. ValueError (nothing backed up or written) when schema_version is missing,
+    invalid or below 1, or a migration step is missing."""
     data: Document = tomllib.loads(path.read_text(encoding="utf-8"))
     version = data.get("schema_version")
-    if not isinstance(version, int) or isinstance(version, bool):
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise ValueError(f"{path}: missing or invalid schema_version")
     if version > current:
         return LoadedDocument(data, read_only=True, migrated_from=None)
     if version == current:
         return LoadedDocument(data, read_only=False, migrated_from=None)
+    upgraded = upgrade_document(data, current=current, migrations=migrations)
     shutil.copy2(path, backup_folder(backup_root) / path.name)
-    for step in range(version, current):
-        data = migrations[step](data)
-    save_document(path, data, current=current)
-    data["schema_version"] = current
-    return LoadedDocument(data, read_only=False, migrated_from=version)
+    save_document(path, upgraded, current=current)
+    return LoadedDocument(upgraded, read_only=False, migrated_from=version)
 
 
 class NewerDocumentError(ValueError):

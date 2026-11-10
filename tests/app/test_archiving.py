@@ -7,17 +7,20 @@ import pytest
 from app_testkit import (
     Clock,
     build_files,
+    copy_files,
     fixed_firmware,
+    flip_last_byte,
     idf_project,
     move_app,
 )
 
-from embr.app.archiving import Archiver
+from embr.app.archiving import Archiver, Cleaned
 from embr.app.chips import firmware_chips, firmware_mcus, image_chip, merge_problem
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
 from embr.app.tracking import Tracker
+from embr.core.archive import ArchiveName
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams, Source
 
@@ -113,6 +116,42 @@ def test_clean_deletes_only_unreferenced_files(context: AppContext) -> None:
     archiver.clean([orphan.sha256, app.sha256])
     assert not context.archive.has(orphan.sha256)
     assert context.archive.has(app.sha256)
+
+
+def test_clean_keeps_a_file_in_use(context: AppContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, archiver = _rig(context)
+    busy = context.archive.add(b"old build", original_name="old.bin")
+    free = context.archive.add(b"older build", original_name="older.bin")
+    real_unlink = Path.unlink
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        if self == context.archive.path(busy.sha256):
+            raise PermissionError(13, "in use by another program")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert archiver.clean([busy.sha256, free.sha256]) == Cleaned(deleted=1, in_use=1)
+    assert [f.sha256 for f in archiver.unreferenced()] == [busy.sha256]
+
+
+def test_archive_entry_refuses_content_changed_while_copied(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library, archiver = _rig(context)
+    firmware = fixed_firmware(library, copy_files(build_files("esp32s3_hello"), tmp_path / "f"))
+    app = next(e for e in firmware.entries if e.kind == EntryKind.APP)
+    real_add = context.archive.add
+
+    def add_after_a_change(source: Path | bytes, **names: str) -> ArchiveName:
+        if isinstance(source, Path):
+            flip_last_byte(source)  # rebuilt between the check and the copy
+        return real_add(source, **names)
+
+    monkeypatch.setattr(context.archive, "add", add_after_a_change)
+    with pytest.raises(PlanError, match="changed while it was being archived"):
+        archiver.archive_entry(firmware.id, app.id)
+    stored = next(e for e in library.firmware(firmware.id).entries if e.id == app.id)
+    assert stored.file == app.file  # still the file on disk
 
 
 def test_usage_lists_every_archive_file_with_its_firmware(context: AppContext) -> None:

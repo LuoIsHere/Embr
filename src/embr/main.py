@@ -44,6 +44,10 @@ DAMAGED_DATABASE = N_(
     "files themselves are kept). Exit: nothing is changed."
 )
 NOT_BACKED_UP = N_("The database could not be copied to {target} ({detail}). Nothing was changed.")
+NOT_REMOVED = N_(
+    "The damaged database was copied to {target} but could not be removed ({detail}). "
+    "Close any program using it and try again."
+)
 RENAME_AND_CONTINUE = N_("Rename and continue")
 BACK_UP_AND_START = N_("Back up and start anew")
 EXIT = N_("Exit")
@@ -214,10 +218,12 @@ def _replace_damaged_database(database: Path, detail: str) -> bool:
         except OSError as exc:
             _fatal(tr(NOT_BACKED_UP).format(target=target, detail=exc.strerror or exc))
             continue
-        for suffix in ("", "-journal", "-wal", "-shm"):
-            extra = database.with_name(database.name + suffix)
-            if extra.is_file():
-                extra.unlink()
+        try:  # the database itself last: a failure leaves it whole for the next try
+            for suffix in ("-journal", "-wal", "-shm", ""):
+                database.with_name(database.name + suffix).unlink(missing_ok=True)
+        except OSError as exc:  # in use by another program
+            _fatal(tr(NOT_REMOVED).format(target=target, detail=exc.strerror or exc))
+            continue
         return True
 
 

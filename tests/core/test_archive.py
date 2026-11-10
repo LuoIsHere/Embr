@@ -85,6 +85,38 @@ def test_same_content_is_stored_once_with_every_name(archive: Archive, tmp_path:
     assert [p.name for p in archive.directory.iterdir()] == [f"{sha}.bin"]  # no temp files
 
 
+def test_a_file_in_use_keeps_its_index_rows(
+    archive: Archive, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    busy = archive.add(b"busy", original_name="busy.bin")
+    gone = archive.add(b"gone", original_name="gone.bin")
+    archive.path(gone.sha256).unlink()  # already removed by hand: only its rows go
+    removable = archive.add(b"removable", original_name="removable.bin")
+    real_unlink = Path.unlink
+
+    def unlink(self: Path, missing_ok: bool = False) -> None:
+        if self == archive.path(busy.sha256):
+            raise PermissionError(13, "in use by another program")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert archive.delete([busy.sha256, gone.sha256, removable.sha256]) == [busy.sha256]
+
+    assert [f.sha256 for f in archive.files()] == [busy.sha256]  # listed again next time
+    assert archive.has(busy.sha256)
+    assert [n.original_name for n in archive.names(busy.sha256)] == ["busy.bin"]
+    assert archive.names(gone.sha256) == archive.names(removable.sha256) == []
+    assert not archive.path(removable.sha256).exists()
+
+
+def test_a_damaged_archive_file_is_written_again(archive: Archive) -> None:
+    first = archive.add(b"content", original_name="a.bin")
+    archive.path(first.sha256).write_bytes(b"damaged")
+    again = archive.add(b"content", original_name="a.bin")
+    assert again.sha256 == first.sha256
+    assert archive.path(first.sha256).read_bytes() == b"content"
+
+
 def test_unreferenced_and_delete(archive: Archive) -> None:
     kept = archive.add(b"kept", original_name="kept.bin")
     dropped = archive.add(b"dropped", original_name="dropped.bin")

@@ -567,6 +567,50 @@ def test_missing_source_raises_os_error(tmp_path: Path) -> None:
     assert not (tmp_path / "read").exists()
 
 
+CORRUPT_AT = {zipfile.ZIP_DEFLATED: 0, zipfile.ZIP_BZIP2: 0, zipfile.ZIP_LZMA: 4}
+"""Offset in the compressed data that makes the decompressor fail (deflate: a reserved
+block type; bzip2: the stream magic; LZMA: the properties byte)."""
+
+
+def _damaged(path: Path, method: int, damaged: Callable[[str], bool]) -> None:
+    """Re-zip `path` with `method` and break the compressed data of the members `damaged`
+    picks, leaving names, sizes and CRCs as they were."""
+    members = _members(path)
+    with zipfile.ZipFile(path, "w", method) as archive:
+        for name, data in members:
+            archive.writestr(name, data)
+    raw = bytearray(path.read_bytes())
+    with zipfile.ZipFile(path) as archive:
+        for info in archive.infolist():
+            if damaged(info.filename):
+                header = info.header_offset  # local header: 30 bytes, then name and extra
+                name_size = int.from_bytes(raw[header + 26 : header + 28], "little")
+                extra_size = int.from_bytes(raw[header + 28 : header + 30], "little")
+                offset = header + 30 + name_size + extra_size + CORRUPT_AT[method]
+                raw[offset] = 0xFF if raw[offset] != 0xFF else 0x00
+    path.write_bytes(bytes(raw))
+
+
+@pytest.mark.parametrize(
+    "method", [zipfile.ZIP_DEFLATED, zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA], ids=str
+)
+def test_damaged_compressed_data_is_a_package_error(
+    sample: Sample, tmp_path: Path, method: int
+) -> None:
+    package_file = _package(sample, tmp_path)
+    intact = package_file.read_bytes()
+    _damaged(package_file, method, lambda name: name.startswith("files/"))
+    folder = tmp_path / "read"
+    with pytest.raises(PackageError, match="cannot be read from the package"):
+        read_package(package_file, folder)
+    assert not folder.exists()
+
+    package_file.write_bytes(intact)
+    _damaged(package_file, method, lambda name: name == MANIFEST_NAME)
+    with pytest.raises(PackageError, match="cannot be read"):
+        read_manifest(package_file)
+
+
 def test_read_manifest_rejects_a_broken_manifest(sample: Sample, tmp_path: Path) -> None:
     package_file = _package(sample, tmp_path)
     _rezip(package_file, _broken_manifest(_members(package_file), sample))

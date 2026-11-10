@@ -25,9 +25,11 @@ class AppContext:
     archive: Archive
 
     def close(self) -> None:
-        """Save the settings and close the database."""
-        self.settings.save()
-        self.database.close()
+        """Save the settings and close the database (closed also when saving fails)."""
+        try:
+            self.settings.save()
+        finally:
+            self.database.close()
 
 
 def open_context(paths: AppPaths) -> AppContext:

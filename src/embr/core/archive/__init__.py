@@ -4,7 +4,6 @@ time something was archived under a name). Files are copied, never moved; the so
 never modified. Nothing is deleted except by delete() ("Clean archive").
 """
 
-import contextlib
 import datetime
 import hashlib
 import os
@@ -61,14 +60,15 @@ class Archive:
         source_firmware: str = "",
     ) -> ArchiveName:
         """Copy the content into the archive (written to a temporary name, then renamed, so
-        a crash never leaves a partial <sha256>.bin) unless that content is already stored,
-        and add a name record. Returns the name record. Raises OSError when the source
-        cannot be read."""
+        a crash never leaves a partial <sha256>.bin) unless that content is already stored
+        intact (a stored file whose content no longer matches its hash is replaced), and add
+        a name record. Returns the name record; its sha256 is the hash of what was stored.
+        Raises OSError when the source cannot be read."""
         data = source if isinstance(source, bytes) else source.read_bytes()
         sha = hashlib.sha256(data).hexdigest()
         stamp = self._clock().isoformat(timespec="seconds")
         target = self.path(sha)
-        if not target.is_file():
+        if not _holds(target, sha):  # missing, or damaged since: written again
             self.directory.mkdir(parents=True, exist_ok=True)
             partial = target.with_suffix(f".{os.getpid()}.part")
             partial.write_bytes(data)
@@ -128,12 +128,31 @@ class Archive:
         keep = set(referenced)
         return [f for f in self.files() if f.sha256 not in keep]
 
-    def delete(self, sha256s: Iterable[str]) -> None:
-        """Remove the files and their index rows (file and names). Unknown hashes are
-        ignored."""
-        for sha in set(sha256s):
+    def delete(self, sha256s: Iterable[str]) -> list[str]:
+        """Remove each file, then its index rows (file and names); a file already gone only
+        loses its rows. A file that cannot be removed (in use by another program, no
+        permission) keeps its rows, so it is listed again next time. Returns the hashes
+        whose file could not be removed. Unknown hashes are ignored."""
+        kept: list[str] = []
+        for sha in sorted(set(sha256s)):
+            try:
+                self.path(sha).unlink(missing_ok=True)
+            except OSError:
+                kept.append(sha)
+                continue
             with self._db:
                 self._db.execute("DELETE FROM archive_names WHERE sha256 = ?", (sha,))
                 self._db.execute("DELETE FROM archive_files WHERE sha256 = ?", (sha,))
-            with contextlib.suppress(FileNotFoundError):
-                self.path(sha).unlink()
+        return kept
+
+
+def _holds(path: Path, sha256: str) -> bool:
+    """`path` exists and its content hashes to `sha256`."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as f:
+            while chunk := f.read(1 << 20):
+                digest.update(chunk)
+    except OSError:  # missing or unreadable: written again
+        return False
+    return digest.hexdigest() == sha256

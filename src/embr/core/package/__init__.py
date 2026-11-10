@@ -20,6 +20,7 @@ import re
 import shutil
 import tomllib
 import zipfile
+import zlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +66,26 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _ARCHIVE = "archive:"
 _BLANK = "blank:"
 _CHUNK = 1 << 20
+
+
+def _decompress_errors() -> tuple[type[Exception], ...]:
+    """What a damaged member can raise while it is decompressed: deflate (zlib.error),
+    bzip2 (OSError), LZMA when this Python has it; an unsupported method raises
+    NotImplementedError, a RuntimeError."""
+    try:
+        import lzma
+    except ImportError:  # zipfile cannot read LZMA members either
+        return (zlib.error, OSError)
+    return (zlib.error, OSError, lzma.LZMAError)
+
+
+_ZIP_ERRORS: tuple[type[Exception], ...] = (
+    zipfile.BadZipFile,
+    EOFError,
+    RuntimeError,
+    *_decompress_errors(),
+)
+"""Reading a member of a damaged or truncated package raises one of these."""
 
 
 class PackageError(Exception):
@@ -445,15 +466,22 @@ def _extract(
     digest = hashlib.sha256()
     size = 0
     try:
-        with zf.open(info) as src, target.open("wb") as out:
-            while chunk := src.read(_CHUNK):
-                size += len(chunk)
-                if size > listed.size:
-                    break
-                digest.update(chunk)
-                out.write(chunk)
-    except (zipfile.BadZipFile, EOFError, RuntimeError) as exc:
+        src = zf.open(info)
+    except _ZIP_ERRORS as exc:
         raise PackageError(N_(f"{name}: cannot be read from the package ({exc})")) from exc
+    with src, target.open("wb") as out:  # an OSError writing `out` stays an OSError
+        while True:
+            try:
+                chunk = src.read(_CHUNK)
+            except _ZIP_ERRORS as exc:
+                raise PackageError(N_(f"{name}: cannot be read from the package ({exc})")) from exc
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > listed.size:
+                break
+            digest.update(chunk)
+            out.write(chunk)
     if size != listed.size or digest.hexdigest() != listed.sha256:
         raise PackageError(N_(f"{name}: content does not match the manifest"))
     return target
@@ -462,7 +490,7 @@ def _extract(
 def _read(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
     try:
         return zf.read(info)
-    except (zipfile.BadZipFile, EOFError, RuntimeError) as exc:
+    except _ZIP_ERRORS as exc:
         raise PackageError(N_(f"{info.filename} cannot be read ({exc})")) from exc
 
 
