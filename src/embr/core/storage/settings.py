@@ -63,6 +63,18 @@ class Settings:
         os.replace(tmp, self.path)
 
 
+def read_value(path: Path, section: str, key: str) -> str | None:
+    """One value of a settings.ini, read as Settings reads it but without opening it as
+    Settings: nothing is written or backed up (for the messages shown before the data is
+    open). None when the file, section or key is missing or the file is not valid INI."""
+    parser = _new_parser()
+    try:
+        parser.read_string(path.read_text(encoding="utf-8"), source=str(path))
+    except (OSError, UnicodeDecodeError, configparser.Error):
+        return None
+    return parser.get(section, key, fallback=None)
+
+
 def _new_parser() -> configparser.RawConfigParser:
     # "=" only: keys such as "10c4:ea60" (baud per VID:PID) contain the default ":" delimiter
     parser = configparser.RawConfigParser(interpolation=None, delimiters=("=",))

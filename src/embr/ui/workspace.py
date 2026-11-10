@@ -139,9 +139,9 @@ class Header(QWidget):
         self.row.setContentsMargins(0, 0, 0, 0)
         self.row.setSpacing(8)
         self._firmware: Firmware | None = None
-        self.notes = label("", tone="3")
+        self.notes = elided("", tone="3")  # ends in "…" at its actual width
         self.notes.setStyleSheet("font-size: 12px;")
-        self._notes_text = ""
+        self._notes_tip = ""
         self.files_updated = label("", tone="3")
         self.files_updated.setStyleSheet("font-size: 12px;")
         self.files_updated.hide()
@@ -214,9 +214,9 @@ class Header(QWidget):
             self.row.addWidget(tag(tr(f"Build updated {status.updated_at:%H:%M:%S}"), "info"))
         if firmware.read_only:
             self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
-        self._notes_text = firmware.notes or tr("no note — edit on the Parameters tab")
+        self.notes.set_full_text(firmware.notes or tr("no note — edit on the Parameters tab"))
+        self._notes_tip = firmware.notes or tr("No note yet. Edit it on the Parameters tab.")
         self.show_files_updated(status)
-        self.notes.setToolTip(firmware.notes or tr("No note yet. Edit it on the Parameters tab."))
         self.archive_action.setEnabled(
             status.state.flashable and any(e.file.startswith("path:") for e in firmware.entries)
         )
@@ -230,11 +230,8 @@ class Header(QWidget):
         width = NOTES_WIDTH
         if moment is not None:
             width -= self.files_updated.sizeHint().width() + NOTES_GAP
-        self.notes.setText(
-            self.notes.fontMetrics().elidedText(
-                self._notes_text, Qt.TextElideMode.ElideRight, width
-            )
-        )
+        self.notes.setMaximumWidth(width)
+        self.notes.setToolTip(self._notes_tip)
 
     def show_project(self, owner: Owner, project_id: str) -> None:
         self._firmware = None
@@ -254,7 +251,8 @@ class Header(QWidget):
             self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
         self.menu_button.hide()
         self.files_updated.hide()
-        self.notes.setText(project.notes or tr("no note — edit below"))
+        self.notes.setMaximumWidth(NOTES_WIDTH)
+        self.notes.set_full_text(project.notes or tr("no note — edit below"))
         self.notes.setToolTip(project.notes or tr("No note yet."))
 
 
@@ -323,7 +321,8 @@ CRUMB_MIN = 40
 HEADING_MIN = 80
 """The header's name never shrinks below this, unless its text is shorter."""
 NOTES_WIDTH = 900
-"""Widest the header's grey line gets, with the files' time."""
+"""Widest the header's grey line gets, with the files' time; narrower when the window
+leaves less room (the notes then end in "…" where they are cut)."""
 NOTES_GAP = 12
 """Between the files' time and the notes."""
 ROW_PX = 36
@@ -334,8 +333,9 @@ _MIN_COLUMN = 40
 COLUMN_WIDTHS = "entry_columns"
 """settings.ini [ui]: widths the user dragged the entries columns to, 0 = fit."""
 """Entry table: the Note column never gets narrower than this."""
-MCU_WIDEST = f"auto (ESP32-P4 v0{chr(0x2013)}v1)"
-"""Entry table: the longest MCU choice; the MCU column is sized to show it whole."""
+MCU_WIDEST = f"ESP32-P4 v0{chr(0x2013)}v1"
+"""Entry table: the longest MCU label; the MCU column is sized to show its choice
+"auto (<label>)" whole, in the current language."""
 _GIVE_WAY = ((3, 90), (5, 0), (4, 70), (6, 80), (2, 110), (1, 84))
 """(column, narrowest width) in the order columns give way; 0 hides the column."""
 """Entry table columns that shrink, in this order and down to these widths, when the
@@ -500,7 +500,8 @@ class EntriesTab(QWidget):
         if self._firmware is None:
             return
         header = self.table.horizontalHeader()
-        mcu = self.table.fontMetrics().horizontalAdvance(MCU_WIDEST) + 34  # frame, arrow
+        widest = tr(f"auto ({MCU_WIDEST})")
+        mcu = self.table.fontMetrics().horizontalAdvance(widest) + 34  # frame, arrow
         widths = {0: 28, 1: ADDRESS_PX + self._widest_tags(), 2: mcu, 3: self._name_width()}
         for column in (4, 5, 6):
             # a hidden section's size hint is 0, which would show the column again on the

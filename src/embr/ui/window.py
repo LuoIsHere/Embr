@@ -397,9 +397,12 @@ class EmbrWindow(FrameWindow):
         self.header.menu.popup(at)
 
     def select_project(self, project_id: str) -> None:
-        self._leave_selection()
+        """Show the project page. Selecting the shown project again (a click on its sidebar
+        row) keeps the hint of the last job, as select_firmware() does."""
+        if self._selection != ("project", project_id):
+            self._leave_selection()
+            self._last_outcome = None
         self._selection = ("project", project_id)
-        self._last_outcome = None
         self.changed()
 
     def identified_chip(self) -> str | None:
@@ -493,8 +496,9 @@ class EmbrWindow(FrameWindow):
                 self.note("dim", f"[firmware] renamed to '{renamed.name}'")
         elif name == "duplicate":
             copy = self._library.duplicate_firmware(firmware_id)
-            self._selection = ("firmware", copy.id)
             self.note("dim", f"[firmware] duplicated as '{copy.name}'")
+            self.select_firmware(copy.id)  # the usual rules of leaving the selection
+            return
         elif name == "move":
             placement = dialogs.move_firmware(
                 self, self._library, firmware.project_id, firmware.device
@@ -532,7 +536,12 @@ class EmbrWindow(FrameWindow):
             self._library.delete_firmware(firmware_id)
             self.note("warning", f"[firmware] '{firmware.name}' deleted")
             first = self._first_firmware()
-            self._selection = ("firmware", first) if first else None
+            if first is not None:
+                self.select_firmware(first)
+                return
+            self._leave_selection()
+            self._selection = None
+            self._last_outcome = None
         self.changed()
 
     # ---- refresh ----------------------------------------------------------------------
@@ -1528,7 +1537,7 @@ class EmbrWindow(FrameWindow):
         paths = [Path(e.file[5:]) for e in firmware.entries if e.file.startswith("path:")]
         folder = paths[0].parent if paths else self._context.paths.root
         request = dialogs.merge(
-            self, self._merger, firmware, folder / f"{firmware.name}_merged.bin"
+            self, self._merger, firmware, self._merger.default_output(firmware, folder)
         )
         if request is None:
             return

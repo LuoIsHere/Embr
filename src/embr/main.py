@@ -145,20 +145,13 @@ def run_gui() -> int:
 def _startup_language(settings_file: Path) -> None:
     """Language of the messages shown before the data is open: the stored choice when
     settings.ini can be read, else the system's (design doc §12.8)."""
-    import configparser
-
     from PySide6.QtCore import QLocale
 
+    from embr.core.storage.settings import read_value
     from embr.i18n import SETTINGS_KEY, Language, effective, set_language
 
-    choice = Language.SYSTEM
-    parser = configparser.ConfigParser(interpolation=None)
-    try:
-        parser.read_string(settings_file.read_text(encoding="utf-8"))
-        text = parser.get("ui", SETTINGS_KEY, fallback="")
-        choice = Language(text) if text in {m.value for m in Language} else Language.SYSTEM
-    except (OSError, UnicodeDecodeError, configparser.Error):
-        pass
+    text = read_value(settings_file, "ui", SETTINGS_KEY)  # the parser Settings uses
+    choice = Language(text) if text in {m.value for m in Language} else Language.SYSTEM
     set_language(effective(choice, QLocale.system().uiLanguages()))
 
 

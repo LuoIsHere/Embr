@@ -87,6 +87,19 @@ def test_the_files_time_is_shown_for_a_firmware_with_files(
     assert label.text() == f"Files updated {YESTERDAY_NOON:%m-%d %H:%M}"
 
 
+def test_long_notes_end_in_an_ellipsis_that_is_visible(window: EmbrWindow, tmp_path: Path) -> None:
+    firmware_id, _ = _fixed(window, tmp_path)
+    window.library.set_param(firmware_id, "notes", "word " * 400)
+    window.resize(1000, 700)  # the notes get well under NOTES_WIDTH
+    window.select_firmware(firmware_id)
+    _settle(window)
+
+    notes = window.header.notes
+    assert notes.text().endswith("…")
+    assert notes.fontMetrics().horizontalAdvance(notes.text()) <= notes.width()
+    assert notes.toolTip() == "word " * 400
+
+
 def test_the_files_time_is_hidden_without_files_and_on_a_project(
     window: EmbrWindow, tmp_path: Path
 ) -> None:

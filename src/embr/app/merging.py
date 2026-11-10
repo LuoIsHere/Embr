@@ -3,8 +3,9 @@ entries (attachments included) and flash parameters of any firmware; tracking fi
 their current resolution.
 """
 
+import contextlib
 import hashlib
-import shutil
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,7 +52,9 @@ class Merger:
         return subprocess.list2cmdline(["esptool", *args])
 
     def merge(self, firmware_id: str, output: Path, options: MergeOptions) -> Firmware | None:
-        """Write the merged image to `output` (via a temporary file in temp/, then moved).
+        """Write the merged image to `output` (a temporary file next to it, then renamed
+        over it, so a failure never leaves half a file; PlanError when `output` is a
+        folder).
         With add_to_list: a new MANUAL firmware named "<source> (merged)" (made unique) in
         the source's project and group, with the source's flash parameters and reset modes,
         folder = the output's folder, one enabled MERGED entry at target_offset referencing
@@ -61,6 +64,8 @@ class Merger:
         flashable, the enabled entries are not all for one MCU (app.chips.merge_problem(),
         whose message the dialog shows while its Merge button is disabled), or padding is
         asked without a known flash size; core.flasher.merge.MergeError propagates."""
+        if output.is_dir():
+            raise PlanError(N_(f"{output} is a folder; enter a file name"))
         firmware, chip, inputs, pad = self._inputs(firmware_id, options, write_files=True)
         data = merge_image(
             chip,
@@ -69,10 +74,7 @@ class Merger:
             target_offset=options.target_offset,
             pad_to_size=pad,
         )
-        partial = self._ctx.paths.temp / f"merge-{new_id()}.bin"
-        partial.write_bytes(data)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(partial, output)  # also across drives
+        _write_whole(output, data)
         if not options.add_to_list:
             return None
         created = self._ctx.firmware.create(
@@ -106,6 +108,28 @@ class Merger:
         ]
         self._ctx.firmware.save(created)
         return created
+
+    def default_output(self, firmware: Firmware, folder: Path) -> Path:
+        """folder/<name>_merged.bin, or _merged_2.bin, _3 ... when that file exists, so a
+        second merge does not overwrite the first one's file by default."""
+        candidate = folder / f"{firmware.name}_merged.bin"
+        number = 2
+        while candidate.exists():
+            candidate = folder / f"{firmware.name}_merged_{number}.bin"
+            number += 1
+        return candidate
+
+    def users(self, output: Path) -> list[str]:
+        """Names of the firmware with an entry referring to the file `output` (paths
+        compared as Windows does), in name order: replacing it changes their content."""
+        key = _path_key(output)
+        return sorted(
+            f.name
+            for f in self._ctx.firmware.all()
+            if any(
+                e.file.startswith("path:") and _path_key(Path(e.file[5:])) == key for e in f.entries
+            )
+        )
 
     def _source_path(self, firmware: Firmware) -> str:
         """project/group/firmware, as far as it has them."""
@@ -152,3 +176,21 @@ class Merger:
 def _settings(firmware: Firmware) -> FlashSettings:
     flash = firmware.flash
     return FlashSettings(flash.mode, flash.freq, flash.size)
+
+
+def _write_whole(output: Path, data: bytes) -> None:
+    """`data` to a temporary file in output's folder, then renamed over `output` (one
+    step on the same volume): `output` is either untouched or complete."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_name(f"{output.name}.{new_id()}.part")
+    try:
+        partial.write_bytes(data)
+        os.replace(partial, output)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            partial.unlink(missing_ok=True)
+        raise
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve()))

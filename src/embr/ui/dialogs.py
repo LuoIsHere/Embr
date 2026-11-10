@@ -821,9 +821,34 @@ def clean_archive(
     return [f.sha256 for f in unused] if accepted and unused else []
 
 
+def _replace_ok(parent: QWidget, path: Path, users: Sequence[str] = ()) -> bool:
+    """True when `path` does not exist yet or the user agrees to replace it; `users` are
+    the firmware referring to the file, named in the question."""
+    if not path.exists():
+        return True
+    lines = [
+        tr(
+            f"<b>{html.escape(path.name)}</b> already exists in "
+            f"{html.escape(str(path.parent))}. Replace it?"
+        )
+    ]
+    if users:
+        names = ", ".join(f"<b>{html.escape(name)}</b>" for name in users)
+        lines.append(
+            tr(
+                f"Used by firmware {names}, which will show 'content changed' after the "
+                "replacement."
+            )
+        )
+    accepted, _ = confirm(parent, tr("Replace file"), lines, tr("Replace"))
+    return accepted
+
+
 def merge(
     parent: QWidget, merger: Merger, firmware: Firmware, default_output: Path
 ) -> tuple[Path, MergeOptions] | None:
+    """Asks before replacing an existing file (naming the firmware that use it); a folder
+    as the output keeps Merge disabled."""
     dialog = Dialog(parent, tr("Merge to .bin"), tr("Merge"), danger=False)
     offset = QLineEdit("0x0")
     dialog.field(tr("Start offset (hex)"), offset)
@@ -863,6 +888,9 @@ def merge(
         if chosen is None:
             command.setText(tr("The start offset is not a hex number."))
             return
+        if output.text().strip() and Path(output.text().strip()).is_dir():
+            command.setText(tr("Save as is a folder; enter a file name."))
+            return
         try:
             command.setText(merger.command(firmware.id, Path(output.text()), chosen))
         except (PlanError, ValueError) as exc:  # e.g. checked entries for two chips
@@ -884,7 +912,14 @@ def merge(
     for box in (pad, add):
         box.toggled.connect(refresh)
     refresh()
-    dialog.check = lambda: options() is not None and bool(output.text().strip())
+
+    def target_ok() -> bool:
+        text = output.text().strip()
+        if not text or Path(text).is_dir():
+            return False
+        return _replace_ok(dialog, Path(text), merger.users(Path(text)))
+
+    dialog.check = lambda: options() is not None and target_ok()
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     chosen = options()
@@ -988,20 +1023,7 @@ def read_flash(
         path = Path(output.text().strip())
         if not output.text().strip() or path.is_dir():
             return False
-        if not path.exists():
-            return True
-        accepted, _ = confirm(
-            dialog,
-            tr("Replace file"),
-            [
-                tr(
-                    f"<b>{html.escape(path.name)}</b> already exists in "
-                    f"{html.escape(str(path.parent))}. Replace it?"
-                )
-            ],
-            tr("Replace"),
-        )
-        return accepted
+        return _replace_ok(dialog, path)
 
     dialog.check = lambda: parsed() is not None and target_ok()
     if dialog.exec() != QDialog.DialogCode.Accepted:

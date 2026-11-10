@@ -1,6 +1,7 @@
 """app/merging: merge a firmware into one raw image and optionally add it to the list
 (design doc §5 stage two "合成工具")."""
 
+import os
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +22,56 @@ from embr.core.firmware.model import FlashParams, Source
 def _rig(context: AppContext) -> tuple[Library, Merger]:
     tracker = Tracker(context, clock=Clock())
     return Library(context, tracker), Merger(context, tracker)
+
+
+def _hello(library: Library) -> str:
+    source = library.create_firmware("hello")
+    library.add_files(source.id, root_first(build_files("esp32s3_hello_v61")))
+    return source.id
+
+
+def test_the_default_output_keeps_earlier_merges(context: AppContext, tmp_path: Path) -> None:
+    library, merger = _rig(context)
+    firmware = library.firmware(_hello(library))
+    assert merger.default_output(firmware, tmp_path) == tmp_path / "hello_merged.bin"
+    (tmp_path / "hello_merged.bin").write_bytes(b"first")
+    (tmp_path / "hello_merged_2.bin").write_bytes(b"second")
+    assert merger.default_output(firmware, tmp_path) == tmp_path / "hello_merged_3.bin"
+
+
+def test_a_folder_is_no_output_and_users_are_named(context: AppContext, tmp_path: Path) -> None:
+    library, merger = _rig(context)
+    source_id = _hello(library)
+    folder = tmp_path / "out"
+    folder.mkdir()
+    with pytest.raises(PlanError, match="is a folder"):
+        merger.merge(source_id, folder, MergeOptions())
+    assert list(folder.iterdir()) == []
+
+    output = tmp_path / "hello_merged.bin"
+    merger.merge(source_id, output, MergeOptions())
+    assert merger.users(output) == ["hello (merged)"]
+    assert merger.users(tmp_path / "HELLO_MERGED.BIN") == ["hello (merged)"]  # as Windows
+    assert merger.users(tmp_path / "other.bin") == []
+
+
+def test_a_failed_write_keeps_the_previous_output(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library, merger = _rig(context)
+    source_id = _hello(library)
+    output = tmp_path / "out" / "hello_merged.bin"
+    output.parent.mkdir()
+    output.write_bytes(b"previous")
+
+    def full(*_args: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", full)
+    with pytest.raises(OSError, match="disk full"):
+        merger.merge(source_id, output, MergeOptions(add_to_list=False))
+    assert output.read_bytes() == b"previous"
+    assert list(output.parent.iterdir()) == [output]  # no partial file left
 
 
 def test_merge_writes_the_image_and_adds_a_firmware(context: AppContext, tmp_path: Path) -> None:

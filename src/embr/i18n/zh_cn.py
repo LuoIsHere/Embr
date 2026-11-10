@@ -336,6 +336,9 @@ TEXT: dict[str, str] = {
     "Save flash content": "保存 flash 内容",
     "Replace file": "替换文件",
     "<b>{0}</b> already exists in {1}. Replace it?": "<b>{0}</b> 已存在于 {1}。要替换吗？",
+    "Used by firmware {0}, which will show 'content changed' after the replacement.": "此文件被固件 {0} 使用，替换后会显示“内容已变化”。",
+    "Save as is a folder; enter a file name.": "“保存为”是一个文件夹，请填写文件名。",
+    "{0} is a folder; enter a file name": "{0} 是一个文件夹，请填写文件名",
     "Replace": "替换",
     # ---- window frame, log, project view, sidebar ----
     "Menu": "菜单",
