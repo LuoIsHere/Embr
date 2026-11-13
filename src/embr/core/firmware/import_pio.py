@@ -1,4 +1,4 @@
-"""Read a PlatformIO build (design doc §5 stage three, §12.5).
+"""Read a PlatformIO build.
 
 The user picks `<project>/.pio/build/<env>`. Images come from the env's idedata.json
 (written by the PlatformIO IDE; used only when it is not older than platformio.ini and
@@ -35,7 +35,7 @@ from embr.i18n import N_
 PLATFORMIO_INI = "platformio.ini"
 IDEDATA = "idedata.json"
 FLASHER_ARGS = "flasher_args.json"
-"""Written by the espidf framework with idf.py file names (remapped, design doc §5)."""
+"""Written by the espidf framework with idf.py file names (remapped)."""
 APP_FILE = "firmware.bin"
 BOOT_APP0 = "boot_app0.bin"
 BOOT_APP0_PIO_ADDRESS = 0xE000
@@ -112,12 +112,12 @@ class PioImages:
     application_offset: int
     app_name: str = APP_FILE
     """The app image's file name: prog_path's name with .bin (a custom PROGNAME), else
-    firmware.bin (design D12)."""
+    firmware.bin."""
 
 
 @dataclass(frozen=True)
 class PackageChoice:
-    """The Arduino framework package boot_app0.bin comes from (design doc §5 "框架包定位")."""
+    """The Arduino framework package boot_app0.bin comes from."""
 
     path: Path | None
     """Package root; None when nothing was found or the manual path is invalid."""
@@ -483,7 +483,7 @@ def read_env(
       outputs (bootloader -> bootloader.bin, partition table -> partitions.bin, app ->
       the app image, otadata -> ota_data_initial.bin, others by file name).
     A scan takes the newest .bin that reads as an app; older app images are left out and
-    noted (a custom PROGNAME leaves the old firmware.bin behind until a clean, design D12).
+    noted (a custom PROGNAME leaves the old firmware.bin behind until a clean).
     Arduino boot_app0.bin (from the idedata path or locate_package()): placed at the
     table's otadata partition with a note when that is not 0xE000; dropped (noted) when the
     table has no otadata partition; a blank otadata of the partition's size when no package
@@ -705,7 +705,7 @@ def _kind_by_name(name: str) -> EntryKind | None:
 def _newest_app(
     build_dir: Path, notes: list[str], contents: dict[Path, bytes | None]
 ) -> tuple[Path, tuple[Path, ...]]:
-    """(app image, older app images) of a scanned build folder (design D12): of the .bin
+    """(app image, older app images) of a scanned build folder: of the .bin
     files that read as an app, the newest; the older ones are noted. firmware.bin when none
     reads as an app (then reported missing or unreadable). Files read go into `contents`."""
     apps: list[tuple[int, Path]] = []

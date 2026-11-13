@@ -1,4 +1,4 @@
-"""When this copy of Embr was packaged (design doc §12 item 22): Embr.spec writes the UTC
+"""When this copy of Embr was packaged: Embr.spec writes the UTC
 time into resources/build.txt of the bundle; a source checkout has no such file."""
 
 from importlib.resources import files

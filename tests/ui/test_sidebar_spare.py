@@ -1,6 +1,6 @@
 """The spare row at the end of the sidebar fills the empty space below the other rows, so
 dropping a firmware or files anywhere there shows the highlight on all of it; when the list
-scrolls it keeps a firmware row's height (plan #11)."""
+scrolls it keeps a firmware row's height."""
 
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication, QTreeWidgetItem

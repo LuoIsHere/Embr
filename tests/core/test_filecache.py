@@ -1,5 +1,4 @@
-"""core/firmware/filecache: stat-only fingerprints and a hash cache keyed by size and mtime
-(design doc §3.4 "检测时机")."""
+"""core/firmware/filecache: stat-only fingerprints and a hash cache keyed by size and mtime."""
 
 import hashlib
 import os

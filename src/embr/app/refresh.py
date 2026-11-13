@@ -1,4 +1,4 @@
-"""Which firmware the periodic re-check visits (design doc §3.4 "检测时机"). No Qt: the UI
+"""Which firmware the periodic re-check visits. No Qt: the UI
 runs a timer every REFRESH_SECONDS, asks round() for the ids and checks them one per event
 loop pass, skipping rounds while a job runs or the window is minimized.
 """

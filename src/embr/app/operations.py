@@ -1,5 +1,5 @@
 """Identify, flash, erase and read_flash jobs: one worker process each, a log segment each,
-a record for every flash, erase and read_flash (design doc §3.3, §4.1, §7.2). When a flash,
+a record for every flash, erase and read_flash. When a flash,
 erase or read_flash job got the board's MAC (InfoEvent), its finished segment is also
 appended to logs/boards/<mac>.log; identify segments and jobs without a MAC stay in the
 daily log only.
@@ -264,7 +264,7 @@ class Operations:
         output: Path | None = None,
         import_firmware: bool = True,
     ) -> None:
-        """Start a read-flash job writing to temp/ (design doc §12 item 3). On OK the
+        """Start a read-flash job writing to temp/. On OK the
         content is moved to `output` (replacing an existing file; folders created), and
         with `import_firmware` it is also archived and a fixed MANUAL firmware is created
         in the given project and group: one enabled MERGED entry at `address`

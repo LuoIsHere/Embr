@@ -1,4 +1,4 @@
-"""The checklist in the connection panel (design doc §6.1): what can be decided before
+"""The checklist in the connection panel: what can be decided before
 connecting, plus what the last identification says. The worker repeats the chip-side
 checks in its own connection; this list is for the user, before pressing Flash.
 """
@@ -82,7 +82,7 @@ def preflight(
        only when the chip matches), flash size (WARN when the declared size differs from
        the detected one), security (REFUSE when secure download mode, flash encryption or
        secure boot is on)
-    Entries are taken per chip (design doc §12 item 13): once identified, items 1, 2 and 4
+    Entries are taken per chip: once identified, items 1, 2 and 4
     look only at the entries for the identified chip (app.chips.for_chip()), so "No entries
     enabled" also covers a board none of the entries are for; before that, item 1 checks
     each chip's entries separately and item 2 all enabled entries."""
@@ -153,11 +153,10 @@ def flash_ready(
     *,
     quick_chip_known: bool = False,
 ) -> bool:
-    """Whether the Flash button may be pressed (design doc §12 item 5): a port is selected,
-    the last identification is a snapshot of that port (same device name), and no item
-    refuses. quick_chip_known (Quick flash on, and the firmware has one MCU to plan for,
-    design D7): no identification needed. The flash job still identifies the chip again in
-    its own connection and refuses there what does not fit."""
+    """Whether the Flash button may be pressed: a port is selected, the last identification is a
+    snapshot of that port (same device name), and no item refuses. quick_chip_known (Quick flash on,
+    and the firmware has one MCU to plan for): no identification needed. The flash job still
+    identifies the chip again in its own connection and refuses there what does not fit."""
     if port is None or not can_flash(items):
         return False
     return quick_chip_known or (snapshot is not None and snapshot.port.device == port.device)

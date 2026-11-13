@@ -1,6 +1,6 @@
 """Interface flows: Merge to .bin, Archive this version, archiving an entry and Clean
-archive, in English and Simplified Chinese (design doc §3.4 归档, §5 合成工具, §6.1,
-§12 items 3, 13, 15; §8.3 target file exists or is not writable)."""
+archive, in English and Simplified Chinese, including a merge target
+that exists or is not writable."""
 
 import shutil
 from collections.abc import Callable
@@ -140,7 +140,7 @@ def test_merge_to_bin(
 def test_merge_target_exists_or_is_not_writable(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§8.3 abnormal operations, as decided in §5 合成工具 (2026-10-31): an existing target
+    """Abnormal operations: an existing target
     file of Merge to .bin… is overwritten directly, without a Replace file question, and
     nothing else changes; a folder that cannot be written gives an error, no firmware and
     no crash."""
@@ -210,7 +210,7 @@ def test_merge_target_exists_or_is_not_writable(
 def test_archive_this_version(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.4 归档此版本: a new archived firmware next to the tracking one (same project and
+    """Archive this version: a new archived firmware next to the tracking one (same project and
     group), named "<name> (archived YYYY-MM-DD)", its files copied into data/archive/; the
     tracking firmware and the build files are unchanged."""
     build = kit.idf_build_copy("esp32s3_hello", tmp_path / "proj")
@@ -264,7 +264,7 @@ def test_archive_entry_and_clean_archive(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
     """Archive this file (entry menu) points the entry at data/archive/; Clean archive
-    first shows what the archive holds and who refers to it (§12 item 15), deletes only
+    first shows what the archive holds and who refers to it, deletes only
     unreferenced files after a red confirmation."""
     app = embr(language=language)
     window, root = app.window, app.paths.root

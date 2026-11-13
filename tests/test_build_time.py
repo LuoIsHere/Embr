@@ -1,4 +1,4 @@
-"""embr.build.build_time() (design doc §12 item 22): the packaged build carries
+"""embr.build.build_time(): the packaged build carries
 embr/resources/build.txt, written by Embr.spec at packaging time; a source checkout has
 none, and About then says "development build".
 

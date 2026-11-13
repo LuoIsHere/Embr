@@ -1,6 +1,6 @@
-"""app/tracking: when sources are read again, auto-follow, BUILDING and the flash-time check
-(design doc §3.4 "检测时机"). The tracker clock is injected; build files are written an
-hour in the past, so only files touched on purpose look recent."""
+"""app/tracking: when sources are read again, auto-follow, BUILDING and the flash-time check. The
+tracker clock is injected; build files are written an hour in the past, so only files touched on
+purpose look recent."""
 
 import datetime
 import hashlib

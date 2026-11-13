@@ -1,4 +1,4 @@
-"""i18n: interface text translation (design doc §12 item 10, §12.5). The Chinese table is
+"""i18n: interface text translation. The Chinese table is
 the real one, so tr() checks are written against whatever it holds; an empty table makes
 those loops pass vacuously until the translation lands."""
 

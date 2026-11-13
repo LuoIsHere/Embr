@@ -61,7 +61,7 @@ LOW_PRIORITY = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
 idf.py starts, has no job limit of its own)."""
 """A full build from scratch (a new target or ESP-IDF version) on Windows."""
 SETTLE_S = 2.6
-"""Embr treats files modified within 2 s as "being built" (design doc §3.4)."""
+"""Embr treats files modified within 2 s as "being built"."""
 ACTIVATION_FAILED = "EMBR: the ESP-IDF activation script left no idf.py"
 ACTIVATION_EXIT = 97
 """Idf.run's exit code (with ACTIVATION_FAILED) when the activation script left no idf.py."""

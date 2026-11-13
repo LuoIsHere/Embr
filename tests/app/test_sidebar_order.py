@@ -1,4 +1,4 @@
-"""The sidebar order of projects and groups (plan #9, design D6): projects by name until
+"""The sidebar order of projects and groups: projects by name until
 the first drag, then as dragged (settings.ini [ui] project_order) with new projects after
 them; groups in the project's own order."""
 

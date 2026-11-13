@@ -1,4 +1,4 @@
-"""Archive use cases (design doc §3.4 "归档此版本", "归档"): archive a version of a firmware,
+"""Archive use cases: archive a version of a firmware,
 archive a single entry, clean unreferenced archive files.
 """
 

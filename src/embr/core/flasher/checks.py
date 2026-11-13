@@ -1,4 +1,4 @@
-"""Pre-write checks (design doc §4.2, §4.3). Pure functions; the worker feeds them the
+"""Pre-write checks. Pure functions; the worker feeds them the
 state it reads from the chip, tests feed them injected state."""
 
 import hashlib

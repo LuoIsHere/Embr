@@ -1,5 +1,5 @@
-"""FlashPlan from a firmware plus the port and baud chosen in the connection panel
-(design doc §7.2). The worker call and the equivalent command line come from the same plan.
+"""FlashPlan from a firmware plus the port and baud chosen in the connection panel. The worker call
+and the equivalent command line come from the same plan.
 """
 
 from pathlib import Path
@@ -127,7 +127,7 @@ def preview_command(
     """Equivalent esptool command for the command bar; writes nothing. Without a port it
     uses PREVIEW_PORT on a UART bridge. `chip` and `revision` are the identified board's,
     as for assemble_plan(). A firmware that cannot be planned gives "" (so a multi-chip firmware
-    shows no command until a board is identified, design doc §12 item 13)."""
+    shows no command until a board is identified)."""
     if port is None:
         port = PortInfo(PREVIEW_PORT, None, None, None, "", ConnectionType.UART_BRIDGE, None)
     try:

@@ -1,4 +1,4 @@
-"""app/identify: clearing rules of the last identification (design doc §4.1)."""
+"""app/identify: clearing rules of the last identification."""
 
 import dataclasses
 import datetime

@@ -1,4 +1,4 @@
-"""`pio project config` for PIO firmware, run in the background (design doc §12.5).
+"""`pio project config` for PIO firmware, run in the background.
 
 The query is read-only and takes about two seconds, so the tracker never waits for it:
 it asks for the cached result, which is refreshed in a worker thread whenever

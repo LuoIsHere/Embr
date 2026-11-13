@@ -1,5 +1,5 @@
-"""Interface flows: projects and groups, in English and Simplified Chinese (design doc
-§3.1 names, groups, defaults, deletion; §6.1 project overview; §8.2 core/project).
+"""Interface flows: projects and groups, in English and Simplified Chinese (names,
+groups, defaults, deletion and the project overview).
 
 Each test drives the real window through the New menu, the project overview and its
 dialogs, then checks what the window shows and what is on disk (data/projects,
@@ -53,7 +53,7 @@ def test_project_create_rename_and_unique_names(embr: Start, language: Language)
         assert tr(text) in head, head
     assert _project(root, "Alpha")["notes"] == "first notes"
 
-    ui.new_project(window, "Alpha")  # same name: a numeric suffix (design doc §3.1)
+    ui.new_project(window, "Alpha")  # same name: a numeric suffix
     kit.wait_log(window, "[project] created 'Alpha (2)'")
     assert sorted(kit.sidebar_names(window, "project")) == ["Alpha", "Alpha (2)"]
 
@@ -118,7 +118,7 @@ def test_project_odd_and_overlong_names(embr: Start, language: Language) -> None
 @ui.LANGUAGES
 def test_project_notes_and_defaults(embr: Start, language: Language) -> None:
     """Notes are saved when the field loses the focus; the reset modes are copied once into
-    new firmware, which starts with erase_all off (design doc §3.1 项目的默认值)."""
+    new firmware, which starts with erase_all off."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     ui.new_project(window, "Defaults")
@@ -252,7 +252,7 @@ def test_delete_project_keeps_or_deletes_its_firmware(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
     """Default: the firmware become standalone; with the check box they are deleted too.
-    Archive files stay either way (design doc §3.1 删除)."""
+    Archive files stay either way."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     files = kit.hello_files("esp32s3_hello", tmp_path / "bins")
@@ -306,7 +306,7 @@ def test_delete_project_keeps_or_deletes_its_firmware(
     _ = QCheckBox
 
 
-# ---- sidebar order (plan #9, #20) -------------------------------------------------------
+# ---- sidebar order ----------------------------------------------------------------------
 
 
 def _mouse(window: Any, kind: QEvent.Type, at: QPoint, *, held: bool = True) -> None:

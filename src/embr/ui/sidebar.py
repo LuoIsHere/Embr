@@ -1,5 +1,4 @@
-"""Sidebar: search, New menu, project / group / firmware tree with drag and drop
-(design doc §6.1 "左侧边栏")."""
+"""Sidebar: search, New menu, project / group / firmware tree with drag and drop."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -75,7 +74,7 @@ class Node:
 
 @dataclass
 class _Sort:
-    """A reorder in progress (plan #9, #20)."""
+    """A reorder in progress."""
 
     project_id: str | None
     """The project whose groups are reordered; None: the projects are."""
@@ -172,9 +171,9 @@ class Row(QWidget):
 class FirmwareTree(QTreeWidget):
     """Rows are QTreeWidgetItems carrying a Node, drawn with Row widgets. Dragging a
     firmware row emits move_requested on a valid drop; the tree itself never moves items.
-    Files dragged in from Explorer emit files_dropped (design doc §12 item 19): on a
+    Files dragged in from Explorer emit files_dropped: on a
     project, group or the standalone header, or on a firmware row. Dragging a project row,
-    or a named group row within its project, reorders them (plan #9, #20; module reorder):
+    or a named group row within its project, reorders them (module reorder):
     projects_reordered / groups_reordered on a drop that changes the order. Not while
     `sortable` is off (a search shows part of the list) nor for the groups of a project in
     `read_only`; Esc or a drop outside the allowed area puts everything back."""
@@ -309,7 +308,7 @@ class FirmwareTree(QTreeWidget):
     def _target(self, pos: QPoint, *, files: bool = False) -> QTreeWidgetItem | None:
         """The row a drop lands on: a project, group or the standalone header; for files
         also a firmware row. The empty space below the rows counts as the spare row at the
-        end, a standalone drop target (design doc §12 item 19)."""
+        end, a standalone drop target."""
         item = self.itemAt(pos)
         if item is None:
             return self._spare_row()

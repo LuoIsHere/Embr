@@ -1,4 +1,4 @@
-"""The Quick flash switch in the connection panel (design D7): stored in settings.ini, Flash
+"""The Quick flash switch in the connection panel: stored in settings.ini, Flash
 without Connect & identify for a firmware with one MCU, the hints above Flash, Ctrl+Enter,
 the switch while a job runs and its row in a narrow column. Driven offscreen on a real
 window; no job is ever started."""

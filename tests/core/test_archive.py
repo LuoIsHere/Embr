@@ -1,4 +1,4 @@
-"""core/archive: content-addressed copies with name records (design doc §3.4 "归档")."""
+"""core/archive: content-addressed copies with name records."""
 
 import datetime
 import hashlib

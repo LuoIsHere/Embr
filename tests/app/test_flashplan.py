@@ -1,4 +1,4 @@
-"""app/flashplan: FlashPlan from a firmware and the connection panel (design doc §7.2)."""
+"""app/flashplan: FlashPlan from a firmware and the connection panel."""
 
 import dataclasses
 import hashlib
@@ -134,7 +134,7 @@ def test_entry_without_address_cannot_be_planned(
 def test_chip_without_stub_is_planned_without_it(
     library: Library, context: AppContext, tmp_path: Path, chip: str, stub: bool
 ) -> None:
-    # esptool 5.3.1 has no flasher stub for ESP32-H21 (design doc §12.1)
+    # esptool 5.3.1 has no flasher stub for ESP32-H21
     data = tmp_path / "data.bin"
     data.write_bytes(b"" * 64)
     firmware = library.create_firmware("fw")
@@ -147,7 +147,7 @@ def test_chip_without_stub_is_planned_without_it(
     assert command and ("--no-stub" in command) is not stub
 
 
-# ---- several chips in one firmware (§12 item 13) ------------------------------------------
+# ---- several chips in one firmware ------------------------------------------
 
 
 @pytest.mark.parametrize(

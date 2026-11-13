@@ -1,4 +1,4 @@
-"""Firmware and entry model (design doc §3.1, §3.2). References a project only by id."""
+"""Firmware and entry model. References a project only by id."""
 
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -56,9 +56,9 @@ class Entry:
     auto_added: bool = False
     """Blank otadata added automatically."""
     chip: str | None = None
-    """MCU chosen by hand for a file that names no chip in an image header (partition
-    table, data images, non-ESP files); ignored when the header names one (design doc §12
-    item 13). See app.chips for the MCU an entry is flashed to."""
+    """MCU chosen by hand for a file that names no chip in an image header (partition table, data
+    images, non-ESP files); ignored when the header names one. See app.chips for the MCU an entry is
+    flashed to."""
     chip_line: str = ""
     """Revision line chosen with `chip` (chipinfo.REVISION_LINES, e.g. "v3" for ESP32-P4);
     "" for chips without lines."""
@@ -114,7 +114,7 @@ class Firmware:
     build_ref: BuildRef | None = None
     folder: str = ""
     """Fixed firmware: the folder of the first file added; later "path:" entries must lie
-    in it or below it (design doc §12 item 8). "" until a file is added; kept when that
+    in it or below it. "" until a file is added; kept when that
     file is removed, changed only by Library.relocate_folder()."""
     framework_pkg: str = ""
     archived_from: str = ""
@@ -148,9 +148,8 @@ class ReadOnlyFieldError(ValueError):
 
 
 def editable_params(firmware: Firmware) -> frozenset[str]:
-    """Fixed (manual, archived): all PARAMS but chip, which comes from the entries
-    (design doc §12 item 13). IDF tracking: erase_all, tags, notes. PIO tracking: before,
-    after, erase_all, tags, notes."""
+    """Fixed (manual, archived): all PARAMS but chip, which comes from the entries. IDF tracking:
+    erase_all, tags, notes. PIO tracking: before, after, erase_all, tags, notes."""
     if firmware.source == Source.IDF_BUILD:
         return _IDF_PARAMS
     if firmware.source == Source.PIO_BUILD:

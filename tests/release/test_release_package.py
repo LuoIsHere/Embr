@@ -1,4 +1,4 @@
-"""The release package (design doc §7.5, §12 item 22), built for real: one run of
+"""The release package, built for real: one run of
 `scripts/package_release.py` (PyInstaller included) for the module, then the zip is
 checked: its layout, build.txt (packaging time, UTC), THIRD_PARTY_NOTICES with a full
 license text for everything bundled, ESPTOOL.txt, no private strings, and the extracted

@@ -1,6 +1,6 @@
-"""app/checklist.flash_ready() with Quick flash (design D7): quick_chip_known drops only the
-identification; a port and no refusing item are still needed. The default keeps the rule
-of design doc §12 item 5."""
+"""app/checklist.flash_ready() with Quick flash: quick_chip_known drops only the
+identification; a port and no refusing item are still needed. Without Quick flash
+the selected port must be identified as well."""
 
 import dataclasses
 

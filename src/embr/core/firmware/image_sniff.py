@@ -1,6 +1,5 @@
-"""Classify bin files, detect merged images and parse partition tables (design doc §5,
-stage one). Offline only; never opens a serial port. Does not depend on the firmware
-model or on the importers."""
+"""Classify bin files, detect merged images and parse partition tables. Offline only;
+never opens a serial port. Does not depend on the firmware model or on the importers."""
 
 import hashlib
 import struct

@@ -1,4 +1,4 @@
-"""app/checklist: the checks shown before pressing Flash (design doc §4, §6.1)."""
+"""app/checklist: the checks shown before pressing Flash."""
 
 import dataclasses
 from pathlib import Path
@@ -185,5 +185,5 @@ FINE = [CheckItem(PASS, "a"), CheckItem(WARN, "b"), CheckItem(LATER, "c")]
 def test_flash_ready(
     items: list[CheckItem], identified: IdentifySnapshot | None, port: PortInfo | None, ready: bool
 ) -> None:
-    # Flash needs an identification of the selected port and no refusal (§12 item 5)
+    # Flash needs an identification of the selected port and no refusal
     assert flash_ready(items, identified, port) is ready

@@ -1,6 +1,5 @@
-"""Merge entries into one raw image with esptool's merge_bin (design doc §5 stage two
-"合成工具"). Offline, in the main process. Output is identical to the esptool command line
-from merge_args() with the same esptool version.
+"""Merge entries into one raw image with esptool's merge_bin. Offline, in the main process. Output
+is identical to the esptool command line from merge_args() with the same esptool version.
 """
 
 import itertools

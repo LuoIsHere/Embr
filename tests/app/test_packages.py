@@ -1,4 +1,4 @@
-"""app/packages: .embr export and import (design doc §5 阶段四, §12.6). Packages go from
+"""app/packages: .embr export and import. Packages go from
 the `context` data folder to `other`, a second data folder standing in for another
 computer, unless a test needs both ends in one folder."""
 

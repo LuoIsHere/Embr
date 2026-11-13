@@ -1,4 +1,4 @@
-"""In-app dialogs (design doc §6.1 "对话框"): Esc closes, destructive buttons are red and
+"""In-app dialogs: Esc closes, destructive buttons are red and
 say what they affect."""
 
 import contextlib
@@ -52,7 +52,7 @@ REPOSITORY = "https://github.com/LuoIsHere/Embr"
 RELEASES = "https://github.com/LuoIsHere/Embr/releases"
 COPYRIGHT = "Copyright © 2026 @LuoIsHere"
 DEVELOPMENT_BUILD = N_("development build")
-"""About's build time when running from source (design doc §12 item 22)."""
+"""About's build time when running from source."""
 
 
 class Dialog(QDialog):
@@ -375,7 +375,7 @@ def _open_url(href: str) -> None:
     QDesktopServices.openUrl(QUrl(href))
 
 
-# ---- stage two: IDF import, archive, merge, erase, read flash, board records ----------
+# ---- IDF import, archive, merge, erase, read flash, board records ---------------------
 
 
 @dataclass(frozen=True)
@@ -537,7 +537,7 @@ def import_pio(
     """Pick `<project>/.pio/build/<env>`; the project is read in the background (about two
     seconds for `pio project config`). Every env of platformio.ini is listed: built ones can
     be checked (the picked one is), unbuilt and already followed ones are greyed. All
-    checked envs go to the same project and group (design doc §12.5)."""
+    checked envs go to the same project and group."""
     dialog = Dialog(parent, tr("Import PlatformIO build"), tr("Import"), danger=False)
     folder = QLineEdit()
     folder.setPlaceholderText(tr(r"e.g. D:\work\my_project\.pio\build\esp32dev"))
@@ -1046,7 +1046,7 @@ def export_firmware(
     check: ExportCheck,
     folder: Path,
 ) -> tuple[list[str], Path] | None:
-    """Export… of a firmware (design doc §12.6): the firmware of its scope with check
+    """Export… of a firmware: the firmware of its scope with check
     boxes, the chosen one checked; blocked ones greyed with the reason. Returns the ids to
     export (in list order) and the package path."""
     dialog = Dialog(parent, tr("Export firmware"), tr("Export"), danger=False)
@@ -1099,8 +1099,8 @@ def export_firmware(
 def export_project(
     parent: QWidget, project_name: str, count: int, check: ExportCheck, folder: Path
 ) -> Path | None:
-    """Export project…: refused with the reasons when any firmware cannot be exported
-    (design doc §12.6), else the package path."""
+    """Export project…: refused with the reasons when any firmware cannot be exported, else the
+    package path."""
     if check.blocked:
         lines = "".join(
             f"<br>•&nbsp;{html.escape(b.name)} — {html.escape(tr(b.reason))}" for b in check.blocked
@@ -1143,7 +1143,7 @@ def import_package(
     device: str | None = None,
 ) -> Placement | None:
     """What a checked package holds; where its loose firmware go. Default: `project_id`
-    and `device` (a package dropped on the sidebar: the drop point, design doc §12.6); with
+    and `device` (a package dropped on the sidebar: the drop point); with
     `device` None, the group they all had when that project has it, else ungrouped (also
     after the project is changed in the dialog). Returns the placement (None project for a
     package without loose firmware)."""

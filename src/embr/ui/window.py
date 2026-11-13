@@ -145,7 +145,7 @@ HINT_JTAG = N_(
     "download mode as described by the board's vendor."
 )
 QUICK_KEY = "quick_flash"
-"""settings.ini [ui] quick_flash: the Quick flash switch (design D7), off by default."""
+"""settings.ini [ui] quick_flash: the Quick flash switch, off by default."""
 HINT_QUICK_NEEDS_ID = N_(
     "This firmware is for several chips or has no chip selected, so the board must be "
     "identified first."
@@ -236,8 +236,8 @@ class EmbrWindow(FrameWindow):
             app.focusChanged.connect(self._focus_moved)
         self._reported: set[tuple[Path, str]] = set()
         self._renames_logged: set[tuple[str, datetime]] = set()
-        """(firmware id, checked_at) of resolutions whose app rename was logged (design D10)."""
-        """Damaged files already shown this session (design doc §12.8)."""
+        """(firmware id, checked_at) of resolutions whose app rename was logged."""
+        """Damaged files already shown this session."""
         self._job_kind: JobKind | None = None
         self._signals = JobSignals(self)
         self._selection: tuple[str, str] | None = None
@@ -380,7 +380,7 @@ class EmbrWindow(FrameWindow):
 
     def select_firmware(self, firmware_id: str) -> None:
         """Show `firmware_id`. Leaving another firmware ends its "Build updated" state and
-        "content changed" marks (design doc §3.4) and the hint of the last job; selecting the
+        "content changed" marks and the hint of the last job; selecting the
         shown one again (a click on its sidebar row) keeps them."""
         if self._selected_firmware_id() != firmware_id:
             self._leave_selection()
@@ -571,7 +571,7 @@ class EmbrWindow(FrameWindow):
             QTimer.singleShot(0, lambda: self._show_damaged(fresh))
 
     def _show_damaged(self, damaged: list[DamagedDocument]) -> None:
-        """Project or firmware files that cannot be read (design doc §12.8): left out, a
+        """Project or firmware files that cannot be read: left out, a
         copy kept in data/backup/, the originals unchanged. Waits for an open dialog."""
         if QApplication.activeModalWidget() is not None:
             QTimer.singleShot(500, lambda: self._show_damaged(damaged))
@@ -658,8 +658,8 @@ class EmbrWindow(FrameWindow):
         return
 
     def _fit_entries(self, firmware_id: str) -> None:
-        """Untick the entries that are not for the identified board (design doc §12 item
-        13); the entries table then shows them greyed out."""
+        """Untick the entries that are not for the identified board; the entries table then shows
+        them greyed out."""
         chip = self.identified_chip()
         if chip is None or self.is_locked(firmware_id):
             return
@@ -711,7 +711,7 @@ class EmbrWindow(FrameWindow):
 
     def _hint(self, port: PortInfo | None, snapshot: IdentifySnapshot | None) -> tuple[str, str]:
         """The hint above Flash: what the last job left behind, else what to do first. With
-        Quick flash on and a firmware selected (design D7): why it still needs Connect &
+        Quick flash on and a firmware selected: why it still needs Connect &
         identify, or how the connection enters download mode, and a warning when the whole
         flash would be erased without identifying the board."""
         outcome = self._last_outcome
@@ -752,7 +752,7 @@ class EmbrWindow(FrameWindow):
         return "", "ok"
 
     def _set_quick(self, on: bool) -> None:
-        """The Quick flash switch: kept in settings.ini at once (design D7)."""
+        """The Quick flash switch: kept in settings.ini at once."""
         self._quick = on
         self.connection.set_quick(on)
         settings = self._context.settings
@@ -813,7 +813,7 @@ class EmbrWindow(FrameWindow):
         self.changed()
 
     def _reorder_projects(self, project_ids: list[str]) -> None:
-        """Projects dragged into a new order in the sidebar (design D6: settings.ini)."""
+        """Projects dragged into a new order in the sidebar (settings.ini)."""
         self._library.set_project_order(project_ids)
         self._refresh_tree()
 
@@ -828,8 +828,7 @@ class EmbrWindow(FrameWindow):
         self._refresh_tree()
 
     def _read_only_notice(self, name: str) -> None:
-        """Firmware or project written by a newer Embr: shown, never changed (design doc
-        §3.5)."""
+        """Firmware or project written by a newer Embr: shown, never changed."""
         dialogs.notice(
             self,
             tr("Read only"),
@@ -1092,7 +1091,7 @@ class EmbrWindow(FrameWindow):
             self._request_recheck(SETTLE_RECHECK_MS, settle=True)
 
     def _log_renames(self, status: TrackStatus) -> None:
-        """One log line per renamed app file, once per resolution (design D10: the
+        """One log line per renamed app file, once per resolution (the
         firmware keeps its name, the entries show the new file name)."""
         renames = [c for c in status.changes if c.kind == ChangeKind.ENTRY_RENAMED]
         seen = (status.firmware_id, status.checked_at)
@@ -1113,7 +1112,7 @@ class EmbrWindow(FrameWindow):
 
     def _request_recheck(self, delay_ms: int = 0, *, settle: bool = False) -> None:
         """The one way to queue a check of the selection: a click, the window activated, a
-        build settling, a flash refused (design D15). One single-shot timer: an earlier queued
+        build settling, a flash refused. One single-shot timer: an earlier queued
         check stands, a later one is moved up to the new time. At most one check per
         RECHECK_GAP_S; a request inside the gap waits for it, neither dropped nor repeated.
         `settle` (a build seen settling) looks again after delay_ms whatever the gap. While the
@@ -1268,7 +1267,7 @@ class EmbrWindow(FrameWindow):
             QTimer.singleShot(0, self._refresh_if_stale)  # after the click is handled
         return False
 
-    # ---- stage two actions --------------------------------------------------------------
+    # ---- import, export, archive, merge, erase and read flash actions -------------------
 
     def _import_idf(
         self, build_dir: Path | None = None, placement: tuple[str | None, str] | None = None
@@ -1327,7 +1326,7 @@ class EmbrWindow(FrameWindow):
         settings.save()
 
     def _export_firmware(self, firmware_id: str) -> None:
-        """Export… (design doc §12.6): the firmware of the same scope, the chosen one checked."""
+        """Export…: the firmware of the same scope, the chosen one checked."""
         firmware = self._library.firmware(firmware_id)
         if firmware.project_id is not None:
             scope = self._library.project_firmware(firmware.project_id)
@@ -1498,8 +1497,8 @@ class EmbrWindow(FrameWindow):
         self.changed()
 
     def _follow_env(self, firmware_id: str) -> None:
-        """The banner's "Follow env" (design D11): follow the one built env platformio.ini
-        still declares and no other firmware follows. The firmware keeps its name (D10)."""
+        """The banner's "Follow env": follow the one built env platformio.ini
+        still declares and no other firmware follows. The firmware keeps its name."""
         firmware = self._library.firmware(firmware_id)
         candidates = self._library.tracker.env_candidates(firmware_id)
         if len(candidates) != 1 or firmware.build_ref is None:
@@ -1597,7 +1596,7 @@ class EmbrWindow(FrameWindow):
         self.connection.show_progress(0, N_("Connecting…"))
 
     def _files_dropped(self, names: list[str], node: object) -> None:
-        """Files or a folder dragged from Explorer onto the sidebar (design doc §12 item 19):
+        """Files or a folder dragged from Explorer onto the sidebar:
         on a firmware they are added; on a project, group or the standalone header a fixed
         firmware is created after its name is confirmed, or an ESP-IDF build folder opens the
         import dialog, and a PlatformIO env build folder or project folder opens the
@@ -1752,7 +1751,7 @@ class EmbrWindow(FrameWindow):
         self.changed()
 
     def _set_language(self, choice: Language) -> None:
-        """Store the choice; the interface changes after a restart (design doc §12.5). The
+        """Store the choice; the interface changes after a restart. The
         dialog offers Restart, disabled while a job runs and enabled when it ends."""
         if choice == self._language:
             return
@@ -1836,7 +1835,7 @@ LANGUAGE_LABELS = (
     (Language.ENGLISH, "English"),
     (Language.ZH_CN, "简体中文"),
 )
-"""Language menu (design doc §12 item 18); each language is named in itself."""
+"""Language menu; each language is named in itself."""
 
 SETTLE_RECHECK_MS = 2500
 """Look again after a build was seen settling (app.tracking.SETTLE_SECONDS plus margin)."""

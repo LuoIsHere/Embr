@@ -1,5 +1,5 @@
 """Tracking messages in the workspace: the banner when platformio.ini no longer declares the
-followed env (design D11), and the log line for a renamed app file (D10). Statuses are
+followed env, and the log line for a renamed app file. Statuses are
 built by hand; the tracker's own rules are tested in tests/app and tests/core."""
 
 import dataclasses

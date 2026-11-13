@@ -1,7 +1,7 @@
 """Interface flows of the window itself, in English and Simplified Chinese: search, the
 ≡ menu (Theme, Language with its restart dialog, Settings, About), the sidebar context
 menu, narrow window and sidebar widths, and a sweep of the Chinese interface for English
-left untranslated (design doc §6.1, §12 items 10, 15, 18, 22, §12.5).
+left untranslated.
 
 Window sizes are set with QWidget.resize() (the frameless window's own edge dragging is
 not driven); the sidebar width is changed by dragging the splitter handle."""
@@ -67,7 +67,7 @@ def test_search_filters_the_sidebar(
 
 @ui.LANGUAGES
 def test_theme_menu(embr: Start, language: Language) -> None:
-    """Theme: System / Light / Dark, kept in settings.ini [ui] theme (§12 item 18)."""
+    """Theme: System / Light / Dark, kept in settings.ini [ui] theme."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
 
@@ -92,7 +92,7 @@ def test_theme_menu(embr: Start, language: Language) -> None:
 
 @ui.LANGUAGES
 def test_language_menu_and_restart_dialog(embr: Start, language: Language) -> None:
-    """§12.5: the choice is saved; the dialog says it applies after a restart, buttons
+    """The choice is saved; the dialog says it applies after a restart, buttons
     Restart and OK; OK keeps Embr open, Restart closes it for a restart."""
     root_language = language
     app = embr(language=root_language)
@@ -129,7 +129,7 @@ def test_settings_dialog(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
     """Settings…: the PlatformIO framework package path (saved on Close, Browse… picks a
-    folder) and the program folder, read-only (§6.1, §7.6)."""
+    folder) and the program folder, read-only."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     package = tmp_path / "framework-arduinoespressif32"
@@ -164,7 +164,7 @@ def test_settings_dialog(
 @ui.LANGUAGES
 def test_about_dialog(embr: Start, language: Language) -> None:
     """About Embr: version, built-in esptool, repository and releases links, the font
-    notice; copyright and build time (§12 item 22: "development build" from source)."""
+    notice; copyright and build time ("development build" from source)."""
     app = embr(language=language)
     window = app.window
     seen: list[str] = []
@@ -182,11 +182,9 @@ def test_about_dialog(embr: Start, language: Language) -> None:
         if part not in text:
             problems.append(f"About lacks {part!r}")
     if "Copyright © 2026 @LuoIsHere" not in text:
-        problems.append(
-            "About lacks the copyright line 'Copyright © 2026 @LuoIsHere' (§12 item 22)"
-        )
+        problems.append("About lacks the copyright line 'Copyright © 2026 @LuoIsHere'")
     if "development build" not in text and tr("development build") not in text:
-        problems.append("About lacks the build time ('development build' from source, §12 item 22)")
+        problems.append("About lacks the build time ('development build' from source)")
     if ui.in_chinese():
         known = [
             __version__,
@@ -206,7 +204,7 @@ def test_about_dialog(embr: Start, language: Language) -> None:
 def test_sidebar_context_menu_is_the_dots_menu(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§12.5: right-clicking a firmware selects it and opens the same menu as ⋯; Delete… is
+    """Right-clicking a firmware selects it and opens the same menu as ⋯; Delete… is
     drawn in the warning colour in both."""
     app = embr(language=language)
     window = app.window
@@ -293,7 +291,7 @@ def test_narrow_window_and_sidebar(
     """At the minimum window size (1100 x 700) the sidebar folds away by itself (below
     1180 px), Ctrl+B brings it back; with the sidebar dragged to its narrowest the New
     button reads "+ New"; nothing is cut off in any column, the entries table does not
-    scroll sideways and Note keeps 120 px (§6.1, §12 item 7, §12.5)."""
+    scroll sideways and Note keeps 120 px."""
     app = embr(language=language)
     window = app.window
     ui.new_project(window, "A project with a fairly long name for the sidebar")
@@ -349,9 +347,9 @@ def test_chinese_interface_has_no_untranslated_english(
     tmp_path: Path,
     pio_env: Path,  # noqa: F811
 ) -> None:
-    """§12.5 翻译范围: every message of the interface is translated (menus, buttons,
-    dialogs, checks, banners, errors); kept in English only what the glossary keeps
-    (internal_docs/m7_glossary.md), the test's own data, file names, paths and commands."""
+    """Every message of the interface is translated (menus, buttons,
+    dialogs, checks, banners, errors); kept in English only the words
+    in KEEP_ENGLISH, the test's own data, file names, paths and commands."""
     project_dir = tmp_path / "proj"
     build = kit.idf_build_copy("esp32s3_hello", project_dir)
     app = embr(language=Language.ZH_CN)

@@ -43,7 +43,7 @@ def _plan(connection: ConnectionType = UART, **kwargs: Any) -> FlashPlan:
     return build_flash_plan(**(params | kwargs))
 
 
-# --- reset rules (design doc §4.4) ------------------------------------------------------
+# --- reset rules ------------------------------------------------------
 
 
 def test_uart_keeps_default_and_hard_reset() -> None:

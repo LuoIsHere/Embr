@@ -1,4 +1,4 @@
-"""Storage sentinel (design doc §7.6): after one complete flow — new project, imports,
+"""Storage sentinel: after one complete flow — new project, imports,
 move firmware, archive, merge, flash, read flash, migration, .embr export and import —
 nothing new outside the program folder.
 

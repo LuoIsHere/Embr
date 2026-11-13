@@ -1,7 +1,7 @@
-"""core/firmware/import_pio: reading a PlatformIO env build (design doc §5 stage three,
-§8.2, §12.5), and how core tracking takes what it hands over. Projects are assembled in
-tmp_path from tests/fixtures/pio; expected values come from the samples' idedata.json,
-flasher_args.json, SOURCE.toml and the PIO merge command, never from Embr."""
+"""core/firmware/import_pio: reading a PlatformIO env build, and how core tracking takes what it
+hands over. Projects are assembled in tmp_path from tests/fixtures/pio; expected values come from
+the samples' idedata.json, flasher_args.json, SOURCE.toml and the PIO merge command, never from
+Embr."""
 
 import json
 import os

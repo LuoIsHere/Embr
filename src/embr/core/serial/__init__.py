@@ -88,7 +88,7 @@ class PortChange:
 
 class PortWatcher:
     """Compares successive port lists. It has no thread or timer: the caller decides when
-    to poll (the UI adapter polls on WM_DEVICECHANGE plus a slow timer, design doc §7.3).
+    to poll (the UI adapter polls on WM_DEVICECHANGE plus a slow timer).
 
     Ports are compared by identity: device name, VID, PID and serial number. A port that
     vanished and came back with the same identity between two polls is no change; one that

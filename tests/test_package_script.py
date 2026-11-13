@@ -1,4 +1,4 @@
-"""scripts/package_release.py (design doc §7.5): the release zip and its notices, checked
+"""scripts/package_release.py: the release zip and its notices, checked
 without a PyInstaller build. Distributions are synthetic .dist-info folders put on
 sys.path; main() runs with --skip-build on a synthetic repository (its module paths
 monkeypatched). The real build is covered by tests/release/test_release_package.py."""

@@ -1,6 +1,5 @@
-"""Projects: optional containers of firmware with a group list and defaults (design doc
-§3.1, §3.2). Operations that touch firmware take the FirmwareStore explicitly; firmware
-never depends on this module."""
+"""Projects: optional containers of firmware with a group list and defaults. Operations that touch
+firmware take the FirmwareStore explicitly; firmware never depends on this module."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -72,7 +71,7 @@ class ProjectStore:
 
     def all(self) -> list[Project]:
         """Every readable project, sorted by name; newer schema versions read-only. Files
-        that cannot be read are skipped and listed by damaged() (design doc §12.8)."""
+        that cannot be read are skipped and listed by damaged()."""
         found: list[Project] = []
         damaged: list[DamagedDocument] = []
         if self.directory.is_dir():

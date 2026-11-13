@@ -1,4 +1,4 @@
-"""Project overview (design doc §6.1 "中间工作区 — 选中项目时")."""
+"""Project overview."""
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -93,7 +93,7 @@ class ProjectView(QScrollArea):
         row.addStretch(1)
         self.content.addLayout(row)
         self.content.addStretch(1)
-        if project.read_only:  # shown, never changed (design doc §3.5)
+        if project.read_only:  # shown, never changed
             warning = label(
                 tr("This project was created by a newer version of Embr and is read-only here."),
                 wrap=True,

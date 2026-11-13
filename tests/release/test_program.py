@@ -4,7 +4,7 @@ Embr.exe), started with empty sentinel folders as TEMP / TMP / APPDATA / LOCALAP
 USERPROFILE / working folder, and checked through their windows (UI Automation) and
 files.
 
-Design rules checked (design doc §7.6): startup clears temp/ and keeps logs/ and data/;
+Behaviour checked: startup clears temp/ and keeps logs/ and data/;
 a program folder that is not writable gets a message and nothing is written elsewhere;
 one working instance per folder; an old embr.sqlite is migrated with a backup; the
 packaged build starts, writes only inside its folder and exits cleanly."""
@@ -26,7 +26,7 @@ from embr.core.storage.paths import AppPaths, prepare
 from embr.i18n import Language
 
 LANGUAGES = [Language.ENGLISH, Language.ZH_CN]
-"""Startup messages follow the language stored in settings.ini (design doc §12.8)."""
+"""Startup messages follow the language stored in settings.ini."""
 
 
 def _intro(message: str, language: Language) -> str:

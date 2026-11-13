@@ -840,7 +840,7 @@ def clipped(
 
 
 KEEP_ENGLISH = {
-    # design doc §12 item 10, internal_docs/m7_glossary.md "保持英文"
+    # words the Chinese interface keeps in English
     "pass",
     "warn",
     "refuse",
@@ -971,7 +971,7 @@ KEEP_ENGLISH = {
     "arduino",
     "s3-main-v1.3",
 }
-"""Words the glossary keeps in English, file and product names, units (lower case)."""
+"""Words the Chinese interface keeps in English, file and product names, units (lower case)."""
 
 WORD = re.compile(r"[A-Za-z][A-Za-z0-9_\-./\\]*")
 CHIP_WORD = re.compile(r"^esp32[a-z0-9\-]*$|^v\d", re.IGNORECASE)
@@ -979,7 +979,7 @@ CHIP_WORD = re.compile(r"^esp32[a-z0-9\-]*$|^v\d", re.IGNORECASE)
 
 def english_leftovers(texts: Iterable[str], data: Iterable[str] = ()) -> list[str]:
     """Texts of the Chinese interface holding English words that are not kept in English
-    by the glossary, not file names, paths, numbers or chip names, and not part of the
+    (KEEP_ENGLISH), not file names, paths, numbers or chip names, and not part of the
     test's own data (`data`: names, paths, file names the test created)."""
     known = sorted({d for d in data if d}, key=len, reverse=True)
     found: list[str] = []
@@ -1348,8 +1348,7 @@ S3_FILES = ["bootloader.bin", "partition-table.bin", "hello_esp32s3.bin"]
 
 
 def reselect(window: Any, name: str, other: str) -> None:
-    """Click another firmware, then `name` again: a full check on selection (design doc
-    §3.4 检测时机)."""
+    """Click another firmware, then `name` again: a full check on selection."""
     click_row(window, other)
     click_row(window, name)
     kit.pump(50)

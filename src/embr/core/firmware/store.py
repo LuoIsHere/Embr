@@ -1,4 +1,4 @@
-"""Firmware files: data/firmwares/<id>.toml, one per firmware, flat (design doc §7.6)."""
+"""Firmware files: data/firmwares/<id>.toml, one per firmware, flat."""
 
 import datetime
 from pathlib import Path, PurePath
@@ -45,7 +45,7 @@ class FirmwareStore:
 
     def all(self) -> list[Firmware]:
         """Every readable firmware, migrated to the current schema (newer ones read-only).
-        Files that cannot be read are skipped and listed by damaged() (design doc §12.8)."""
+        Files that cannot be read are skipped and listed by damaged()."""
         found: list[Firmware] = []
         damaged: list[DamagedDocument] = []
         if self.directory.is_dir():

@@ -1,4 +1,4 @@
-"""Interface text translation (design doc §12 item 10, §12.5).
+"""Interface text translation.
 
 Source text stays English and is its own key. tr(text) returns the text in the current
 language: the exact key, else a template key whose {0}, {1}… placeholders match the
@@ -6,7 +6,7 @@ text (so formatted strings translate: tr(f"{name}: file missing") finds the key
 "{0}: file missing"); each placeholder value is passed through tr() too (exact key
 or template), so a message built from other messages translates as a whole.
 Text without a translation is returned unchanged, and English (the default) returns
-everything unchanged. Logs never go through tr(); words the glossary keeps in English
+everything unchanged. Logs never go through tr(); words that stay in English
 (PASS, Flash, chip names, esptool modes…) are simply left untranslated in the table.
 
 N_(text) marks a message made outside the UI (app layer) that the UI shows through tr();

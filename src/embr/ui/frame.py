@@ -1,5 +1,5 @@
-"""Frameless main window shell: top bar, three resizable columns, command bar (design doc
-§6.1 "布局"). The panels themselves live in their own modules."""
+"""Frameless main window shell: top bar, three resizable columns, command bar. The panels themselves
+live in their own modules."""
 
 import contextlib
 import ctypes

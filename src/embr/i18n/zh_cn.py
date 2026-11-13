@@ -1,8 +1,8 @@
-"""Simplified Chinese interface text: English key -> translation (design doc §12.5).
+"""Simplified Chinese interface text: English key -> translation.
 
 Keys are the English source text; formatted strings use template keys with {0}, {1}…
-(i18n.template_key). Words the glossary keeps in English (internal_docs/m7_glossary.md)
-stay English inside the translations."""
+(i18n.template_key). Words kept in English (PASS, Flash, chip names, esptool modes…) stay
+English inside the translations."""
 
 TEXT: dict[str, str] = {
     # ---- checks (app.checklist, core.flasher.checks) ----
@@ -646,7 +646,7 @@ TEXT: dict[str, str] = {
     " · after={0}": " · after={0}",
     "partition {0}": "分区 {0}",
     "derived": "derived",
-    # .embr export and import (M8)
+    # .embr export and import
     "Export…": "导出…",
     "Export project…": "导出项目…",
     "Import .embr package…": "导入 .embr 包…",
@@ -706,7 +706,7 @@ TEXT: dict[str, str] = {
     "{0}: size does not match the manifest": "{0}：大小与清单不一致",
     "{0}: cannot be read from the package ({1})": "{0}：无法从包中读取（{1}）",
     "{0}: content does not match the manifest": "{0}：内容与清单不一致",
-    # damaged data and startup messages (design doc §12.8)
+    # damaged data and startup messages
     "These project or firmware files cannot be read and are left out; everything else works as usual. The files themselves are not changed:{0}": "以下项目或固件文件无法读取，已暂不加载，其余内容照常使用。这些文件本身未作任何改动：{0}",
     "A copy of each is kept in {0}.": "每个文件已复制一份保存在 {0}。",
     "Files that cannot be read": "无法读取的文件",

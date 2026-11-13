@@ -38,7 +38,7 @@ class ChipInfo:
 
 @dataclass(frozen=True)
 class RevisionLine:
-    """A range of chip revisions that needs its own build (design doc §12 item 13)."""
+    """A range of chip revisions that needs its own build."""
 
     name: str
     """Stored name, e.g. "v0-v1"."""
@@ -67,7 +67,7 @@ FLASH_MODES: tuple[str, ...] = ("qio", "qout", "dio", "dout")
 _EXCLUDED = frozenset({"esp8266"})
 
 # esptool 5.3.1 has no per-chip USB flags; these are the USB_SERIAL_JTAG_SUPPORTED and
-# USB_OTG_SUPPORTED values of esptool 5.6.0 (design doc §12.1)
+# USB_OTG_SUPPORTED values of esptool 5.6.0
 _USB_SERIAL_JTAG = frozenset(
     {"esp32c3", "esp32c5", "esp32c6", "esp32c61", "esp32h2", "esp32h21", "esp32h4"}
     | {"esp32s3", "esp32p4", "esp32s31"}

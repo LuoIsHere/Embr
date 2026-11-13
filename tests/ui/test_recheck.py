@@ -1,6 +1,6 @@
 """Checks of the selected firmware on a click, on activation and while a build settles: one
 timer, at most one check per second, no extra checks while a build is still being written,
-and no refresh under a half-typed parameter (design D15). The clock is replaced and the
+and no refresh under a half-typed parameter. The clock is replaced and the
 timer fired by hand, so nothing here waits."""
 
 import dataclasses
@@ -314,7 +314,7 @@ def test_the_refresh_comes_once_the_field_is_left(
 def test_a_click_on_the_selected_firmware_keeps_build_updated(
     window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Design doc §3.4: "Build updated" and the "content changed" marks last until the build
+    """The "Build updated" and the "content changed" marks last until the build
     changes again or another firmware is selected. A click on the selected firmware's row
     only checks it again."""
     first, _ = _fixed(window, tmp_path)

@@ -1,5 +1,4 @@
-"""Center column: firmware header, Entries / Parameters / Records tabs (design doc §6.1
-"中间工作区 — 选中固件时")."""
+"""Center column: firmware header, Entries / Parameters / Records tabs."""
 
 import dataclasses
 import datetime
@@ -446,7 +445,7 @@ class EntriesTab(QWidget):
     ) -> None:
         """`notes`: importer remarks by entry id (TrackStatus.entry_notes). `removed`:
         entries whose file left the build (TrackStatus.removed), shown read-only below the
-        others with their "file missing" mark (design doc §3.4 case 2)."""
+        others with their "file missing" mark."""
         notes = notes or {}
         same = self._firmware is not None and self._firmware.id == firmware.id
         typing = self._typing() if same else None
@@ -471,7 +470,7 @@ class EntriesTab(QWidget):
         self.add_button.setVisible(not tracking)
         self.from_build.setVisible(tracking)
         enabled = [e for e in firmware.entries if e.enabled]
-        # nothing to merge, or the build output / a file is missing (design doc §5)
+        # nothing to merge, or the build output / a file is missing
         self.merge_button.setEnabled(
             bool(enabled) and all(marks.get(e.id) != EntryMark.MISSING for e in enabled)
         )
@@ -544,7 +543,7 @@ class EntriesTab(QWidget):
     def _column_dragged(self, column: int, old: int, new: int) -> None:
         """The user dragged a column edge (Address to Image requires): keep the width, taking
         the space from Note, which never gets narrower than NOTE_MIN_WIDTH, so the table still
-        never scrolls sideways (design doc §12 item 7). Saved in settings.ini [ui]."""
+        never scrolls sideways. Saved in settings.ini [ui]."""
         if self._sizing or column not in _DRAGGABLE:
             return
         header = self.table.horizontalHeader()
@@ -634,7 +633,7 @@ class EntriesTab(QWidget):
         mcu = entry_mcu(self._owner.context, self._firmware, entry)
         board = self._owner.identified_chip()
         revision = self._owner.identified_revision()
-        unfit = board is not None and not fits(mcu, board, revision)  # design doc §12 item 13
+        unfit = board is not None and not fits(mcu, board, revision)  # not for the identified board
         dim = "3" if not entry.enabled or unfit else None
         check = QTableWidgetItem()
         check.setData(Qt.ItemDataRole.UserRole, entry.id)
@@ -1493,7 +1492,7 @@ class FirmwareView(QWidget):
             if firmware.source == Source.PIO_BUILD
             else tr("Run <code>idf.py build</code>")
         )
-        if status.env_gone:  # design D11: offer the one env it may have been renamed to
+        if status.env_gone:  # offer the one env it may have been renamed to
             env = html.escape((firmware.build_ref.env if firmware.build_ref else None) or "")
             text = tr(f"platformio.ini no longer declares [env:{env}]. It may have been renamed.")
             candidates = self._owner.library.tracker.env_candidates(firmware.id)

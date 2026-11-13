@@ -3,12 +3,11 @@ with idf.py through EMBR_TEST_IDF_EXPORT and, for the version switch, EMBR_TEST_
 and the real boards. The project is changed (a marker string in the countdown line, the
 target, the ESP-IDF version) and restored after the session by the idf_project fixture.
 
-Design rules checked (design doc §3.4, §4.3, §5 stage two, §8.2 "集成 (需真机)", §12.7):
-a rebuild that only changes file contents is followed without confirmation and a click on
-Flash flashes the new product; a target switched in sdkconfig but not rebuilt blocks
-flashing; after the rebuild the chip change needs confirmation, then the P4 build flashes
-the Tab5 and is refused on the S3; an ESP-IDF version change needs confirmation; old and
-new products mixed (bootloader or app from the other version) are "build incomplete".
+Behaviour checked: a rebuild that only changes file contents is followed without confirmation and a
+click on Flash flashes the new product; a target switched in sdkconfig but not rebuilt blocks
+flashing; after the rebuild the chip change needs confirmation, then the P4 build flashes the Tab5
+and is refused on the S3; an ESP-IDF version change needs confirmation; old and new products mixed
+(bootloader or app from the other version) are "build incomplete".
 """
 
 import shutil
@@ -38,7 +37,7 @@ def _import(app: kit.EmbrApp, dialogs: kit.FileDialogs, project: bk.IdfProject) 
 
 def _build(project: bk.IdfProject, idf: bk.Idf | None = None) -> None:
     (idf or project.idf).run(project.root, "build")
-    time.sleep(bk.SETTLE_S)  # older than 2 s: no longer "being built" (design doc §3.4)
+    time.sleep(bk.SETTLE_S)  # older than 2 s: no longer "being built"
 
 
 def _marker(text: str) -> str:
@@ -218,7 +217,7 @@ def test_a_renamed_project_is_followed_without_confirmation(
     embr: Callable[..., kit.EmbrApp],
     file_dialogs: kit.FileDialogs,
 ) -> None:
-    """Design D9, D10: renaming the project renames the app file. Same address and chip:
+    """Renaming the project renames the app file. Same address and chip:
     followed without confirmation, the entry note moves to the new name, the firmware keeps
     its name and the log says so. The old app file left in the build folder is not used."""
     idf_project.reset()
@@ -238,7 +237,7 @@ def test_a_renamed_project_is_followed_without_confirmation(
         _build(idf_project)
         assert (idf_project.build / old).is_file()  # left behind by the build
 
-        status = bk.wait_state(app, name, "updated")  # polling clicks keep it (§3.4)
+        status = bk.wait_state(app, name, "updated")  # polling clicks keep it
         assert [(c.kind, c.before, c.after) for c in status.changes] == [
             (ChangeKind.ENTRY_RENAMED, old, new)
         ], status.changes

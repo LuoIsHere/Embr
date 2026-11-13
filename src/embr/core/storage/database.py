@@ -7,8 +7,8 @@ from pathlib import Path
 from embr.core.storage.documents import backup_folder
 
 DB_SCHEMA_VERSION = 2
-"""Version 1 tables: flash_records, record_entries (design doc §3.3), archive_files,
-archive_names (§7.6). Version 2: flash_records.operation (flash / erase / read_flash)."""
+"""Version 1 tables: flash_records, record_entries, archive_files,
+archive_names. Version 2: flash_records.operation (flash / erase / read_flash)."""
 
 
 class NewerSchemaError(Exception):
@@ -16,8 +16,8 @@ class NewerSchemaError(Exception):
 
 
 class DamagedDatabaseError(Exception):
-    """The database file is not a readable SQLite database, or fails its integrity check
-    (design doc §12.8). The file is left untouched."""
+    """The database file is not a readable SQLite database, or fails its integrity check. The file
+    is left untouched."""
 
 
 def open_database(path: Path, backup_root: Path) -> sqlite3.Connection:

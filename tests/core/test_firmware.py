@@ -93,7 +93,7 @@ def test_firmware_round_trip_with_entries(store: FirmwareStore) -> None:
         auto_added=True,
     )
     attachment.enabled = False
-    attachment.chip = "esp32s3"  # MCU chosen by hand (design doc §12 item 13)
+    attachment.chip = "esp32s3"  # MCU chosen by hand
     fw.entries = [app, attachment, otadata]
     store.save(fw)
 
@@ -166,7 +166,7 @@ def test_firmware_in_one_project_stay_independent(store: FirmwareStore) -> None:
 
 def test_editable_params() -> None:
     expected = {
-        # the chip is derived for every firmware (design doc §12 item 13)
+        # the chip is derived for every firmware
         Source.MANUAL: set(PARAMS) - {"chip"},
         Source.ARCHIVED: set(PARAMS) - {"chip"},
         Source.IDF_BUILD: {"erase_all", "tags", "notes"},
@@ -238,7 +238,7 @@ def test_set_param_refuses_read_only_params() -> None:
 
 
 def test_file_without_the_new_fields_loads_with_defaults(store: FirmwareStore) -> None:
-    # no migration (design doc §12 item 13): files without folder and entry chips load with
+    # no migration: files without folder and entry chips load with
     # the defaults
     fw = store.create("Old")
     fw.entries = [_path_entry(APP, EntryKind.APP, 0x20000)]

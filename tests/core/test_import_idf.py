@@ -1,4 +1,4 @@
-"""core/firmware/import_idf: reading an ESP-IDF build directory (design doc §5 stage two).
+"""core/firmware/import_idf: reading an ESP-IDF build directory.
 Expected values come from the fixtures' flasher_args.json and SOURCE.toml."""
 
 import json

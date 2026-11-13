@@ -1,5 +1,4 @@
-"""app/archiving: archive this version, archive an entry, clean the archive (design doc
-§3.4 "归档此版本", "归档")."""
+"""app/archiving: archive this version, archive an entry, clean the archive."""
 
 from pathlib import Path
 
@@ -51,7 +50,7 @@ def test_archive_version_copies_the_resolved_firmware(context: AppContext, tmp_p
     )
     assert archived.name.startswith(f"{source.name} (archived ")
     assert archived.notes == "release 1" and source.name in archived.archived_from
-    # a fixed firmware: its chips come from the entries (§12 item 13)
+    # a fixed firmware: its chips come from the entries
     assert (firmware_chips(context, archived), archived.flash) == (
         ("esp32s3",),
         FlashParams("dio", "80m", "2MB"),

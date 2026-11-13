@@ -1,4 +1,4 @@
-"""app/library: use cases on projects, firmware and entries (design doc §3.1, §3.4, §5)."""
+"""app/library: use cases on projects, firmware and entries."""
 
 import os
 from collections.abc import Callable
@@ -68,7 +68,7 @@ def test_untitled_firmware_takes_name_from_the_first_file(library: Library) -> N
     assert firmware.name == UNTITLED
     library.add_files(firmware.id, [APP])
     loaded = library.firmware(firmware.id)
-    # a fixed firmware stores no chip; its chips come from the entries (§12 item 13)
+    # a fixed firmware stores no chip; its chips come from the entries
     assert (loaded.name, loaded.chip) == (APP.stem, None)
 
 
@@ -195,7 +195,7 @@ def test_missing_file_is_flagged_and_can_be_relocated(
     # a library that has not checked the files yet still sees the file is gone
     assert find_row(Library(context).tree(), firmware.id).flag == FirmwareFlag.MISSING
 
-    (new,) = copy_files([APP], tmp_path / "old" / "new")  # inside the folder (§12 item 8)
+    (new,) = copy_files([APP], tmp_path / "old" / "new")  # inside the folder
     library.relocate_entry(firmware.id, entry_id, new)
     assert library.check_files(firmware.id) == {entry_id: FileState.OK}
     assert library.flag(firmware.id) == FirmwareFlag.NONE
@@ -393,7 +393,7 @@ ADDITIONS: dict[str, Callable[[Library, str, str, Path], object]] = {
 def test_tracking_firmware_takes_no_added_entries(
     context: AppContext, tmp_path: Path, case: str
 ) -> None:
-    # entries of tracking firmware come from the build only (§12 item 16)
+    # entries of tracking firmware come from the build only
     library, _ = _tracked(context)
     firmware = library.import_idf(idf_project("esp32s3_hello", tmp_path / "hello"))
     fixed = fixed_firmware(library, [APP], "fixed")
@@ -406,7 +406,7 @@ def test_tracking_firmware_takes_no_added_entries(
     assert context.firmware.get(firmware.id) == before
 
 
-# ---- mismatches with the identified chip (§12 item 1) -------------------------------------
+# ---- mismatches with the identified chip -------------------------------------
 
 REV3 = build_files("esp32p4_rev3_hello")  # images require v3.1 - v3.99
 
@@ -460,7 +460,7 @@ def test_mismatches_dim_firmware_without_the_identified_chip(
     assert s3.id in found
 
 
-# ---- MCU of entries (§12 item 13) ---------------------------------------------------------
+# ---- MCU of entries ---------------------------------------------------------
 
 
 def _with_data(context: AppContext, firmware: Firmware, folder: Path) -> Entry:
@@ -583,7 +583,7 @@ def test_mismatches_judge_only_the_entries_of_the_board_line(
     assert firmware.id not in library.mismatches(info("esp32p4", major, minor))
 
 
-# ---- one folder per fixed firmware (§12 item 8) -------------------------------------------
+# ---- one folder per fixed firmware -------------------------------------------
 
 
 def _folders(tmp_path: Path) -> tuple[Path, Path]:

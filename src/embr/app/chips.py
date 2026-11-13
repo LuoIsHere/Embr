@@ -1,4 +1,4 @@
-"""Which MCU each entry is for (design doc §12 item 13). A fixed firmware may hold files
+"""Which MCU each entry is for. A fixed firmware may hold files
 for several chips; a board only gets the entries for its own chip.
 
 The MCU of an entry is, in this order: the chip in its image header (bootloader, app,

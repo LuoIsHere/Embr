@@ -1,5 +1,5 @@
-"""Firmware <-> TOML document. Placement is stored as "address:0x..." or "partition:<name>"
-(design doc §3.2); addresses of partition-placed entries are resolved at run time."""
+"""Firmware <-> TOML document. Placement is stored as "address:0x..." or "partition:<name>";
+addresses of partition-placed entries are resolved at run time."""
 
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import (

@@ -1,7 +1,7 @@
-""".embr export and import use cases (design doc §5 阶段四, §12.6).
+""".embr export and import use cases.
 
 Export: a whole project, or one or more firmware of one scope (one project, or the
-standalone firmware). Each firmware goes in as it would be archived now ("归档此版本"):
+standalone firmware). Each firmware goes in as it would be archived now (Archive this version):
 tracking firmware as their current resolution (derived entries with overrides plus user
 entries), as fixed firmware; "path:" entries become "archive:<sha256>"; build directory,
 framework package, overrides and the last resolution are left out. Firmware that is not
@@ -10,7 +10,7 @@ or read-only cannot be exported.
 
 Import: core.package.read_package() checks the whole package first; only then are files
 put into the archive (existing content not stored twice, a name record added) and new
-projects and firmware created with new ids, names made unique (design doc §3.1). Every
+projects and firmware created with new ids, names made unique. Every
 imported firmware is ARCHIVED with archived_from "Imported from <file name>, <time>".
 Projects of the package come back as new projects with their groups; loose firmware go
 where the import dialog says (a project and group, or standalone).

@@ -1,4 +1,4 @@
-"""Fault injection (design doc §8.3): break one piece of logic, run the tests, restore.
+"""Fault injection: break one piece of logic, run the tests, restore.
 
     uv run python scripts/fault_inject.py FILE OLD NEW [pytest args ...]
 

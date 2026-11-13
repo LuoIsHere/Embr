@@ -1,7 +1,7 @@
-"""app/library and app/tracking for PlatformIO firmware (design doc §5 stage three, §8.2,
-§12.5): importing envs, the import preview, following rebuilds, a switched board and the
-framework package path. pio is never run: PioConfigs gets a FakePio and runs its query
-synchronously; tests call load() where the app would wait for the background query."""
+"""app/library and app/tracking for PlatformIO firmware: importing envs, the import preview,
+following rebuilds, a switched board and the framework package path. pio is never run: PioConfigs
+gets a FakePio and runs its query synchronously; tests call load() where the app would wait for the
+background query."""
 
 import hashlib
 import os
@@ -238,7 +238,7 @@ def test_a_progname_rename_is_followed(context: AppContext, tmp_path: Path) -> N
     app = next(e for e in status.firmware.entries if e.kind is EntryKind.APP)
     assert (app.name, app.note) == ("my_app.bin", "main")
     stored = rig.library.firmware(firmware.id)
-    assert stored.name == ESP32  # the firmware keeps its name (D10)
+    assert stored.name == ESP32  # the firmware keeps its name
     assert set(stored.entry_overrides) == {entry_key(EntryKind.APP, "my_app.bin")}
 
 

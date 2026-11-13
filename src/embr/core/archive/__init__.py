@@ -1,4 +1,4 @@
-"""Content-addressed archive (design doc §3.4 "归档", §7.6): data/archive/<sha256>.bin plus
+"""Content-addressed archive: data/archive/<sha256>.bin plus
 an index in embr.sqlite (archive_files: one row per content; archive_names: one row per
 time something was archived under a name). Files are copied, never moved; the source is
 never modified. Nothing is deleted except by delete() ("Clean archive").

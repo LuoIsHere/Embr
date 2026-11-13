@@ -1,4 +1,4 @@
-"""The log under the workspace in the centre column (design doc §6.1 "日志"): esptool output
+"""The log under the workspace in the centre column: esptool output
 of the current job, coloured by level, with Expand and Log folder."""
 
 import html

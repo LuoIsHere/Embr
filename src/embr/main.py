@@ -80,8 +80,8 @@ def esptool_config_path() -> str:
 
 
 def run_gui() -> int:
-    """Startup order (design doc §7.6): language for the startup messages, writable check,
-    the folders Embr needs (design doc §12.8), instance lock, clear temp/, data folders,
+    """Startup order: language for the startup messages, writable check,
+    the folders Embr needs, instance lock, clear temp/, data folders,
     TMP/TEMP to temp/ before Qt starts, open the data (migrations; a damaged database is
     offered a backup), window."""
     from embr.core.logs.crash import CrashLog
@@ -144,7 +144,7 @@ def run_gui() -> int:
 
 def _startup_language(settings_file: Path) -> None:
     """Language of the messages shown before the data is open: the stored choice when
-    settings.ini can be read, else the system's (design doc §12.8)."""
+    settings.ini can be read, else the system's."""
     from PySide6.QtCore import QLocale
 
     from embr.core.storage.settings import read_value
@@ -157,7 +157,7 @@ def _startup_language(settings_file: Path) -> None:
 
 def _usable_folders(paths: "AppPaths") -> bool:
     """True when every folder Embr needs is usable, or was made usable by renaming what is
-    in the way (the user's choice); False to exit (design doc §12.8)."""
+    in the way (the user's choice); False to exit."""
     from embr.core.storage.paths import folder_problems, set_aside
 
     problems = folder_problems(paths)
@@ -185,7 +185,7 @@ def _usable_folders(paths: "AppPaths") -> bool:
 def _replace_damaged_database(database: Path, detail: str) -> bool:
     """Ask what to do with a damaged embr.sqlite: back it up to a place the user picks and
     start with a new one (True), or exit (False). The file is never changed before the copy
-    succeeded (design doc §12.8)."""
+    succeeded."""
     import datetime
     import shutil
 
@@ -250,7 +250,7 @@ def _application() -> "QApplication":
 
 
 def _relaunch() -> None:
-    """Start Embr again (language change, design doc §12.5): the packaged exe, or this
+    """Start Embr again (language change): the packaged exe, or this
     interpreter with -m embr when running from source. Called after the instance lock is
     released."""
     command = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "embr"]

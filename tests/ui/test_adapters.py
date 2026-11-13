@@ -1,4 +1,4 @@
-"""Qt adapters (design doc §7.3, §8.2 "app 与 ui/adapters"): worker events reach the GUI
+"""Qt adapters: worker events reach the GUI
 thread in order, log lines are batched without reordering, hotplug polling is debounced,
 and Qt values survive a trip through settings.ini."""
 

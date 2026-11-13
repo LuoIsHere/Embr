@@ -1,4 +1,4 @@
-"""Build the release package (design doc §7.5): dist/release/embr_<version>_windows_x64.zip
+"""Build the release package: dist/release/embr_<version>_windows_x64.zip
 holding the folder of the same name with Embr.exe, _internal/, LICENSE, THIRD_PARTY_NOTICES
 (the list from the repository plus the full license texts of everything bundled),
 ESPTOOL.txt, README.md and CHANGELOG.md; next to it <zip name>.sha256 ("<hash>  <name>").

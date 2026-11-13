@@ -1,5 +1,4 @@
-"""Entry operations: adding files, addresses, placement, layout checks (design doc §3.2,
-§5 stage one)."""
+"""Entry operations: adding files, addresses, placement, layout checks."""
 
 import dataclasses
 import hashlib
@@ -25,7 +24,7 @@ class AddressError(ValueError):
 
 
 class FolderError(ValueError):
-    """Files outside the folder of a fixed firmware (design doc §12 item 8); nothing was
+    """Files outside the folder of a fixed firmware; nothing was
     changed."""
 
     def __init__(self, folder: str, outside: list[Path]) -> None:

@@ -1,4 +1,4 @@
-"""core/history: flash records in embr.sqlite (design doc §3.3)."""
+"""core/history: flash records in embr.sqlite."""
 
 import dataclasses
 from collections.abc import Iterator

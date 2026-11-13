@@ -1,5 +1,5 @@
-"""Right column: port and baud, identify, checks, flash / cancel with progress (design doc
-§6.1 "右侧栏"). The log is in the centre column (log_panel)."""
+"""Right column: port and baud, identify, checks, flash / cancel with progress. The log is in the
+centre column (log_panel)."""
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QResizeEvent, QStandardItemModel
@@ -102,7 +102,7 @@ class ConnectionPanel(QWidget):
     erase_all_toggled = Signal(bool)
     """The "erase the whole flash first" box above Flash (the firmware's erase_all)."""
     quick_toggled = Signal(bool)
-    """The Quick flash switch next to it (a global setting, design D7)."""
+    """The Quick flash switch next to it (a global setting)."""
     hint_dismissed = Signal()
 
     def __init__(self) -> None:

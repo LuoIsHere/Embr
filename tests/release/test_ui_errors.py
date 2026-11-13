@@ -1,7 +1,6 @@
-"""Abnormal operations in the interface, in English and Simplified Chinese (design doc
-§8.3 规则 and §12.7 必须覆盖的情况): double clicks and a second dialog, cancelling every
-dialog, damaged and foreign files added as entries, projects and firmware written by a
-newer Embr (read-only, never rewritten)."""
+"""Abnormal operations in the interface, in English and Simplified Chinese: double clicks and a
+second dialog, cancelling every dialog, damaged and foreign files added as entries, projects and
+firmware written by a newer Embr (read-only, never rewritten)."""
 
 import re
 import shutil
@@ -139,7 +138,7 @@ def test_cancel_changes_nothing(
 def test_damaged_and_foreign_files_as_entries(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§5 stage one 识别 / §8.2 image_sniff: an app with a bad checksum is still an app;
+    """Recognising added files: an app with a bad checksum is still an app;
     8 KiB of 0xFF is otadata; random data, an ELF, a text file and 4 KiB of 0xFF are
     unknown (no address: flashing is refused); a damaged partition table is not taken as
     one; a P4 app in an S3 firmware is shown as ESP32-P4 (two MCUs). Nothing crashes."""
@@ -255,8 +254,8 @@ def _newer(path: Path) -> bytes:
 def test_newer_project_and_firmware_are_read_only(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.5: a project or firmware written by a newer Embr opens read-only with the hint
-    "created by a newer Embr" and is never rewritten; it cannot be exported (§12.6)."""
+    """A project or firmware written by a newer Embr opens read-only with the hint
+    "created by a newer Embr" and is never rewritten; it cannot be exported."""
     root = tmp_path / "embr"
     app = embr(root, language)
     window = app.window

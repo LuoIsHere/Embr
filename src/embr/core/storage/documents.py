@@ -1,4 +1,4 @@
-"""TOML documents with a schema_version: projects and firmware (design doc §3.5)."""
+"""TOML documents with a schema_version: projects and firmware."""
 
 import datetime
 import os
@@ -30,7 +30,7 @@ class LoadedDocument:
 
 @dataclass(frozen=True)
 class DamagedDocument:
-    """A project or firmware file that cannot be read (design doc §12.8): skipped, never
+    """A project or firmware file that cannot be read: skipped, never
     changed."""
 
     path: Path

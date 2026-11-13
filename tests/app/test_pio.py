@@ -1,5 +1,5 @@
 """app/pio: `pio project config` results cached per project and refreshed in the background
-when platformio.ini changes (design doc §12.5). pio is never run: a FakePio answers from
+when platformio.ini changes. pio is never run: a FakePio answers from
 the platformio.ini it is run in; `start` collects the background jobs so tests run them."""
 
 import os

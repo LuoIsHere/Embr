@@ -1,4 +1,4 @@
-"""app/library: the sidebar tree and its search (design doc §6.1)."""
+"""app/library: the sidebar tree and its search."""
 
 from pathlib import Path
 

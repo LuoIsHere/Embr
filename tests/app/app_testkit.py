@@ -78,7 +78,7 @@ def app_revision_range(sample: str) -> tuple[int, int]:
 
 def root_first(files: list[Path]) -> list[Path]:
     """`files` with the shallowest first, so the firmware's folder (the folder of the first
-    file, design doc §12 item 8) holds all of them, e.g. an IDF build's bootloader/ and
+    file) holds all of them, e.g. an IDF build's bootloader/ and
     partition_table/ files below the app."""
     return sorted(files, key=lambda p: len(p.parts))
 

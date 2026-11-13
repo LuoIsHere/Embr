@@ -1,4 +1,4 @@
-"""core/package: the .embr zip (design doc §5 阶段四, §12.6) and in-memory document upgrades.
+"""core/package: the .embr zip and in-memory document upgrades.
 
 Packages are written with write_package() and then taken apart and rebuilt with zipfile
 to get malformed ones. The manifest's key names are not part of the interface; the

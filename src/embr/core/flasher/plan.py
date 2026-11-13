@@ -110,7 +110,7 @@ class ReadPlan:
 def adjust_reset(
     connection: ConnectionType, before: str, after: str
 ) -> tuple[str, str, tuple[str, ...]]:
-    """Apply the per-connection reset rules (design doc §4.4).
+    """Apply the per-connection reset rules.
 
     UART bridge (and unknown): before default-reset | no-reset, after hard-reset | no-reset.
     USB-Serial/JTAG: before default-reset | usb-reset | no-reset; after hard-reset becomes

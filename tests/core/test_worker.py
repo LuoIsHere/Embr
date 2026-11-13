@@ -130,7 +130,7 @@ def esptool_log() -> Iterator[Any]:
 
 
 def test_installed_logger_turns_esptool_output_into_events(esptool_log: Any) -> None:
-    # esptool 5.3.1's set_logger() keeps the global object's attributes (design doc §12.1)
+    # esptool 5.3.1's set_logger() keeps the global object's attributes
     events: list[Event] = []
     cursor = EntryCursor()
     install(events.append, cursor)

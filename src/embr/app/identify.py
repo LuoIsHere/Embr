@@ -1,4 +1,4 @@
-"""The last identification result (design doc §4.1).
+"""The last identification result.
 
 The port is released when a job ends, so this is only a snapshot: it dims firmware for
 other chips and lets checks run before connecting, but a flash job always identifies the

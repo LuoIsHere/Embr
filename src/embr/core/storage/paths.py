@@ -1,4 +1,4 @@
-"""Portable data layout: everything Embr writes lives next to Embr.exe (design doc §7.6)."""
+"""Portable data layout: everything Embr writes lives next to Embr.exe."""
 
 import contextlib
 import datetime
@@ -90,7 +90,7 @@ def folders(paths: AppPaths) -> tuple[Path, ...]:
 
 @dataclass(frozen=True)
 class FolderProblem:
-    """A folder Embr needs that it cannot use (design doc §12.8)."""
+    """A folder Embr needs that it cannot use."""
 
     path: Path
     occupied: bool

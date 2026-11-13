@@ -1,6 +1,5 @@
-"""Interface flows: .embr export and import, in English and Simplified Chinese (design doc
-§5 stage four, §12.6 entries and default placement; §12.7 damaged packages and packages
-written by a newer Embr).
+"""Interface flows: .embr export and import, in English and Simplified Chinese (entries and
+default placement, damaged packages and packages written by a newer Embr).
 
 Packages are made through the window's own Export dialogs; damaged copies are then
 written by the test (a changed file, a cut-off zip, a newer format or schema)."""
@@ -171,7 +170,7 @@ def test_export_project_refused_then_imported_whole(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
     """Export project… is refused as a whole, listing why, while one firmware cannot be
-    exported (§12.6); once fixed, the project with its groups and firmware comes back as
+    exported; once fixed, the project with its groups and firmware comes back as
     a new project (name suffixed)."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
@@ -234,7 +233,7 @@ def test_export_project_refused_then_imported_whole(
 def test_drop_embr_package_default_placement(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§12.6: a package dropped on a group defaults to that group, on a project to it
+    """A package dropped on a group defaults to that group, on a project to it
     (ungrouped), on the standalone area to standalone, on a firmware to its project and
     group; a package dropped with other files is refused."""
     app = embr(language=language)
@@ -345,7 +344,7 @@ def _damaged(good: Path, folder: Path) -> dict[str, Path]:
 def test_damaged_and_newer_packages_are_refused(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§5 stage four 导入: checked in full first; a changed, missing or cut-off file, a
+    """Import: checked in full first; a changed, missing or cut-off file, a
     manifest that is not readable, a newer package format or schema → refused with the
     reason, nothing created (projects, firmware, archive unchanged)."""
     app = embr(language=language)

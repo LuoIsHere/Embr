@@ -1,6 +1,6 @@
-"""Interface flows: fixed firmware, in English and Simplified Chinese (design doc §3.1,
-§3.2 entries and addresses, §3.4 fixed firmware, §5 stage one, §6.1 entries and
-parameters tabs, §12 items 7, 8, 13, 16, 17, 19).
+"""Interface flows: fixed firmware, in English and Simplified Chinese (entries and addresses,
+the Entries and Parameters tabs, the MCU of each entry, the folder of a fixed firmware, files
+dropped from Explorer).
 
 Files are copies of the tests/fixtures samples in tmp folders; the file dialog is the
 only replaced part (release_kit.FileDialogs). Drops from Explorer are delivered as Qt
@@ -42,7 +42,7 @@ def _entry_doc(root: Path, firmware: str, entry: str) -> dict[str, Any]:
 def test_new_fixed_firmware_and_add_files(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """An unnamed new firmware takes the first file's name (design doc §5 stage one);
+    """An unnamed new firmware takes the first file's name;
     entries are classified and placed automatically, sorted by address."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
@@ -77,7 +77,7 @@ def test_new_fixed_firmware_and_add_files(
         tr("3 files checked: name, path and hash agree with the recorded values")
     )
     assert ui.check(window, "Chip / revision / size / security").state == "LATER"
-    assert not window.connection.flash.isEnabled()  # nothing identified (§12 item 5)
+    assert not window.connection.flash.isEnabled()  # nothing identified
     command = window.cmdbar._full
     for part in ("write-flash", "0x0", "0x8000", "0x10000", APP):
         assert part in command, command
@@ -100,7 +100,7 @@ def test_new_fixed_firmware_and_add_files(
 
 @ui.LANGUAGES
 def test_drop_files_on_the_sidebar(embr: Start, language: Language, tmp_path: Path) -> None:
-    """Explorer drops (design doc §12 item 19): .bin files on a group create a firmware
+    """Explorer drops: .bin files on a group create a firmware
     there after the name is confirmed; on a firmware they are added; bad drops are
     refused as a whole with every reason listed; the folder rule applies."""
     app = embr(language=language)
@@ -213,7 +213,7 @@ def _place_attachment(
 def test_attachments_by_partition_and_by_address(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Attachments (design doc §5 stage one 附件): by partition the address is the
+    """Attachments: by partition the address is the
     partition's offset and a file larger than the partition is refused; by address the
     address is kept."""
     app = embr(language=language)
@@ -310,7 +310,7 @@ def test_attachments_by_partition_and_by_address(
 def test_entry_address_editing(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Design doc §3.2: a typed address is manual; invalid input is refused and the old
+    """A typed address is manual; invalid input is refused and the old
     value kept; clearing restores the detected address; typing the detected value counts
     as auto; overlapping enabled entries are refused."""
     app = embr(language=language)
@@ -371,7 +371,7 @@ def test_entry_address_editing(
 def test_mcu_column_and_multi_chip_firmware(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Design doc §12 item 13: files without chip information get an MCU chooser (empty by
+    """Files without chip information get an MCU chooser (empty by
     default, "auto (chip)" in a single-chip firmware); a firmware with entries for two
     MCUs shows both in the header, "multi" in the sidebar, a read-only chip on the
     Parameters tab, no command before identification, and cannot be merged."""
@@ -471,7 +471,7 @@ def test_enable_disable_and_entry_notes(
 def test_entry_column_widths_are_kept(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Design doc §12.5: columns Address…Image requires can be dragged; widths are saved in
+    """Columns Address…Image requires can be dragged; widths are saved in
     settings.ini [ui] entry_columns; Note keeps at least 120 px; no horizontal scrolling."""
     root = tmp_path / "embr"
     app = embr(root, language)
@@ -519,7 +519,7 @@ def test_parameters_tab(
 ) -> None:
     """Fixed firmware: flash mode / freq / size, reset modes, notes and tags are edited on
     the Parameters tab and saved at once; erase_all is the check box above Flash; the
-    command follows (no --skip-flashed with erase_all, §8.2); Re-locate folder…"""
+    command follows (no --skip-flashed with erase_all); Re-locate folder…"""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     folder = tmp_path / "params"
@@ -691,7 +691,7 @@ def test_rename_duplicate_move_and_delete_firmware(
 def test_folder_rule_for_later_files(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Design doc §12 item 8: later files must be in the first file's folder or below it;
+    """Later files must be in the first file's folder or below it;
     others are refused and nothing changes."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
@@ -717,7 +717,7 @@ def test_folder_rule_for_later_files(
 def test_entry_files_missing_changed_and_relocated(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Design doc §3.4 固定型固件: a missing file blocks flashing until it is re-located or
+    """Fixed firmware: a missing file blocks flashing until it is re-located or
     removed; changed content needs confirmation."""
     app = embr(language=language)
     window, root = app.window, app.paths.root

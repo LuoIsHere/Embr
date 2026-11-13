@@ -1,4 +1,4 @@
-"""Colour tokens, fonts and the application style sheet (design doc §6.1; values from the
+"""Colour tokens, fonts and the application style sheet (values from the
 UI mock). The light accent is the logo's Clay #C8582F; dark mode uses a lighter tone of the
 same hue for contrast on dark panels."""
 

@@ -63,7 +63,7 @@ def test_esp8266_and_unknown_chips() -> None:
     [("esp32h21", False), ("esp32", True), ("esp32s3", True), ("esp32p4", True), ("esp32c3", True)],
 )
 def test_has_stub(chip: str, stub: bool) -> None:
-    # esptool 5.3.1 ships no flasher stub for ESP32-H21 (design doc §12.1)
+    # esptool 5.3.1 ships no flasher stub for ESP32-H21
     assert chipinfo.has_stub(chip) is stub
 
 
@@ -80,7 +80,7 @@ def test_header_code_names() -> None:
     assert chipinfo.flash_freq_name("esp32c2", 0xF) == "60m"
 
 
-# ---- revision lines (design doc §12 item 13, "P4 按芯片版本分档") --------------------------
+# ---- revision lines -----------------------------------------
 
 
 def test_only_esp32p4_has_revision_lines() -> None:

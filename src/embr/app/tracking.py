@@ -1,5 +1,5 @@
-"""Keep the shown state of firmware in step with their sources (design doc §3.4
-"检测时机"). One Tracker serves the sidebar flags, the workspace and the flash button.
+"""Keep the shown state of firmware in step with their sources. One Tracker serves the sidebar
+flags, the workspace and the flash button.
 
 check() first compares a fingerprint (size and modification time of every source file)
 with the previous check and returns the cached status when nothing changed; only then is
@@ -210,7 +210,7 @@ class Tracker:
         return found
 
     def env_candidates(self, firmware_id: str) -> tuple[str, ...]:
-        """For a PIO firmware whose env platformio.ini no longer declares (design D11): the
+        """For a PIO firmware whose env platformio.ini no longer declares: the
         envs it does declare that are built and that no other firmware follows, in file
         order. One candidate is offered as "Follow env"; () while its env is still declared
         and for any other firmware."""
@@ -244,7 +244,7 @@ class Tracker:
 
     def mark_seen(self, firmware_id: str) -> None:
         """The user left the firmware: clear updated_at and, after a followed content
-        change, the "content changed" marks (design doc §3.4: they last until the next
+        change, the "content changed" marks (they last until the next
         change of the build output or switching firmware)."""
         self._updated.pop(firmware_id, None)
         status = self._status.get(firmware_id)
@@ -393,7 +393,7 @@ class Tracker:
         configured target from the PioConfigs cache and the manual framework package
         (firmware.framework_pkg, else the global default, Library.framework_pkg_default()),
         then core tracking.resolve(). Env no longer in platformio.ini -> INCOMPLETE with
-        env_gone (design D11; checked first, so also when its build folder is gone); build
+        env_gone (checked first, so also when its build folder is gone); build
         folder gone -> MISSING; an unreadable build -> INCOMPLETE. Inputs always include
         platformio.ini and its extra_configs files, so editing them re-resolves."""
         if firmware.build_ref is None or not firmware.build_ref.env:

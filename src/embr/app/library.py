@@ -4,7 +4,7 @@ Every change is saved before the method returns. Entry operations on fixed firmw
 (manual, archived) change its entries. On tracking firmware: address, enabled state and
 note of a derived entry (id = tracking.entry_key()) go to entry_overrides; adding files,
 attachments or copied entries raises TrackingEntriesError (entries come from the build
-only, design doc §12 item 16); removing, relocating or copying into a derived entry raises
+only); removing, relocating or copying into a derived entry raises
 ValueError. Every change to a tracking firmware invalidates its tracker status.
 """
 
@@ -202,8 +202,8 @@ class ProjectRow:
 
 UI_SECTION = "ui"
 PROJECT_ORDER_KEY = "project_order"
-"""settings.ini [ui] project_order: project ids, comma-separated, as dragged in the sidebar
-(design D6). Absent until the first drag: projects by name."""
+"""settings.ini [ui] project_order: project ids, comma-separated, as dragged in the sidebar. Absent
+until the first drag: projects by name."""
 
 
 @dataclass(frozen=True)
@@ -278,7 +278,7 @@ class Library:
         return Tree(tuple(projects), standalone)
 
     def damaged(self) -> list[DamagedDocument]:
-        """Project and firmware files the last tree() could not read (design doc §12.8)."""
+        """Project and firmware files the last tree() could not read."""
         return self._ctx.projects.damaged() + self._ctx.firmware.damaged()
 
     def keep_damaged(self, damaged: list[DamagedDocument]) -> Path | None:
@@ -548,10 +548,10 @@ class Library:
         project_id: str | None = None,
         device: str = "",
     ) -> list[Firmware]:
-        """New PIO_BUILD firmware, one per env in `envs` (design doc §12.5): named after the
+        """New PIO_BUILD firmware, one per env in `envs`: named after the
         env (made unique), build_ref = (project root, env), all in the same project and group
         (a project copies its default reset modes, as PIO builds give no reset
-        modes, design doc §3.1), resolved at once with the first
+        modes), resolved at once with the first
         resolution accepted. All or nothing: AlreadyTrackedError when tracking_firmware_for_env()
         finds one of them followed already, PlanError (naming the env) when one cannot be
         resolved (unbuilt, incomplete, target switched); nothing is created then. ValueError
@@ -681,7 +681,7 @@ class Library:
         name: str = "",
     ) -> Firmware:
         """New fixed firmware (as create_firmware()) holding `paths`, named `name` or after
-        the first file: files dropped on the sidebar (design doc §12 item 19). The folder
+        the first file: files dropped on the sidebar. The folder
         rule is checked first: FolderError (or OSError for an unreadable file) and nothing is
         created."""
         if not paths:
@@ -703,7 +703,7 @@ class Library:
         with an otadata partition and no enabled otadata entry exists, a blank otadata
         entry is added too. Entries placed by partition are re-resolved. A firmware still
         named UNTITLED with no entries takes the first file's name (without extension).
-        Folder rule (design doc §12 item 8): a firmware without a folder takes the folder of
+        Folder rule: a firmware without a folder takes the folder of
         the first of `paths`; every file must be in that folder or below it, otherwise
         FolderError and nothing changes. An unreadable file: OSError, nothing changes.
         Tracking firmware: TrackingEntriesError, nothing changes."""
@@ -834,7 +834,7 @@ class Library:
         return entry
 
     def fit_entries(self, firmware_id: str, chip: str, revision: int | None = None) -> list[Entry]:
-        """After a board with `chip` and `revision` was identified (design doc §12 item 13):
+        """After a board with `chip` and `revision` was identified:
         untick and save every enabled entry of a fixed firmware that does not fit it
         (app.chips.fits(): another chip, another revision line, or no MCU).
         Nothing changes when `chip` is not among the firmware's chips (the whole firmware is
@@ -1087,7 +1087,7 @@ def _origin(firmware: Firmware) -> str:
 
 def _root(firmware: Firmware, first_new: Path) -> str:
     """The folder files of a fixed firmware must be in: its folder, else the folder of the
-    first file being added (design doc §12 item 8)."""
+    first file being added."""
     return firmware.folder or str(first_new.resolve().parent)
 
 

@@ -1,4 +1,4 @@
-"""Merge a firmware into one raw image (design doc §5 stage two "合成工具"): the enabled
+"""Merge a firmware into one raw image: the enabled
 entries (attachments included) and flash parameters of any firmware; tracking firmware use
 their current resolution.
 """

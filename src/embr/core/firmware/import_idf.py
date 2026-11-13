@@ -1,4 +1,4 @@
-"""Read an ESP-IDF build directory (design doc §5 stage two): build/flasher_args.json for
+"""Read an ESP-IDF build directory: build/flasher_args.json for
 the files, addresses, flash settings, chip and reset modes, build/project_description.json
 for the project name, target, IDF version and config file, and the project's sdkconfig for
 the configured target. Offline; reads files only. May use image_sniff, never the reverse.

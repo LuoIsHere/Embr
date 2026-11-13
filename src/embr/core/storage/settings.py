@@ -1,4 +1,4 @@
-"""settings.ini: preferences, remembered baud rates, window sizes (design doc §7.6).
+"""settings.ini: preferences, remembered baud rates, window sizes.
 
 Plain configparser INI; no QSettings, no registry. Qt types are converted to text by the
 UI adapters before they reach this module.

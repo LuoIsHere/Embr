@@ -3,15 +3,14 @@ built with `pio run`; Embr itself never builds) and the ESP32-S3 on its UART bri
 test writes its own platformio.ini (and sources) and builds what it needs; the pio_project
 fixture restores the project after the session and rebuilds its original env.
 
-Design rules checked (design doc §5 stage three, §3.4, §12.5, §12.7 "PIO"): several envs
-imported at once; boot_app0.bin taken from the installed framework package and placed at
-the partition table's otadata (0xE000, or where a custom table puts it); a changed board
-switches the target until rebuilt, then the chip change needs confirmation; `pio run -t
-clean` makes the build missing; an idedata.json older than platformio.ini is not used; envs
-added and removed; two Arduino framework packages (official espressif32 6.12.0 and an older
-6.5.0): highest version or the platform_packages pin, a manual package path set, invalid
-and restored; an espidf env; Arduino core 3.x (pioarduino) is outside v0.1.0: imported,
-flashed and booting correctly, or clearly refused, never flashed wrong.
+Behaviour checked: several envs imported at once; boot_app0.bin taken from the installed framework
+package and placed at the partition table's otadata (0xE000, or where a custom table puts it); a
+changed board switches the target until rebuilt, then the chip change needs confirmation; `pio run
+-t clean` makes the build missing; an idedata.json older than platformio.ini is not used; envs added
+and removed; two Arduino framework packages (official espressif32 6.12.0 and an older 6.5.0):
+highest version or the platform_packages pin, a manual package path set, invalid and restored; an
+espidf env; Arduino core 3.x (pioarduino) is outside v0.1.0: imported, flashed and booting
+correctly, or clearly refused, never flashed wrong.
 
 Platforms needed in the PIO core besides espressif32 6.12.0 (installed once, kept):
 espressif32@6.5.0 (official registry) and pioarduino PIOARDUINO (GitHub release).
@@ -235,7 +234,7 @@ def test_clean_makes_the_build_missing_and_a_rebuild_is_followed_again(
     embr: Callable[..., kit.EmbrApp],
     file_dialogs: kit.FileDialogs,
 ) -> None:
-    """design doc §3.4: output gone -> missing, not flashable, until it is built again."""
+    """Output gone -> missing, not flashable, until it is built again."""
     app = _start(pio_project, embr)
     window = app.window
     _ini(pio_project, bk.ini_env("s3", S3_BOARD, "pio-s3"))
@@ -613,7 +612,7 @@ def test_progname_and_a_renamed_env_are_followed(
     embr: Callable[..., kit.EmbrApp],
     file_dialogs: kit.FileDialogs,
 ) -> None:
-    """Design D9, D11, D12: PROGNAME set in an extra script (platformio.ini unchanged, so
+    """PROGNAME set in an extra script (platformio.ini unchanged, so
     PlatformIO does not clean the build folder) leaves firmware.bin behind; the newer app
     image is followed as a rename, never the stale firmware.bin. A renamed env: the banner
     says platformio.ini no longer declares it and offers the one built env no firmware

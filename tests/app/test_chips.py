@@ -1,4 +1,4 @@
-"""app/chips: which MCU each entry is for (design doc §12 item 13)."""
+"""app/chips: which MCU each entry is for."""
 
 from pathlib import Path
 
@@ -112,7 +112,7 @@ def test_for_chip_shares_only_that_chips_entries(context: AppContext, tmp_path: 
     assert len(firmware.entries) == 6
 
 
-# ---- ESP32-P4 revision lines (§12 item 13, "P4 按芯片版本分档") -----------------------------
+# ---- ESP32-P4 revision lines --------------------------------------------
 
 P4_V0_V1, P4_V3, P4_ANY = Mcu("esp32p4", "v0-v1"), Mcu("esp32p4", "v3"), Mcu("esp32p4")
 

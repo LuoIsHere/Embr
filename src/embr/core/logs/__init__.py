@@ -1,5 +1,4 @@
-"""Daily log files logs/YYYY-MM-DD.log, and per-board files logs/boards/<mac>.log
-(design doc §7.6).
+"""Daily log files logs/YYYY-MM-DD.log, and per-board files logs/boards/<mac>.log.
 
 Every operation writes one segment that starts with a header line carrying the record id
 (or, for identify, an id of its own), so a record can be traced to its log. Flash, erase

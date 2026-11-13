@@ -1,5 +1,4 @@
-"""app/merging: merge a firmware into one raw image and optionally add it to the list
-(design doc §5 stage two "合成工具")."""
+"""app/merging: merge a firmware into one raw image and optionally add it to the list."""
 
 import os
 import re
@@ -146,7 +145,7 @@ def _mixed_p4_lines(library: Library, firmware_id: str, tmp_path: Path) -> Merge
     return MergeOptions()
 
 
-# the reason is the one the dialog shows (app.chips.merge_problem(), §12 item 13)
+# the reason is the one the dialog shows (app.chips.merge_problem())
 REFUSED: dict[str, tuple[Callable[[Library, str, Path], MergeOptions], str]] = {
     "no_chip": (_no_chip, "data.bin has no MCU"),
     "mixed_mcu": (_mixed_mcu, "Checked entries are for esp32p4 v0-v1 and esp32s3"),

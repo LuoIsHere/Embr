@@ -1,4 +1,4 @@
-"""About Embr (design doc §12 item 22): the copyright line, never translated, and the
+"""About Embr: the copyright line, never translated, and the
 build time written at packaging time; "development build" when run from source. Driven
 offscreen: Dialog.exec is replaced by a recorder of the dialog's texts."""
 

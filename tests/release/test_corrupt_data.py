@@ -1,4 +1,4 @@
-"""Damaged and foreign data (design doc §12.8 and §7.6): real `python -m embr` processes
+"""Damaged and foreign data: real `python -m embr` processes
 for what happens before the window opens, the real window for what it shows.
 
 Specified behaviour asserted here:

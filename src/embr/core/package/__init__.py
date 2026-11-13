@@ -1,4 +1,4 @@
-"""The .embr package (design doc §5 阶段四, §12.6): a zip file holding projects, firmware
+"""The .embr package: a zip file holding projects, firmware
 and every file they refer to, for moving them to another computer.
 
     manifest.toml

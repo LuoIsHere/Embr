@@ -1,6 +1,6 @@
-"""File fingerprints and a hash cache for re-checking firmware sources cheaply
-(design doc §3.4 "检测时机"): a stat per file decides whether anything needs reading,
-and a file is hashed again only when its size or modification time changed."""
+"""File fingerprints and a hash cache for re-checking firmware sources cheaply: a stat per file
+decides whether anything needs reading, and a file is hashed again only when its size or
+modification time changed."""
 
 import hashlib
 import stat
@@ -16,9 +16,9 @@ class FileStamp:
     size: int | None
     """None when the file does not exist or is not a regular file."""
     mtime_ns: int | None
-    """None when the path does not exist. A folder has its own (it changes when a file is
-    added, removed or renamed in it: a PlatformIO build folder gaining a renamed app image,
-    design D12); other non-regular files have None."""
+    """None when the path does not exist. A folder has its own (it changes when a file is added,
+    removed or renamed in it: a PlatformIO build folder gaining a renamed app image); other
+    non-regular files have None."""
 
 
 @dataclass(frozen=True)

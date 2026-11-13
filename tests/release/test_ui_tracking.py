@@ -1,6 +1,6 @@
 """Interface flows: tracking firmware (ESP-IDF and PlatformIO builds), in English and
-Simplified Chinese (design doc §3.4 跟随型固件 and 检测时机, §5 stages two and three, §6.1
-banners, §12 items 2, 16, 19, §12.5).
+Simplified Chinese: importing builds, following rebuilds, when sources are checked again,
+banners and project folders dropped on the sidebar.
 
 Builds are copies of the tests/fixtures samples in tmp folders (release_kit.idf_build_copy,
 pio_project_copy); the copies are then changed on disk as a rebuild, a clean or an
@@ -8,7 +8,7 @@ interrupted build would. PlatformIO: PLATFORMIO_CORE_DIR points at the sample's 
 and pio is taken off PATH, so `pio project config` is not available and the board check
 is skipped (documented behaviour); no PlatformIO installation is touched.
 
-A re-check is triggered by selecting the firmware again (§3.4: on selection); the
+A re-check is triggered by selecting the firmware again (on selection); the
 building state (a file younger than 2 s) is seen the same way."""
 
 import json
@@ -100,11 +100,10 @@ SAMPLES = {
 def test_import_idf_build(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path, sample: str
 ) -> None:
-    """The project folder is not taken silently: the dialog offers its build folder
-    (§12 item 2); the firmware follows the build, named after project_name, placed in the
-    chosen project and group; entries come from flasher_args.json and cannot be added
-    (§12 item 16); a build folder already followed is refused with a way to that
-    firmware; a folder without a build is refused."""
+    """The project folder is not taken silently: the dialog offers its build folder; the firmware
+    follows the build, named after project_name, placed in the chosen project and group; entries
+    come from flasher_args.json and cannot be added; a build folder already followed is refused with
+    a way to that firmware; a folder without a build is refused."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     project = tmp_path / "proj"
@@ -205,7 +204,7 @@ def test_import_pio_multi_env_project(
     tmp_path: Path,
     pio_env: Path,  # noqa: F811
 ) -> None:
-    """§12.5 多 env: every env of platformio.ini is listed, built ones can be checked (the
+    """Several envs: every env of platformio.ini is listed, built ones can be checked (the
     picked one is), unbuilt ones are greyed; each checked env becomes a firmware named
     after it, all in the chosen project and group; PIO Arduino firmware get boot_app0
     from the framework package, whose path can be set on the Parameters tab."""
@@ -264,7 +263,7 @@ def test_import_pio_multi_env_project(
     kit.wait_until(lambda: _doc(root, "esp32dev").get("framework_pkg", "") == "", 5)
     last = kit.log_text(window).splitlines()[-1]
     if last != "[firmware] esp32dev: framework package the Settings path / auto-detection":
-        pytest.fail(f"log line in the interface language (logs stay English, §12.5): {last!r}")
+        pytest.fail(f"log line in the interface language (logs stay English): {last!r}")
     _ = pytest
 
 
@@ -275,7 +274,7 @@ def test_drop_build_folders_on_the_sidebar(
     tmp_path: Path,
     pio_env: Path,  # noqa: F811
 ) -> None:
-    """§12 item 19 and §12.5: an IDF project folder dropped on a group opens the IDF import
+    """An IDF project folder dropped on a group opens the IDF import
     with its build folder and that project and group; a PlatformIO project folder dropped
     on a project opens the PlatformIO import with its first built env; a build folder
     dropped together with a file is refused."""
@@ -331,7 +330,7 @@ def test_drop_build_folders_on_the_sidebar(
 def test_content_change_is_followed_automatically(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.4 case 1: same files, only contents changed → followed without confirmation;
+    """Same files, only contents changed → followed without confirmation;
     the header shows "Build updated HH:MM:SS", the changed entry "content changed"."""
     build = kit.idf_build_copy("esp32s3_hello", tmp_path / "proj")
     app = embr(language=language)
@@ -367,10 +366,10 @@ def test_content_change_is_followed_automatically(
 def test_build_changes_that_need_confirmation(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.4 cases 2 and 3 and manual addresses: an added or removed file or a moved entry
+    """Changed file lists and manual addresses: an added or removed file or a moved entry
     needs confirmation (banner listing the changes, "needs confirmation", "!", Flash
     blocked); Confirm entries accepts it once. A renamed app file at the same address is
-    followed without confirmation and logged (design D9, D10)."""
+    followed without confirmation and logged."""
     build = kit.idf_build_copy("esp32s3_hello", tmp_path / "proj")
     app = embr(language=language)
     window, root = app.window, app.paths.root
@@ -445,7 +444,7 @@ def test_build_changes_that_need_confirmation(
 def test_build_folder_missing_and_change_directory(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.4 / §6.1: a build folder that is gone (renamed, fullclean) → "build output
+    """A build folder that is gone (renamed, fullclean) → "build output
     missing": banner with the last resolution and Change directory…, the snapshot still
     listed, ×, flash / merge / archive blocked; Change directory… follows the new place."""  # noqa: RUF002
     build = kit.idf_build_copy("esp32s3_hello", tmp_path / "proj")
@@ -470,7 +469,7 @@ def test_build_folder_missing_and_change_directory(
     if ui.entry_names(window) != ui.S3_FILES:
         problems.append(f"snapshot entries {ui.entry_names(window)}")
     if window.firmware_view.entries.merge_button.isEnabled():
-        problems.append("Merge to .bin… enabled with the build output missing (§5 合成工具)")
+        problems.append("Merge to .bin… enabled with the build output missing")
     seen: list[ui.MenuSeen] = []
     ui.firmware_menu(window, seen=seen)
     if seen[0].enabled.get(ui.plain(tr("Archive this version…"))):
@@ -495,7 +494,7 @@ def test_build_folder_missing_and_change_directory(
 def test_build_incomplete_and_being_written(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """§3.4: unreadable images or missing files → "build incomplete" (not flashable); a
+    """Unreadable images or missing files → "build incomplete" (not flashable); a
     file written less than 2 s ago → building, checked again shortly."""
     build = kit.idf_build_copy("esp32s3_hello", tmp_path / "proj")
     app = embr(language=language)

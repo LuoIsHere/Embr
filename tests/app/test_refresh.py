@@ -1,4 +1,4 @@
-"""app/refresh: which firmware the periodic re-check visits (design doc §3.4 "检测时机")."""
+"""app/refresh: which firmware the periodic re-check visits."""
 
 from embr.app.context import AppContext
 from embr.app.refresh import ROUND_LIMIT, RefreshSchedule

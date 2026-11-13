@@ -1,4 +1,4 @@
-"""Resolve tracking firmware against its build output (design doc §3.4).
+"""Resolve tracking firmware against its build output.
 
 Source-agnostic: an importer (import_idf, import_pio) describes the build as a
 DerivedBuild. resolve() classifies its files, applies the user's entry_overrides,
@@ -43,7 +43,7 @@ class ResolveState(StrEnum):
     OK = "ok"
     """Same as last_resolved."""
     UPDATED = "updated"
-    """Only file contents changed, or the app file was renamed (design D9): followed without
+    """Only file contents changed, or the app file was renamed: followed without
     confirmation (accept() is applied)."""
     NEEDS_CONFIRMATION = "needs_confirmation"
     """Anything else changed since last_resolved; not flashable until confirmed."""
@@ -75,7 +75,7 @@ class ChangeKind(StrEnum):
     """Content of the partition table file."""
     ENTRY_RENAMED = "entry_renamed"
     """The app file has a new name (an ESP-IDF project or PlatformIO PROGNAME renamed): one
-    app entry gone and one new at the same address, same chip (design D9). Listed instead
+    app entry gone and one new at the same address, same chip. Listed instead
     of the added, removed and dropped-override lines; its overrides move to the new name."""
     ENTRY_ADDED = "entry_added"
     ENTRY_REMOVED = "entry_removed"
@@ -124,7 +124,7 @@ class DerivedFile:
     """Importer remark shown with the entry (Resolution.entry_notes)."""
     blank_size: int = 0
     """With path None: an OTADATA entry named "otadata (blank)", file "blank:", content
-    blank_size bytes of 0xFF (PIO Arduino without boot_app0.bin, design doc §5)."""
+    blank_size bytes of 0xFF (PIO Arduino without boot_app0.bin)."""
 
 
 @dataclass(frozen=True)
@@ -179,11 +179,11 @@ class Resolution:
     build_notes: tuple[str, ...] = ()
     """DerivedBuild.notes."""
     removed: tuple[Entry, ...] = ()
-    """Entries of last_resolved whose file is no longer in the build (design doc §3.4 case
-    2; not the old name of a renamed app file), rebuilt from the snapshot for display and
-    marked MISSING. Never part of `firmware`: not flashed, not accepted."""
+    """Entries of last_resolved whose file is no longer in the build (not the old name of a renamed
+    app file), rebuilt from the snapshot for display and marked MISSING. Never part of `firmware`:
+    not flashed, not accepted."""
     env_gone: bool = False
-    """PlatformIO: platformio.ini no longer declares the followed env (design D11)."""
+    """PlatformIO: platformio.ini no longer declares the followed env."""
 
 
 def entry_key(kind: EntryKind, file_name: str) -> str:
@@ -206,7 +206,7 @@ def resolve(
     4. no last_resolved -> OK (first resolve; the importer accepts it)
     5. only CONTENT and ENTRY_RENAMED changes -> UPDATED; any other change ->
        NEEDS_CONFIRMATION; else OK
-    A renamed app file (_renamed_app(), design D9) keeps the overrides of its old name:
+    A renamed app file (_renamed_app()) keeps the overrides of its old name:
     note, enabled and manual address apply to the new entry, which is marked CHANGED.
     build.problems make the state INCOMPLETE with those problems (step 1). Blank files
     (DerivedFile.blank_size) become "otadata (blank)" entries that are never missing.
@@ -452,7 +452,7 @@ def _renamed_app(
     derived: list[_Derived],
     chip: str | None,
 ) -> tuple[str, str] | None:
-    """(old key, new key) when the app file was renamed (design D9): against last_resolved
+    """(old key, new key) when the app file was renamed: against last_resolved
     exactly one app entry is gone and exactly one is new, at the same address, and the chip
     did not change. Renaming an ESP-IDF project, or setting a PlatformIO PROGNAME, renames
     the app file this way. Other entries may change too; they are listed as usual."""

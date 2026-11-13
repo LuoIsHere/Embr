@@ -204,7 +204,7 @@ def test_check_layout_flash_size_and_missing_address() -> None:
     assert missing and unresolved.id in missing[0].entry_ids
 
 
-# --- one folder per fixed firmware (design doc §12 item 8) -------------------------------
+# --- one folder per fixed firmware -------------------------------
 
 IN_FOLDER: dict[str, tuple[Callable[[Path], str], Callable[[Path], Path], bool]] = {
     "file": (str, lambda r: r / "a.bin", True),

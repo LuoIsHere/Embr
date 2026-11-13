@@ -1,4 +1,4 @@
-"""Flash records in embr.sqlite (design doc §3.3).
+"""Flash records in embr.sqlite.
 
 A record is a snapshot taken when the operation ran: it never refers to the current
 content of a project or firmware, so renaming, moving or deleting them leaves it intact.

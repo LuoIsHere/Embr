@@ -1,4 +1,4 @@
-"""Entry file consistency: name, path and hash (design doc §3.4)."""
+"""Entry file consistency: name, path and hash."""
 
 import hashlib
 from enum import StrEnum

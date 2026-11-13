@@ -1,4 +1,4 @@
-"""Reordering projects and groups by dragging them in the sidebar (plan #9, #20): the
+"""Reordering projects and groups by dragging them in the sidebar: the
 geometry as plain functions, then real mouse events on the sidebar of a window."""
 
 import tomllib

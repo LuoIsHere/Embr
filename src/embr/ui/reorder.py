@@ -1,4 +1,4 @@
-"""Reordering projects and groups by dragging them in the sidebar (plan #9, #20).
+"""Reordering projects and groups by dragging them in the sidebar.
 
 No QDrag: the sidebar handles the mouse itself. When a drag starts, each block (a project
 with its rows, or a group with its firmware) is grabbed as a picture and drawn by an overlay

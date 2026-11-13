@@ -1,5 +1,4 @@
-"""app/operations: identify, flash, erase and read-flash jobs with a fake worker process
-(design doc §3.3, §7.2).
+"""app/operations: identify, flash, erase and read-flash jobs with a fake worker process.
 
 The fake worker is `python -c` printing protocol lines, started through the real runner.
 `dispatch` queues each callable and the test thread runs the queue, as the Qt adapter

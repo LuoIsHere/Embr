@@ -1,5 +1,5 @@
 """core/flasher/merge: merged raw images, byte for byte against `idf.py merge-bin`, the PIO
-reference image and esptool's own command line (design doc §5 stage two "合成工具")."""
+reference image and esptool's own command line."""
 
 import json
 import shlex

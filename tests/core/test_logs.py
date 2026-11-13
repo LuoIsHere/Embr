@@ -1,4 +1,4 @@
-"""core/logs: daily log files, segments and per-board files (design doc §7.6)."""
+"""core/logs: daily log files, segments and per-board files."""
 
 import datetime
 from pathlib import Path

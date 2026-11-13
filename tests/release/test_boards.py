@@ -2,15 +2,15 @@
 window driven through its controls, the bundled esptool in real worker processes, and an
 independent read-back with esptool's command line.
 
-Boards (design doc §8.1): EMBR_TEST_PORT_UART (ESP32-S3 through a CH343 bridge),
+Boards: EMBR_TEST_PORT_UART (ESP32-S3 through a CH343 bridge),
 EMBR_TEST_PORT_USB (the same S3's USB-Serial/JTAG), EMBR_TEST_PORT_P4 (M5Stack Tab5,
 ESP32-P4 v1.0). Every test leaves a fixture hello_world on the boards it used.
 
-Design rules checked: §4.1 (one connection per job, the port released afterwards,
-identification snapshot cleared on a port switch), §4.3 (chip and revision refusals with
-nothing written), §4.4 (baud not applicable on native USB, reset policy per connection,
-baud remembered per VID/PID, manual reset hint), §5 stage one (attachments by partition),
-§8.2 "集成 (需真机)", §12.7 (multi-device switching, damaged firmware, operator steps).
+Behaviour checked: one connection per job, the port released afterwards and the
+identification snapshot cleared on a port switch; chip and revision refusals with nothing
+written; baud not applicable on native USB, the reset policy per connection, the baud
+remembered per VID/PID and the manual reset hint; attachments placed by partition;
+switching between boards, damaged firmware and the operator steps.
 """
 
 import random
@@ -69,7 +69,7 @@ def _restore_hello(device: str, sample: str) -> None:
     bk.write_back(device, _pairs(sample))
 
 
-# ---- §8.2: the port is released after identify and flash --------------------------------
+# ---- the port is released after identify and flash --------------------------------
 
 
 @pytest.mark.parametrize("var", [bk.UART, bk.USB, bk.P4])
@@ -91,7 +91,7 @@ def test_port_released_after_identify_and_flash(
     assert app.window.isVisible()
 
 
-# ---- §8.2: S3 over the UART bridge, flash and read back ---------------------------------
+# ---- S3 over the UART bridge, flash and read back ---------------------------------
 
 
 def test_s3_uart_flash_and_read_back(
@@ -121,7 +121,7 @@ def test_s3_uart_flash_and_read_back(
     assert HELLO in bk.listen(device, 6, reset=True)
 
 
-# ---- §8.2: S3 over USB-Serial/JTAG ------------------------------------------------------
+# ---- S3 over USB-Serial/JTAG ------------------------------------------------------
 
 
 def test_s3_usb_serial_jtag_auto_reset_and_watchdog_boot(
@@ -161,7 +161,7 @@ HINT_MANUAL = (
 )
 
 
-# ---- §8.2: Tab5 -------------------------------------------------------------------------
+# ---- Tab5 -------------------------------------------------------------------------
 
 
 def test_tab5_flash_ok_and_rev3_image_refused_without_writing(
@@ -199,7 +199,7 @@ def test_tab5_flash_ok_and_rev3_image_refused_without_writing(
     assert bk.regions(device, spans, tmp_path / "rb") == before
 
 
-# ---- §8.2: a project with S3 and P4 firmware --------------------------------------------
+# ---- a project with S3 and P4 firmware --------------------------------------------
 
 
 def test_multichip_project_highlight_dim_and_refusal(
@@ -235,7 +235,7 @@ def test_p4_firmware_flash_job_on_s3_refused_behind_the_disabled_button(
     embr: Callable[..., kit.EmbrApp], file_dialogs: kit.FileDialogs, tmp_path: Path
 ) -> None:
     """The window keeps Flash disabled (test above). Behind it, the job must refuse too
-    (design doc §4.1: the job checks everything in its own connection; §4.3: identified
+    (the job checks everything in its own connection; identified
     chip, firmware chip and image headers compared, a mismatch is refused), with nothing
     written and no "ok" record for the P4 firmware on the S3."""
     from embr.app.flashplan import PlanError
@@ -252,7 +252,7 @@ def test_p4_firmware_flash_job_on_s3_refused_behind_the_disabled_button(
     before = bk.regions(uart, spans, tmp_path / "rb")
     bk.identify(window, uart)  # a fresh snapshot after the read-back's reset
     kit.click_sidebar(window, "p4 fw")
-    # behind the disabled button the job must refuse as well (design doc §4.1, §4.3: the
+    # behind the disabled button the job must refuse as well (the
     # job checks the board against the firmware's chip in its own connection)
     port = window.connection.selected_port()
     fw = bk.firmware_by_name(app, "p4 fw")
@@ -271,7 +271,7 @@ def test_p4_firmware_flash_job_on_s3_refused_behind_the_disabled_button(
     ]
 
 
-# ---- §12.7: switching between the boards ------------------------------------------------
+# ---- switching between the boards ------------------------------------------------
 
 
 def test_switch_ports_and_boards_with_firmware_selected(
@@ -321,7 +321,7 @@ def test_switch_ports_and_boards_with_firmware_selected(
     assert bk.last_record(app).port == uart
 
 
-# ---- §5 stage one: an attachment placed by partition ------------------------------------
+# ---- an attachment placed by partition ------------------------------------
 
 
 @pytest.mark.parametrize("language", [Language.ENGLISH, Language.ZH_CN])
@@ -369,7 +369,7 @@ def test_attachment_by_partition_is_flashed_there(
     _restore_hello(device, S3_HELLO)  # clear the attachment out of nvs
 
 
-# ---- §12.7: erase the whole flash, then flash a test program again ----------------------
+# ---- erase the whole flash, then flash a test program again ----------------------
 
 
 @pytest.mark.parametrize("var", [bk.UART, bk.P4])
@@ -411,7 +411,7 @@ def test_erase_whole_flash_then_reflash(
         assert HELLO in out or "Restarting in" in out, out[-1500:]
 
 
-# ---- §12.7: read flash, save it and import it -------------------------------------------
+# ---- read flash, save it and import it -------------------------------------------
 
 
 def test_read_flash_region_saved_and_imported(
@@ -457,7 +457,7 @@ def _flash_size(window: Any) -> str:
     return str(snapshot.info.flash_size)
 
 
-# ---- §4.4: the baud rate is remembered per VID/PID --------------------------------------
+# ---- the baud rate is remembered per VID/PID --------------------------------------
 
 
 def test_baud_remembered_per_vid_pid(
@@ -490,7 +490,7 @@ def test_baud_remembered_per_vid_pid(
     assert "303a:1001" not in (root / "settings.ini").read_text(encoding="utf-8")
 
 
-# ---- §12.7: damaged firmware is refused before anything is written ----------------------
+# ---- damaged firmware is refused before anything is written ----------------------
 
 
 def _damage(kind: str, files: list[Path], folder: Path) -> list[Path]:
@@ -687,7 +687,7 @@ def test_operator_tab5_manual_download_mode_flash_and_manual_reset(
     assert bk.last_record(app).result == RecordResult.OK
     assert kit.same_text(kit.text_of(window.connection.hint), HINT_MANUAL)
     still = bk.listen(device, 5)
-    assert HELLO not in still, "left download mode by itself (design doc §4.4 says it cannot)"
+    assert HELLO not in still, "left download mode by itself (it stays until a reset)"
     kit.operator_step(
         "接下来请手动复位 Tab5 (短按复位键), 让它运行刚烧录的程序。",
         "现在短按 Tab5 的复位键。按完后点击“完成”。",
@@ -700,7 +700,7 @@ def test_operator_tab5_manual_download_mode_flash_and_manual_reset(
 def test_operator_tab5_not_in_download_mode_prompt_and_cancel(
     embr: Callable[..., kit.EmbrApp],
 ) -> None:
-    """Connect & identify (required before Flash, design doc §12 item 5) on a Tab5 whose
+    """Connect & identify (required before Flash) on a Tab5 whose
     firmware does not keep USB-Serial/JTAG: the automatic reset cannot work, the hint says
     to enter download mode as the vendor describes, the wait can be cancelled at once and
     the port is released."""

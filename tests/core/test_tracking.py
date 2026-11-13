@@ -1,6 +1,5 @@
-"""core/firmware/tracking: resolving a tracking firmware against its build (design doc
-§3.4 "跟随", "切换目标芯片", "切换 ESP-IDF 版本"). Builds are assembled in tmp_path from
-the IDF fixtures; DerivedBuild comes from import_idf as an importer would build it."""
+"""core/firmware/tracking: resolving a tracking firmware against its build. Builds are assembled in
+tmp_path from the IDF fixtures; DerivedBuild comes from import_idf as an importer would build it."""
 
 import copy
 import shutil
@@ -207,7 +206,7 @@ def test_build_changes_need_confirmation(tmp_path: Path, case: str) -> None:
     assert kinds == sorted(kinds, key=order.index)
     if case == "entry_added":
         assert EntryMark.NEW in resolution.marks.values()
-    if case == "app_renamed_and_moved":  # a new address: not a rename (design D9)
+    if case == "app_renamed_and_moved":  # a new address: not a rename
         assert resolution.marks[entry_key(EntryKind.APP, "renamed.bin")] is EntryMark.NEW
 
     accept(firmware, resolution)
