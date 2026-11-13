@@ -325,8 +325,8 @@ def test_newer_project_and_firmware_are_read_only(
 
     with kit.expect_dialog(look, title="Export firmware"):
         ui.firmware_menu(window, "Export…")
-    if not any(tr("written by a newer Embr") in t for t in export):
-        problems.append(f"no reason 'written by a newer Embr' in {export}")
+    if not any(tr("created by a newer Embr") in t for t in export):
+        problems.append(f"no reason 'created by a newer Embr' in {export}")
 
     ui.click_row(window, "Future", "project")
     shown = " ".join(ui.header_texts(window) + kit.all_texts(window.project_view))

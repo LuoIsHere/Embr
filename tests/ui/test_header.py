@@ -132,3 +132,30 @@ def test_a_new_file_time_with_the_same_content_keeps_the_workspace(
 
     assert window.header.files_updated.text().endswith(f"{YESTERDAY_NOON:%m-%d %H:%M}")
     assert _label(window, 1) is name  # the header was not rebuilt
+
+
+def _tags(window: EmbrWindow) -> list[str]:
+    return [w.text() for w in window.header.findChildren(QLabel)]
+
+
+def test_one_group_is_counted_in_the_singular(window: EmbrWindow) -> None:
+    project = window.library.create_project("p")
+    window.library.add_group(project.id, "Main")
+    window.select_project(project.id)
+    assert "1 group" in _tags(window)
+    window.library.add_group(project.id, "Aux")
+    window.select_project(project.id)
+    assert "2 groups" in _tags(window)
+
+
+def test_the_notes_tooltip_only_shows_a_note(window: EmbrWindow) -> None:
+    # without a note the line already says it all; a note may be cut off, so it is shown whole
+    project = window.library.create_project("p")
+    window.select_project(project.id)
+    assert window.header.notes.toolTip() == ""
+    window.library.set_project_notes(project.id, "rev B board")
+    window.select_project(project.id)
+    assert window.header.notes.toolTip() == "rev B board"
+    firmware = window.library.create_firmware("fw")
+    window.select_firmware(firmware.id)
+    assert window.header.notes.toolTip() == ""

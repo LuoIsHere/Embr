@@ -216,7 +216,12 @@ def check_files(entries: Sequence[PlanEntry]) -> Check:
             return Check(
                 FILES, CheckLevel.REFUSE, N_(f"{e.name}: content changed since it was checked")
             )
-    return Check(FILES, CheckLevel.PASS, N_(f"{len(entries)} files: name, path and hash match"))
+    passed = (
+        N_("1 file: name, path and hash match")
+        if len(entries) == 1
+        else N_(f"{len(entries)} files: name, path and hash match")
+    )
+    return Check(FILES, CheckLevel.PASS, passed)
 
 
 def flash_size_bytes(size: str) -> int | None:

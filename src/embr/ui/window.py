@@ -137,12 +137,12 @@ HINT_IDENTIFY = N_(
 )
 HINT_OTG = N_(
     "Connect & identify this board first. USB-OTG: put the board into download mode as "
-    "described by its vendor before connecting; Cancel is available while waiting."
+    "described by its vendor before connecting. Cancel is available while waiting."
 )
 HINT_JTAG = N_(
-    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried; if the "
-    "running firmware does not keep this peripheral, the connect step times out, then enter "
-    "download mode as described by the board's vendor."
+    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried. If the "
+    "running firmware does not keep this peripheral, the connect step times out; then put "
+    "the board into download mode as described by its vendor."
 )
 QUICK_KEY = "quick_flash"
 """settings.ini [ui] quick_flash: the Quick flash switch, off by default."""
@@ -160,12 +160,12 @@ HINT_QUICK_NEEDS_ID = N_(
 )
 HINT_QUICK_OTG = N_(
     "Quick flash over USB-OTG: put the board into download mode as described by its vendor "
-    "before flashing; Cancel is available while waiting."
+    "before flashing. Cancel is available while waiting."
 )
 HINT_QUICK_JTAG = N_(
-    "Quick flash over USB-Serial/JTAG: automatic reset is tried; if the running firmware does "
-    "not keep this peripheral, the connect step times out, then enter download mode as "
-    "described by the board's vendor."
+    "Quick flash over USB-Serial/JTAG: automatic reset is tried. If the running firmware "
+    "does not keep this peripheral, the connect step times out; then put the board into "
+    "download mode as described by its vendor."
 )
 
 
@@ -527,11 +527,8 @@ class EmbrWindow(FrameWindow):
                 self,
                 tr("Delete firmware"),
                 [
-                    tr(
-                        f"Delete <b>{html.escape(firmware.name)}</b>? Archived files are kept "
-                        "(use Clean archive to remove unreferenced ones) and flash records are "
-                        "not affected."
-                    )
+                    tr(f"Delete <b>{html.escape(firmware.name)}</b>?"),
+                    tr(dialogs.ARCHIVE_KEPT),
                 ],
                 tr("Delete"),
             )
@@ -940,8 +937,8 @@ class EmbrWindow(FrameWindow):
 
     def _flash_or_cancel(self) -> None:
         if self._ops.busy:
-            self.note("error", "Cancelling: worker process killed, serial port released.")
             self._ops.cancel()
+            self.note("error", "Cancelled: worker process killed, serial port released.")
             return
         firmware_id = self._selected_firmware_id()
         port = self.connection.selected_port()

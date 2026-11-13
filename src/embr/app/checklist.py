@@ -227,7 +227,9 @@ def _files(context: AppContext, firmware: Firmware, chip: str | None) -> CheckIt
     return CheckItem(
         CheckState.PASS,
         N_("Files match"),
-        N_(f"{len(enabled)} files checked: name, path and hash agree with the recorded values"),
+        N_("1 file: name, path and hash match the records")
+        if len(enabled) == 1
+        else N_(f"{len(enabled)} files: name, path and hash match the records"),
     )
 
 

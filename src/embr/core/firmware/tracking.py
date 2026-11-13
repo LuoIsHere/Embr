@@ -90,7 +90,7 @@ class ChangeKind(StrEnum):
     CONTENT = "content"
     """Same file, new content. With ENTRY_RENAMED the only kinds in an UPDATED resolution."""
     GROUP_HINT = "group_hint"
-    """Chip changed: the device group may need adjusting."""
+    """Chip changed: the group may need adjusting."""
 
 
 @dataclass(frozen=True)
@@ -604,7 +604,7 @@ def _changes(
             "",
             firmware.device,
             firmware.device,
-            N_("The device group may need adjusting"),
+            N_("The group may need adjusting"),
         )
     old_idf, new_idf = doc_str(last, "idf_version"), doc_str(snapshot, "idf_version")
     idf_changed = bool(old_idf and new_idf and old_idf != new_idf)

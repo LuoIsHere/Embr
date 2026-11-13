@@ -49,6 +49,11 @@ from embr.ui.widgets import button, label
 
 IMPORT_LABEL = N_("Import into Embr as a firmware")
 """Read flash and merge: keep the result in the firmware list too (checked by default)."""
+ARCHIVE_KEPT = N_(
+    "Archived files are kept (use Clean archive to remove the ones no firmware refers to); "
+    "flash records are not affected."
+)
+"""Deleting firmware or a project: what stays."""
 REPOSITORY = "https://github.com/LuoIsHere/Embr"
 RELEASES = "https://github.com/LuoIsHere/Embr/releases"
 COPYRIGHT = "Copyright © 2026 @LuoIsHere"
@@ -263,7 +268,7 @@ def new_firmware(
     dialog.text(
         tr(
             "Fixed firmware: add entries by hand afterwards. Reset policy is copied from the "
-            "project defaults."
+            "project defaults; standalone firmware use default-reset / hard-reset."
         )
     )
     name.setFocus()
@@ -341,7 +346,7 @@ def settings(parent: QWidget, paths: AppPaths, library: Library) -> None:
     folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     dialog.field(tr("Program folder"), folder)
     dialog.field(
-        tr("Data and log folders (portable, inside the program folder; fixed, not configurable)"),
+        tr("Data, logs and settings (portable: inside the program folder, not configurable)"),
         label("data\\ · logs\\ · temp\\ · settings.ini", mono=True),
     )
     dialog.exec()
@@ -652,8 +657,8 @@ def import_pio(
         if result.config_error:
             lines.append(
                 tr(
-                    f"pio project config gave nothing ({html.escape(tr(result.config_error))}); "
-                    "boards are unknown and the board check is skipped until it works."
+                    f"pio project config failed: {html.escape(tr(result.config_error))}. "
+                    "Boards are unknown and the board check is skipped."
                 )
             )
         for choice in result.envs:
@@ -778,7 +783,11 @@ def clean_archive(
     if not unused:
         dialog.cancel.hide()
     total = sum(u.file.size for u in usage)
-    dialog.text(tr(f"The archive holds {len(usage)} files ({total:,} bytes)."))
+    dialog.text(
+        tr(f"The archive holds 1 file ({total:,} bytes).")
+        if len(usage) == 1
+        else tr(f"The archive holds {len(usage)} files ({total:,} bytes).")
+    )
     if kept:
         users: dict[str, int] = {}
         for u in kept:
@@ -790,6 +799,11 @@ def clean_archive(
         )
         kept_text = dialog.text(
             tr(
+                f"1 file is kept because firmware refers to it: {links}. Archived versions "
+                "are firmware too; delete one of them first to free its files."
+            )
+            if len(kept) == 1
+            else tr(
                 f"{len(kept)} files are kept because firmware refers to them: {links}. Archived "
                 "versions are firmware too; delete one of them first to free its files."
             )
@@ -814,6 +828,11 @@ def clean_archive(
         more = tr(f"<br>…and {len(unused) - 12} more") if len(unused) > 12 else ""
         dialog.text(
             tr(
+                f"<b>Delete 1 file ({size:,} bytes) that no firmware refers to?</b> "
+                f"This cannot be undone.{lines}"
+            )
+            if len(unused) == 1
+            else tr(
                 f"<b>Delete {len(unused)} files ({size:,} bytes) that no firmware refers to?</b> "
                 f"This cannot be undone.{lines}{more}"
             )
@@ -873,7 +892,7 @@ def merge(
     dialog.text(
         tr(
             "Gaps are filled with 0xFF, so every partition inside the written range is overwritten "
-            "(the NVS between the partition table and otadata is cleared). A padded image "
+            "(for example, the NVS partition of the default layout is cleared). A padded image "
             "overwrites the whole flash."
         )
     )
@@ -971,7 +990,11 @@ def read_flash(
 ) -> ReadRequest | None:
     """`folder`: where the file goes by default (the last one used)."""
     dialog = Dialog(parent, tr("Read flash"), tr("Read"), danger=False)
-    whole = QCheckBox(tr(f"whole flash ({info.flash_size or 'detected size'})"))
+    whole = QCheckBox(
+        tr(f"whole flash ({info.flash_size})")
+        if info.flash_size
+        else tr("whole flash (size not detected)")
+    )
     whole.setChecked(True)
     dialog.body.addWidget(whole)
     start = QLineEdit("0x0")
@@ -1058,13 +1081,11 @@ def export_firmware(
     export (in list order) and the package path."""
     dialog = Dialog(parent, tr("Export firmware"), tr("Export"), danger=False)
     chosen = next((f for f in firmware if f.id == chosen_id), firmware[0])
-    scope = (
-        tr("Firmware in this project") if chosen.project_id else tr("Firmware without a project")
-    )
+    scope = tr("Firmware in this project") if chosen.project_id else tr("Standalone firmware")
     dialog.text(
         tr(
-            f"{scope}; check the ones to put into the package. Tracking firmware go in as they "
-            "are resolved now, as fixed firmware."
+            f"{scope}; check the ones to put into the package. Tracking firmware is exported as "
+            "fixed firmware with its current entries."
         )
     )
     blocked = {b.firmware_id: b for b in check.blocked}
@@ -1128,8 +1149,8 @@ def export_project(
     dialog.text(
         tr(
             f"Exports <b>{html.escape(project_name)}</b> with its groups and all {count} "
-            "firmware, and every file they use, into one .embr package. Tracking firmware go in "
-            "as they are resolved now, as fixed firmware."
+            "firmware, and every file they use, into one .embr package. Tracking firmware is "
+            "exported as fixed firmware with its current entries."
         )
     )
     if check.with_dump:
@@ -1173,7 +1194,11 @@ def import_package(
     size = sum(f.size for f in manifest.files)
     dialog.text("<br>".join(f"•&nbsp;{line}" for line in lines))
     dialog.text(
-        tr(f"{len(manifest.files)} files ({size:,} bytes); every file matches the package's list.")
+        tr(f"1 file ({size:,} bytes); it matches the package's list.")
+        if len(manifest.files) == 1
+        else tr(
+            f"{len(manifest.files)} files ({size:,} bytes); every file matches the package's list."
+        )
     )
     placement: PlacementFields | None = None
     if loose:
@@ -1192,8 +1217,8 @@ def import_package(
         placement = fields
     dialog.text(
         tr(
-            "Everything is created anew as archived firmware with new ids; the files go into "
-            "the archive. Names that already exist get a numeric suffix."
+            "Everything is created anew as archived firmware; the files go into the archive. "
+            "Names that already exist get a numeric suffix."
         )
     )
     if dialog.exec() != QDialog.DialogCode.Accepted:

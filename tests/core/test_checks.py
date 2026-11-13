@@ -177,3 +177,8 @@ def test_missing_file_refuses(copied: list[PlanEntry]) -> None:
     check = check_files(copied)
     assert (check.name, check.level) == (FILES, CheckLevel.REFUSE)
     assert copied[2].name in check.message or Path(copied[2].path).name in check.message
+
+
+def test_passed_files_are_counted(copied: list[PlanEntry]) -> None:
+    assert check_files(copied).message == "3 files: name, path and hash match"
+    assert check_files(copied[:1]).message == "1 file: name, path and hash match"

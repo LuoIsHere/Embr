@@ -10,7 +10,7 @@ or read-only cannot be exported.
 
 Import: core.package.read_package() checks the whole package first; only then are files
 put into the archive (existing content not stored twice, a name record added) and new
-projects and firmware created with new ids, names made unique. Every
+projects and firmware created anew, names made unique. Every
 imported firmware is ARCHIVED with archived_from "Imported from <file name>, <time>".
 Projects of the package come back as new projects with their groups; loose firmware go
 where the import dialog says (a project and group, or standalone).
@@ -49,7 +49,7 @@ class Blocked:
     firmware_id: str
     name: str
     reason: str
-    """Short, translatable (tracking.STATE_TEXT or "written by a newer Embr")."""
+    """Short, translatable (tracking.STATE_TEXT or "created by a newer Embr")."""
     details: tuple[str, ...] = ()
     """The problems or changes behind it, as the change list shows them."""
 
@@ -94,7 +94,7 @@ class Packager:
 
     def check_export(self, firmware_ids: Sequence[str]) -> ExportCheck:
         """Which of the firmware can be exported now and why the others cannot (the
-        reasons archiving would give, or "written by a newer Embr"). KeyError for an
+        reasons archiving would give, or "created by a newer Embr"). KeyError for an
         unknown id."""
         exportable: list[str] = []
         blocked: list[Blocked] = []
@@ -102,7 +102,7 @@ class Packager:
         for firmware_id in firmware_ids:
             firmware = self._ctx.firmware.get(firmware_id)
             if firmware.read_only:
-                reason = N_("written by a newer Embr")
+                reason = N_("created by a newer Embr")
                 blocked.append(Blocked(firmware_id, firmware.name, reason))
                 continue
             status = self._tracker.check(firmware_id)

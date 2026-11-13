@@ -92,12 +92,12 @@ NEEDS_ID = (
 )
 QUICK_OTG = (
     "Quick flash over USB-OTG: put the board into download mode as described by its vendor "
-    "before flashing; Cancel is available while waiting."
+    "before flashing. Cancel is available while waiting."
 )
 QUICK_JTAG = (
-    "Quick flash over USB-Serial/JTAG: automatic reset is tried; if the running firmware does "
-    "not keep this peripheral, the connect step times out, then enter download mode as "
-    "described by the board's vendor."
+    "Quick flash over USB-Serial/JTAG: automatic reset is tried. If the running firmware "
+    "does not keep this peripheral, the connect step times out; then put the board into "
+    "download mode as described by its vendor."
 )
 ERASE = (
     "Quick flash with erase on: the whole flash of the board on {} is erased without a prior "
@@ -106,12 +106,12 @@ ERASE = (
 OLD_IDENTIFY = "Connect & identify this board first; Flash becomes available when no check refuses."
 OLD_OTG = (
     "Connect & identify this board first. USB-OTG: put the board into download mode as "
-    "described by its vendor before connecting; Cancel is available while waiting."
+    "described by its vendor before connecting. Cancel is available while waiting."
 )
 OLD_JTAG = (
-    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried; if the "
-    "running firmware does not keep this peripheral, the connect step times out, then enter "
-    "download mode as described by the board's vendor."
+    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried. If the "
+    "running firmware does not keep this peripheral, the connect step times out; then put "
+    "the board into download mode as described by its vendor."
 )
 MANUAL_RESET = (
     "Flashed and verified. If the device did not restart on its own (usually when download "

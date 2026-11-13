@@ -346,7 +346,7 @@ class ProjectView(QScrollArea):
                     f"Delete <b>{_esc(project.name)}</b>? By default its {count} firmware become "
                     "standalone."
                 ),
-                tr("Archived files are kept (use Clean archive); flash records are not affected."),
+                tr(dialogs.ARCHIVE_KEPT),
             ],
             tr("Delete project"),
             checkbox=tr("Also delete all firmware in this project"),

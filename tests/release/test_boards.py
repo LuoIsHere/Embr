@@ -735,7 +735,7 @@ def test_operator_tab5_not_in_download_mode_prompt_and_cancel(
 
 
 HINT_JTAG = (
-    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried; if the "
-    "running firmware does not keep this peripheral, the connect step times out, then enter "
-    "download mode as described by the board's vendor."
+    "Connect & identify this board first. USB-Serial/JTAG: automatic reset is tried. If the "
+    "running firmware does not keep this peripheral, the connect step times out; then put "
+    "the board into download mode as described by its vendor."
 )

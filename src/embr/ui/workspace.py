@@ -214,7 +214,7 @@ class Header(QWidget):
         if firmware.read_only:
             self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
         self.notes.set_full_text(firmware.notes or tr("no note — edit on the Parameters tab"))
-        self._notes_tip = firmware.notes or tr("No note yet. Edit it on the Parameters tab.")
+        self._notes_tip = firmware.notes
         self.show_files_updated(status)
         self.archive_action.setEnabled(
             status.state.flashable and any(e.file.startswith("path:") for e in firmware.entries)
@@ -245,14 +245,15 @@ class Header(QWidget):
         lift_to_baseline(name, caption)
         self.row.addWidget(name)
         self.row.addWidget(tag(tr(f"{count} firmware"), "gray"))
-        self.row.addWidget(tag(tr(f"{len(project.devices)} groups"), "gray"))
+        groups = len(project.devices)
+        self.row.addWidget(tag(tr("1 group") if groups == 1 else tr(f"{groups} groups"), "gray"))
         if project.read_only:
             self.row.addWidget(tag(tr("created by a newer Embr"), "warn"))
         self.menu_button.hide()
         self.files_updated.hide()
         self.notes.setMaximumWidth(NOTES_WIDTH)
         self.notes.set_full_text(project.notes or tr("no note — edit below"))
-        self.notes.setToolTip(project.notes or tr("No note yet."))
+        self.notes.setToolTip(project.notes)
 
 
 def shrink_to(widget: ElidedLabel, narrowest: int) -> None:
@@ -788,8 +789,9 @@ class EntriesTab(QWidget):
         try:
             updated = self._owner.library.set_entry_address(self._firmware.id, entry.id, text)
         except AddressError:
+            kept = f"kept {current}" if current else "the address stays empty"
             self._owner.note(
-                "error", f"[entry] {entry.name}: '{text}' is not a hex address; kept {current}"
+                "error", f"[entry] {entry.name}: '{text}' is not a hex address; {kept}"
             )
             widget.setText(current)
             return
@@ -1089,8 +1091,8 @@ class ParamsTab(QWidget):
                     tr("Archive"),
                     [
                         tr(
-                            "Fixed snapshot: files are referenced by content hash "
-                            "(archive:<sha256>), the original path is no longer needed."
+                            "Fixed snapshot: files are referenced by content hash; the "
+                            "original paths are no longer needed."
                         ),
                         tr("Entry names are the recorded original file names; notes are editable."),
                     ],
@@ -1481,7 +1483,7 @@ class FirmwareView(QWidget):
         elif changed:
             self.banner.show_text(
                 tr(
-                    f"Files changed on disk since the last check: {', '.join(changed)} (content). "
+                    f"File contents changed on disk since the last check: {', '.join(changed)}. "
                     "Flashing is blocked until you confirm the list below."
                 ),
                 tr("Confirm entries"),
@@ -1545,7 +1547,7 @@ class FirmwareView(QWidget):
             lines = "".join(f"<br>•&nbsp;{html.escape(tr(c.message))}" for c in first[:8])
             more = tr(f"<br>…and {len(first) - 8} more") if len(first) > 8 else ""
             hint = (
-                tr("<br>The device group may need adjusting.")
+                tr("<br>The group may need adjusting.")
                 if any(c.kind == ChangeKind.GROUP_HINT for c in status.changes)
                 else ""
             )
@@ -1582,7 +1584,11 @@ def _summary(record: FlashRecord) -> str:
     seconds = record.duration_ms / 1000
     written = sum(1 for e in record.entries if not e.skipped)
     skipped = len(record.entries) - written
-    text = tr(f"{len(record.entries)} entries, {seconds:.1f} s")
+    text = (
+        tr(f"1 entry, {seconds:.1f} s")
+        if len(record.entries) == 1
+        else tr(f"{len(record.entries)} entries, {seconds:.1f} s")
+    )
     if skipped:
         text += tr(f" · {skipped} already in flash")
     if record.reset_after:

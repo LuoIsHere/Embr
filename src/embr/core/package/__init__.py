@@ -410,7 +410,7 @@ def _document(
         doc: Document = tomllib.loads(_read(zf, info).decode("utf-8"))
         doc = upgrade(doc)
     except NewerDocumentError as exc:
-        raise NewerPackageError(N_(f"{item.name} was written by a newer Embr ({exc})")) from exc
+        raise NewerPackageError(N_(f"{item.name} was created by a newer Embr ({exc})")) from exc
     except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError) as exc:
         raise PackageError(N_(f"{info.filename} cannot be read ({exc})")) from exc
     if doc.get("id") != item.id:

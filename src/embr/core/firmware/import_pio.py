@@ -478,7 +478,7 @@ def read_env(
     goes into notes.
     - idedata: the listed images plus the app (PioImages.app_name) at application_offset.
     - scan, arduino: every .bin, classified with image_sniff against partitions.bin;
-      merged images and unrecognised files are left out (noted).
+      merged images and unrecognized files are left out (noted).
     - scan, espidf: flasher_args.json's flash_files with idf.py names mapped to PlatformIO
       outputs (bootloader -> bootloader.bin, partition table -> partitions.bin, app ->
       the app image, otadata -> ota_data_initial.bin, others by file name).
@@ -552,7 +552,7 @@ def read_env(
                 notes.append(N_(f"{path.name}: a merged image; left out"))
                 continue
             if found.kind == EntryKind.UNKNOWN or found.address is None:
-                notes.append(N_(f"{path.name}: not recognised; left out"))
+                notes.append(N_(f"{path.name}: not recognized; left out"))
                 continue
             files.append(PioFile(found.address, path, found.kind))
             continue

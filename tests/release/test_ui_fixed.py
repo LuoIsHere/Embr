@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QComboBox, QLineEdit
 from ui_kit import watchdog  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
 from embr.i18n import Language, tr
+from embr.ui.dialogs import ARCHIVE_KEPT
 
 Start = Callable[..., kit.EmbrApp]
 pytestmark = pytest.mark.usefixtures("watchdog")
@@ -73,9 +74,7 @@ def test_new_fixed_firmware_and_add_files(
     assert ui.check(window, "No address overlap").state == "PASS"
     files_check = ui.check(window, "Files match")
     assert files_check.state == "PASS"
-    assert files_check.detail == ui.plain(
-        tr("3 files checked: name, path and hash agree with the recorded values")
-    )
+    assert files_check.detail == ui.plain(tr("3 files: name, path and hash match the records"))
     assert ui.check(window, "Chip / revision / size / security").state == "LATER"
     assert not window.connection.flash.isEnabled()  # nothing identified
     command = window.cmdbar._full
@@ -448,7 +447,7 @@ def test_enable_disable_and_entry_notes(
     ui.tick(window, APP, False)
     assert _entry_doc(root, "Ticks", APP)["enabled"] is False
     assert ui.check(window, "Files match").detail == ui.plain(
-        tr("2 files checked: name, path and hash agree with the recorded values")
+        tr("2 files: name, path and hash match the records")
     )
     assert APP not in window.cmdbar._full
     for name in (BOOT, TABLE):
@@ -676,14 +675,8 @@ def test_rename_duplicate_move_and_delete_firmware(
     assert "fw2 copy" not in kit.sidebar_names(window)
     assert all(d["name"] != "fw2 copy" for d in ui.firmware_docs(root))
     assert ui.archive_files(root) == archive
-    assert (
-        ui.plain(
-            tr(
-                "Delete <b>fw2 copy</b>? Archived files are kept (use Clean archive to remove unreferenced ones) and flash records are not affected."  # noqa: E501
-            )
-        )
-        in texts[0]
-    )
+    assert ui.plain(tr("Delete <b>fw2 copy</b>?")) in texts[0]
+    assert ui.plain(tr(ARCHIVE_KEPT)) in texts[0]
     _ = QComboBox
 
 
@@ -762,7 +755,7 @@ def test_entry_files_missing_changed_and_relocated(
     ui.reselect(window, "Watched", "Elsewhere")
     changed = ui.plain(
         tr(
-            f"Files changed on disk since the last check: {BOOT} (content). Flashing is blocked until you confirm the list below."  # noqa: E501
+            f"File contents changed on disk since the last check: {BOOT}. Flashing is blocked until you confirm the list below."  # noqa: E501
         )
     )
     if ui.banner(window) != changed:
