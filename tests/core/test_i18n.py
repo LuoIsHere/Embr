@@ -199,15 +199,19 @@ def test_translations_keep_placeholders_and_are_not_empty() -> None:
         assert set(_fields(translation)) == set(_fields(key)), key
 
 
-def test_every_interface_text_has_a_translation() -> None:
+def _source_keys() -> set[str]:
+    """Keys of every tr() and N_() call in the package: the UI, the app layer and the core
+    messages the UI shows."""
     package = Path(embr.__file__).parent
-    keys = {
-        key
-        for folder in ("ui", "app")
-        for path in sorted((package / folder).rglob("*.py"))
-        for key in keys_in_source(path)
-    }
-    assert sorted(keys - set(table(Language.ZH_CN))) == []
+    return {key for path in sorted(package.rglob("*.py")) for key in keys_in_source(path)}
+
+
+def test_every_interface_text_has_a_translation() -> None:
+    assert sorted(_source_keys() - set(table(Language.ZH_CN))) == []
+
+
+def test_every_translation_is_used() -> None:
+    assert sorted(set(table(Language.ZH_CN)) - _source_keys()) == []
 
 
 # --- template_key ----------------------------------------------------------------------

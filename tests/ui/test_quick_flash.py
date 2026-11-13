@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtGui import QStandardItemModel
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from embr.app.checklist import can_flash, preflight
 from embr.app.context import open_context
@@ -28,6 +28,7 @@ from embr.core.storage.paths import AppPaths, prepare
 from embr.i18n import Language, current, set_language, tr
 from embr.ui.connection import QUICK_TIP
 from embr.ui.window import (
+    HINT_DOWNLOAD_MODE,
     HINT_QUICK_JTAG,
     HINT_QUICK_NEEDS_ID,
     HINT_QUICK_OTG,
@@ -99,8 +100,8 @@ QUICK_JTAG = (
     "described by the board's vendor."
 )
 ERASE = (
-    "Quick flash with erase on: the whole flash of the board on {} will be erased without "
-    "identifying it first."
+    "Quick flash with erase on: the whole flash of the board on {} is erased without a prior "
+    "Connect & identify."
 )
 OLD_IDENTIFY = "Connect & identify this board first; Flash becomes available when no check refuses."
 OLD_OTG = (
@@ -118,7 +119,7 @@ MANUAL_RESET = (
 )
 ZH_QUICK = "快速烧录"
 ZH_TIP = (
-    "跳过“连接并识别”，直接烧录。烧录时仍会识别芯片并进行安全检查；"  # noqa: RUF001
+    "跳过“连接并识别”，直接烧录。烧录时仍会识别并检查芯片；"  # noqa: RUF001
     "芯片不符或已启用安全功能时拒绝写入。"
 )
 
@@ -457,6 +458,45 @@ def test_the_last_job_hint_comes_first(window: EmbrWindow, tmp_path: Path) -> No
     )
     window._refresh_right()
     assert _hint(window) == (MANUAL_RESET, "warn")
+
+
+def _identified_in_download_mode(window: EmbrWindow, sdm: bool) -> None:
+    """A finished Connect & identify that left an esp32s3 in download mode; in secure
+    download mode the revision is not read."""
+    security = SecurityState(secure_download_mode=sdm, flash_encryption=False, secure_boot=False)
+    event = InfoEvent(
+        chip="esp32s3",
+        revision="unknown" if sdm else "v0.2",
+        major=-1 if sdm else 0,
+        minor=-1 if sdm else 2,
+        mac="" if sdm else "aa:bb:cc:00:00:01",
+        flash_size=None if sdm else "2MB",
+        security=security,
+        in_download_mode=True,
+    )
+    window._memory.record(UART, event, datetime.datetime(2026, 1, 1, 12, 0))
+    window._last_outcome = JobOutcome(
+        kind=JobKind.IDENTIFY,
+        result=RecordResult.OK,
+        message="",
+        record_id="r1",
+        log_file="",
+        segment_id="r1",
+        native_usb=False,
+    )
+    window._refresh_right()
+
+
+@pytest.mark.parametrize("sdm", [False, True], ids=["plain", "secure-download-mode"])
+def test_download_mode_after_identify(window: EmbrWindow, tmp_path: Path, sdm: bool) -> None:
+    _single(_quiet(window), tmp_path)
+    _port(window, UART)
+    _identified_in_download_mode(window, sdm)
+    texts = [w.text() for w in window.connection.findChildren(QLabel)]
+    assert "in download mode" in texts
+    # a chip in secure download mode refuses any flash: no "the next flash can start"
+    assert (_hint(window)[0] == HINT_DOWNLOAD_MODE) is not sdm
+    assert ("ESP32-S3 (revision unknown)" if sdm else "ESP32-S3 v0.2") in texts
 
 
 def test_hint_constants_match_the_requirements() -> None:

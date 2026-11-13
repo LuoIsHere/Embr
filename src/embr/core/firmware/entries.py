@@ -29,7 +29,7 @@ class FolderError(ValueError):
 
     def __init__(self, folder: str, outside: list[Path]) -> None:
         names = ", ".join(p.name for p in outside)
-        super().__init__(f"{names}: not in the firmware's folder {folder}")
+        super().__init__(N_(f"{names}: not in the firmware's folder {folder}"))
         self.folder = folder
         self.outside = outside
 

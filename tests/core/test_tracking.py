@@ -320,8 +320,10 @@ def test_switched_target_without_rebuild(tmp_path: Path) -> None:
     assert switched.state is ResolveState.TARGET_SWITCHED
     assert not switched.state.flashable
     assert switched.configured_target == "esp32p4"
-    text = " ".join(switched.problems)
-    assert "esp32p4" in text and "esp32s3" in text
+    assert list(switched.problems) == [  # chips by display name
+        "configured target: ESP32-P4, build output: ESP32-S3. The target was switched; "
+        "rebuild the project."
+    ]
     with pytest.raises(ValueError):
         accept(firmware, switched)
 
@@ -338,7 +340,11 @@ def _old_bootloader(build: Path) -> None:
 
 
 INCOMPLETE: dict[str, tuple[str, Callable[[Path], None], tuple[str, ...]]] = {
-    "declared_chip_vs_images": ("esp32s3_hello", _declare_p4, ("esp32p4", "esp32s3")),
+    "declared_chip_vs_images": (
+        "esp32s3_hello",
+        _declare_p4,
+        ("chips differ: the build declares ESP32-P4; image headers: ", "(ESP32-S3)"),
+    ),
     "mixed_idf_versions": ("esp32s3_hello_v61", _old_bootloader, ("v5.5.5", "v6.1")),
     "file_missing": ("esp32s3_hello", lambda b: app_file(b).unlink(), ("hello_esp32s3.bin",)),
 }

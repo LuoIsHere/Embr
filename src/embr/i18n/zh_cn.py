@@ -8,7 +8,7 @@ TEXT: dict[str, str] = {
     # ---- checks (app.checklist, core.flasher.checks) ----
     "Chip / revision / size / security": "芯片 / 版本 / 容量 / 安全",
     "checked after connecting": "连接后检查",
-    "the firmware is for {0}, the board is {1} {2}": "固件适用于 {0}，设备是 {1} {2}",
+    "the firmware is for {0}, the board is {1}": "固件适用于 {0}，设备是 {1}",
     "No address overlap": "地址无重叠",
     "Entry layout": "条目布局",
     "enable at least one entry for {0}": "请为 {0} 至少勾选一个条目",
@@ -30,6 +30,13 @@ TEXT: dict[str, str] = {
     "Reset policy adjusted to connection": "复位策略已按连接类型调整",
     "Reset policy": "复位策略",
     "{0} has no enabled entries": "{0} 没有勾选的条目",
+    "No MCU set for {0}": "未为 {0} 设置 MCU",
+    "Checked entries are for different MCUs: {0}": "勾选的条目适用于不同的 MCU：{0}",
+    "{0} cannot be merged now: {1}": "{0} 暂时不能合成：{1}",
+    "{0}: not in the firmware's folder {1}": "{0}：不在固件文件夹 {1} 中",
+    "Entries of {0} come from its build directory; archive this version or create a fixed firmware to add files": (
+        "{0} 的条目来自其构建目录；如需添加文件，请归档此版本或新建固定型固件"
+    ),
     "{0} has no address": "{0} 没有地址",
     "{0}: flash size unknown; set it to pad the image": (
         "{0}：flash 容量未知；要填充镜像请先设置容量"
@@ -81,8 +88,14 @@ TEXT: dict[str, str] = {
     "framework package not found: {0} has no {1}": "找不到框架包：{0} 中没有 {1}",
     "{0}: no build output": "{0}：没有构建产物",
     "{0} no longer declares [env:{1}]": "{0} 已不再声明 [env:{1}]",
-    "{0}; the build folder was scanned instead": "{0}；已改为扫描构建文件夹",
+    "{0}; the build folder was scanned instead": "{0}；已改为扫描构建目录",
     "{0}: a merged image; left out": "{0}：合成镜像，未加入",
+    "listed at 0x{0}; the {1} image belongs at 0x{2} (the listed address is used)": (
+        "列出的地址为 0x{0}；{1} 镜像应位于 0x{2}（使用列出的地址）"
+    ),
+    "PlatformIO writes {0} at 0x{1}; placed at the otadata partition (0x{2})": (
+        "PlatformIO 将 {0} 写到 0x{1}；此处放在 otadata 分区（0x{2}）"
+    ),
     "{0}: not recognised; left out": "{0}：无法识别，未加入",
     "{0}: an older app image; {1} is used": "{0}：较旧的应用镜像，已改用 {1}",
     "{0} left out: the partition table has no otadata partition": (
@@ -99,6 +112,16 @@ TEXT: dict[str, str] = {
     "{0}: cannot be read as {1}": "{0}：无法按 {1} 读取",
     "the build output has no app image": "构建产物中没有 app 镜像",
     "Target chip: {0} -> {1}": "目标芯片：{0} -> {1}",
+    "chips differ: the build declares {0}; image headers: {1}": "芯片不一致：构建声明 {0}；镜像头：{1}",
+    "chips differ: the build declares {0}": "芯片不一致：构建声明 {0}",
+    "chips differ: image headers: {0}": "芯片不一致：镜像头：{0}",
+    "ESP-IDF versions differ: the build uses {0}; image headers: {1}": (
+        "ESP-IDF 版本不一致：构建使用 {0}；镜像头：{1}"
+    ),
+    "ESP-IDF versions differ: image headers: {0}": "ESP-IDF 版本不一致：镜像头：{0}",
+    "configured target: {0}, build output: {1}. The target was switched; rebuild the project.": (
+        "配置的目标芯片：{0}，构建产物：{1}。目标已切换，请重新编译工程。"
+    ),
     "The device group may need adjusting": "设备分组可能需要调整",
     "ESP-IDF: {0} -> {1}": "ESP-IDF：{0} -> {1}",
     "Flash: {0} -> {1}": "flash 参数：{0} -> {1}",
@@ -119,14 +142,36 @@ TEXT: dict[str, str] = {
     "{0}: manual address {1} dropped on confirmation": "{0}：手动地址 {1} 将在确认时丢弃",
     "{0}: manual address {1} kept; check it": "{0}：手动地址 {1} 已保留，请核对",
     "{0} is enabled; Embr does not flash such chips, use esptool / espsecure": (
-        "{0} 已启用；Embr 不烧录这类芯片，请使用 esptool / espsecure"
+        "{0} 已启用；Embr 不烧录此类芯片，请使用 esptool / espsecure"
     ),
     "secure download mode, flash encryption and secure boot are off": (
         "安全下载模式、flash 加密与安全启动均未启用"
     ),
-    "chip mismatch ({0})": "芯片不符（{0}）",
+    "chip mismatch: the board is {0}, the firmware is for {1}": "芯片不符：设备是 {0}，固件适用于 {1}",
+    "chip mismatch: the board is {0}, the firmware is for {1}; images for another chip: {2}": (
+        "芯片不符：设备是 {0}，固件适用于 {1}；适用于其他芯片的镜像：{2}"
+    ),
+    "chip mismatch: the board is {0}; images for another chip: {1}": (
+        "芯片不符：设备是 {0}；适用于其他芯片的镜像：{1}"
+    ),
+    "{0} requires chip revision {1} or higher, chip is {2}": "{0} 要求芯片版本 {1} 或更高，芯片为 {2}",
+    "{0} requires chip revision {1} or lower, chip is {2}": "{0} 要求芯片版本 {1} 或更低，芯片为 {2}",
+    "{0} requires chip revision {1} to {2}, chip is {3}": "{0} 要求芯片版本 {1} 至 {2}，芯片为 {3}",
+    "before={0} -> no-reset: on USB-OTG the chip only appears in ROM download mode, it cannot be reset into it": (
+        "before={0} -> no-reset：USB-OTG 下芯片只在 ROM 下载模式中出现，无法通过复位进入"
+    ),
+    "after=hard-reset -> watchdog-reset: on USB-Serial/JTAG an RTS reset may leave the chip in download mode": (
+        "after=hard-reset -> watchdog-reset：USB-Serial/JTAG 下 RTS 复位可能使芯片停留在下载模式"
+    ),
+    "before=usb-reset -> default-reset: not a USB-Serial/JTAG port": (
+        "before=usb-reset -> default-reset：此端口不是 USB-Serial/JTAG"
+    ),
+    "after=watchdog-reset -> hard-reset: not a native USB port": (
+        "after=watchdog-reset -> hard-reset：此端口不是原生 USB"
+    ),
     "{0}: board, firmware and images agree": "{0}：设备、固件与镜像一致",
     "chip {0}, all entries in range": "芯片 {0}，全部条目在范围内",
+    "{0} (revision unknown)": "{0}（芯片版本未知）",
     "flash size could not be detected": "无法检测 flash 容量",
     "firmware declares {0}, board has {1}": "固件声明 {0}，设备为 {1}",
     "board has {0}": "设备为 {0}",
@@ -161,7 +206,7 @@ TEXT: dict[str, str] = {
     "No serial port found": "未找到串口",
     "unavailable": "不可用",
     "not applicable": "不适用",
-    "Native USB: baud rate not applicable": "原生 USB：不适用波特率",
+    "Native USB: baud rate not applicable": "原生 USB：波特率不适用",
     "Not identified yet. After identifying, firmware for other chips is dimmed in the sidebar.": (
         "尚未识别。识别后，侧栏中适用于其他芯片的固件会变灰。"
     ),
@@ -175,6 +220,7 @@ TEXT: dict[str, str] = {
     "Header flash size": "镜像头 flash 容量",
     "Flash capacity": "flash 容量",
     "Flash": "Flash",
+    "Flash size": "flash 容量",
     "{0} (detected)": "{0}（检测值）",
     "Security": "安全",
     "none (SDM / encryption / secure boot off)": "无（SDM / 加密 / 安全启动均未启用）",
@@ -232,8 +278,8 @@ TEXT: dict[str, str] = {
     ),
     "Build time: {0}": "构建时间：{0}",
     "development build": "开发构建",
-    "Repository": "代码仓库",
-    "Releases": "发布页面",
+    "Repository: {0}": "代码仓库：{0}",
+    "Releases: {0}": "发布页面：{0}",
     "Interface font: HarmonyOS Sans (Copyright 2021 Huawei Device Co., Ltd.), used under the HarmonyOS Sans Fonts License Agreement.": (
         "界面字体：HarmonyOS Sans（Copyright 2021 Huawei Device Co., Ltd.），"
         "依据 HarmonyOS Sans Fonts License Agreement 使用。"
@@ -245,14 +291,14 @@ TEXT: dict[str, str] = {
     "Import": "导入",
     "e.g. D:\\work\\my_project\\build": "例如 D:\\work\\my_project\\build",
     "Build directory (contains flasher_args.json)": "构建目录（含 flasher_args.json）",
-    "Use the build folder": "改用 build 目录",
+    "Use the build folder": "改用构建目录",
     "Show that firmware": "转到该固件",
     "The firmware follows the build: entries, chip, flash settings and reset modes are read from it each time. Rebuilds that only change file contents are followed automatically; other changes need confirming.": (
         "固件跟随构建：每次都从构建产物读取条目、芯片、flash 参数与复位策略。"
         "重新编译后只有文件内容变化时自动跟随；其他变化需要确认。"
     ),
     "<b>This is the project folder.</b> Pick its build folder, which contains flasher_args.json: {0}": (
-        "<b>这是工程文件夹。</b>请选择含 flasher_args.json 的 build 目录：{0}"
+        "<b>这是工程文件夹。</b>请选择含 flasher_args.json 的构建目录：{0}"
     ),
     "<b>'{0}' already follows this build folder.</b> A build folder is followed by one firmware only.": (
         "<b>“{0}”已在跟随此构建目录。</b>一个构建目录只能被一个固件跟随。"
@@ -261,7 +307,7 @@ TEXT: dict[str, str] = {
     "Build directory": "构建目录",
     "Import PlatformIO build": "导入 PlatformIO 构建",
     "e.g. D:\\work\\my_project\\.pio\\build\\esp32dev": "例如 D:\\work\\my_project\\.pio\\build\\esp32dev",
-    "Env build folder (.pio\\build\\<env>)": "env 构建文件夹（.pio\\build\\<env>）",
+    "Env build folder (.pio\\build\\<env>)": "env 构建目录（.pio\\build\\<env>）",
     "Use this env": "改用此 env",
     "Envs (each checked env becomes a firmware named after it)": (
         "env（每个勾选的 env 生成一个以它命名的固件）"
@@ -272,7 +318,7 @@ TEXT: dict[str, str] = {
         "重新编译后只有文件内容变化时自动跟随；其他变化需要确认。"
     ),
     "<b>This is the project folder.</b> Pick an env build folder under .pio\\build: {0}": (
-        "<b>这是工程文件夹。</b>请选择 .pio\\build 下的 env 构建文件夹：{0}"
+        "<b>这是工程文件夹。</b>请选择 .pio\\build 下的 env 构建目录：{0}"
     ),
     "Use {0}": "改用 {0}",
     "Reading the PlatformIO project…": "正在读取 PlatformIO 工程…",
@@ -282,7 +328,7 @@ TEXT: dict[str, str] = {
     ),
     "{0} · not built": "{0} · 未构建",
     "{0} · already followed by '{1}'": "{0} · 已被“{1}”跟随",
-    "Env build folder": "env 构建文件夹",
+    "Env build folder": "env 构建目录",
     "board unknown": "设备未知",
     "chip unknown": "芯片未知",
     "Archive this version": "归档此版本",
@@ -294,6 +340,8 @@ TEXT: dict[str, str] = {
     "Clean archive": "清理归档",
     "Delete files": "删除文件",
     "The archive holds {0} files ({1} bytes).": "归档区共有 {0} 个文件（{1} 字节）。",
+    "{0} ({1} bytes)": "{0}（{1} 字节）",
+    "{0}… {1} bytes, archived {2}": "{0}… {1} 字节，归档于 {2}",
     "{0} files are kept because firmware refers to them: {1}. Archived versions are firmware too; delete one of them first to free its files.": (
         "{0} 个文件被固件引用，因此保留：{1}。归档的版本也是固件；要释放其文件，请先删除对应的固件。"
     ),
@@ -307,7 +355,7 @@ TEXT: dict[str, str] = {
     "Merge to .bin": "合成为 .bin",
     "Merge": "合成",
     "Start offset (hex)": "起始偏移（十六进制）",
-    "pad to the whole flash size": "填充到整片 flash 大小",
+    "pad to the whole flash size": "填充到整片 flash 容量",
     "Save as": "保存为",
     "Gaps are filled with 0xFF, so every partition inside the written range is overwritten (the NVS between the partition table and otadata is cleared). A padded image overwrites the whole flash.": (
         "间隙用 0xFF 填充，写入范围内的分区都会被覆盖（分区表与 otadata 之间的 NVS 会被清空）。"
@@ -329,7 +377,7 @@ TEXT: dict[str, str] = {
     "Start address (hex)": "起始地址（十六进制）",
     "Size (hex)": "大小（十六进制）",
     "Save to": "保存到",
-    "Imported, the content is also kept in the archive as a new fixed firmware with one merged entry. A dump includes NVS and may contain Wi-Fi credentials and other secrets.": (
+    "When imported, the content is also kept in the archive as a new fixed firmware with one merged entry. A dump includes NVS and may contain Wi-Fi credentials and other secrets.": (
         "导入后，内容还会存入归档区，生成一个含单个 merged 条目的固定型固件。"
         "读出的内容包含 NVS，可能含有 Wi-Fi 凭据等敏感数据。"
     ),
@@ -364,7 +412,7 @@ TEXT: dict[str, str] = {
     "Remove": "移除",
     "Remove group (its firmware becomes ungrouped)": "移除分组（其中的固件改为未分组）",
     "{0} firmware": "{0} 个固件",
-    "new group, e.g. Main board": "新分组，例如 主板",
+    "new group, e.g. Main board": "新分组，例如：主板",
     "Add": "添加",
     "Groups are display folders inside this project. Drag a firmware onto a group in the sidebar to move it there; drop it on the project name to make it ungrouped.": (
         "分组是项目内用于展示的文件夹。在侧栏中将固件拖到分组上即可移入；拖到项目名上则改为未分组。"
@@ -394,7 +442,7 @@ TEXT: dict[str, str] = {
     "Import ESP-IDF build…": "导入 ESP-IDF 构建…",
     "follows a build directory": "跟随一个构建目录",
     "Import PlatformIO build…": "导入 PlatformIO 构建…",
-    "follows the build folders of PlatformIO envs": "跟随 PlatformIO env 的构建文件夹",
+    "follows the build folders of PlatformIO envs": "跟随 PlatformIO env 的构建目录",
     "PROJECTS": "项目",
     "(no groups, no firmware)": "（没有分组，也没有固件）",
     "empty": "空",
@@ -429,11 +477,12 @@ TEXT: dict[str, str] = {
         "连接会超时，此时请按设备厂商的说明进入下载模式。"
     ),
     "Create a firmware or a project with {0} New in the sidebar.": "用侧栏的 {0} 新建 创建固件或项目。",
-    "the project": "该项目",
-    "standalone firmware": "独立固件",
     "Rename firmware": "重命名固件",
-    "Unique within {0}; a duplicate gets a numeric suffix. Flash records keep the name used at the time.": (
-        "在{0}内唯一；重名时自动加数字后缀。烧录记录保留当时的名称。"
+    "Unique within the project; a duplicate gets a numeric suffix. Flash records keep the name used at the time.": (
+        "在项目内唯一；重名时自动加数字后缀。烧录记录保留当时的名称。"
+    ),
+    "Unique among standalone firmware; a duplicate gets a numeric suffix. Flash records keep the name used at the time.": (
+        "在独立固件中唯一；重名时自动加数字后缀。烧录记录保留当时的名称。"
     ),
     "Rename": "重命名",
     "Delete firmware": "删除固件",
@@ -462,7 +511,7 @@ TEXT: dict[str, str] = {
     "{0} is not in this firmware's folder {1}.": "{0} 不在此固件的文件夹 {1} 内。",
     "Name shown in the sidebar": "在侧栏中显示的名称",
     "{0} file(s) from {1}": "来自 {1} 的 {0} 个文件",
-    "{0}: drop a build folder on a project or group": "{0}：请将构建文件夹拖到项目或分组上",
+    "{0}: drop a build folder on a project or group": "{0}：请将构建目录拖到项目或分组上",
     "Settings…": "设置…",
     "Clean archive…": "清理归档…",
     "Theme": "主题",
@@ -486,7 +535,7 @@ TEXT: dict[str, str] = {
     ),
     "<b>{0}</b>: cannot be read ({1})": "<b>{0}</b>：无法读取（{1}）",
     "<b>{0}</b>: empty file (0 bytes)": "<b>{0}</b>：空文件（0 字节）",
-    "Drop a build folder on its own.": "请单独拖入构建文件夹。",
+    "Drop a build folder on its own.": "请单独拖入构建目录。",
     # ---- workspace ----
     "content changed": "内容已变化",
     "new file": "新文件",
@@ -496,7 +545,7 @@ TEXT: dict[str, str] = {
     "tracks IDF build": "跟随 IDF 构建",
     "tracks PIO build": "跟随 PIO 构建",
     "target switched": "目标已切换",
-    "build incomplete": "构建未完成",
+    "build incomplete": "构建不完整",
     "Standalone": "独立",
     "Firmware actions": "固件操作",
     "Rename…\tF2": "重命名…\tF2",
@@ -530,9 +579,10 @@ TEXT: dict[str, str] = {
     ),
     "Merge to .bin…": "合成为 .bin…",
     "For {0}; the board is {1}": "适用于 {0}；设备是 {1}",
+    "No MCU set; the board is {0}": "未设置 MCU；设备是 {0}",
     "address": "地址",
     "Hex address. Clear the field and confirm to restore the detected address": (
-        "十六进制地址。清空并确认即可恢复识别出的地址"
+        "十六进制地址。清空并确认即可恢复检测到的地址"
     ),
     "add note": "添加备注",
     "auto ({0})": "自动（{0}）",
@@ -577,9 +627,11 @@ TEXT: dict[str, str] = {
     ),
     "Reset after": "烧录后复位",
     "— (standalone firmware)": "—（独立固件）",
-    "change via the ⋯ menu → Move, or drag in the sidebar": "可通过 ⋯ 菜单 → 移动，或在侧栏中拖动来修改",
+    "change via the ⋯ menu → Move to project…, or drag in the sidebar": (
+        "可通过 ⋯ 菜单 → 移到项目…，或在侧栏中拖动来修改"
+    ),
     "What this firmware is, which board revision, why it exists…": "固件的用途、对应的设备版本、保留原因…",
-    "shown in grey next to the name; saved when the field loses focus": "以灰色显示在名称旁；输入框失去焦点时保存",
+    "shown in grey below the name; saved when the field loses focus": "以灰色显示在名称下方；输入框失去焦点时保存",
     "comma-separated, e.g. release, s3": "用逗号分隔，例如 release, s3",
     "Tags": "标签",
     "Fixed snapshot: files are referenced by content hash (archive:<sha256>), the original path is no longer needed.": (
@@ -600,10 +652,10 @@ TEXT: dict[str, str] = {
     "not found": "不存在",
     "exists": "存在",
     "last resolved {0}": "上次解析 {0}",
-    "{0} target {1}": "{0} 目标 {1}",
+    "platformio.ini target {0}": "platformio.ini 目标芯片 {0}",
+    "sdkconfig target {0}": "sdkconfig 目标芯片 {0}",
     "Settings path: {0}": "设置中的路径：{0}",
     "auto-detected: {0}": "自动检测：{0}",
-    "the Settings path / auto-detection": "设置中的路径 / 自动检测",
     "keep = leave the bootloader header as built": "keep = 保留 bootloader 镜像头中构建时的值",
     "Click a record to show its section of that day's log (logs/YYYY-MM-DD.log).": (
         "点击记录可显示当天日志中的对应段落（logs/YYYY-MM-DD.log）。"
@@ -626,11 +678,14 @@ TEXT: dict[str, str] = {
         "在此之前不能烧录、归档或合成。"
     ),
     "Build incomplete: {0}. Wait for the build to finish or rebuild; flashing is blocked.": (
-        "构建未完成：{0}。请等待构建结束或重新编译；暂时不能烧录。"
+        "构建不完整：{0}。请等待构建结束或重新编译；暂时不能烧录。"
     ),
     "The build output is being written; checking again shortly.": "构建产物正在写入；稍后会再次核对。",
     "{0}. Last resolved {1}; the entries below are that snapshot and cannot be flashed until the directory exists again.": (
         "{0}。上次解析于 {1}；下面的条目是那次的快照，目录恢复之前不能烧录。"
+    ),
+    "{0}. Never resolved; flashing is blocked until the directory exists again.": (
+        "{0}。从未解析；目录恢复之前不能烧录。"
     ),
     "Change directory…": "更改目录…",
     "platformio.ini no longer declares [env:{0}]. It may have been renamed.": (
@@ -645,6 +700,8 @@ TEXT: dict[str, str] = {
     " · {0} already in flash": " · {0} 个已在 flash 中",
     " · after={0}": " · after={0}",
     "partition {0}": "分区 {0}",
+    "auto": "自动",
+    "manual": "手动",
     "derived": "derived",
     # .embr export and import
     "Export…": "导出…",
@@ -673,7 +730,7 @@ TEXT: dict[str, str] = {
     "Drop a .embr package on its own.": ".embr 包需要单独拖入。",
     "written by a newer Embr": "由更新版本的 Embr 写入",
     "changes need confirmation": "有变化需要确认",
-    "the target was switched; rebuild the project": "目标芯片已切换，需重新编译工程",
+    "the target was switched; rebuild the project": "目标已切换，需重新编译工程",
     "the build is incomplete": "构建不完整",
     "the build output or a file is missing": "构建产物或文件缺失",
     "the build is still being written": "构建产物仍在写入",
@@ -712,7 +769,7 @@ TEXT: dict[str, str] = {
     "Files that cannot be read": "无法读取的文件",
     "Embr keeps its data, logs and settings next to Embr.exe, but this folder is not writable:\n\n{root}\n\nMove the Embr folder to a writable location (for example under your Documents, not Program Files) and start it again.": "Embr 的数据、日志与设置保存在 Embr.exe 所在的文件夹中，但此文件夹不可写：\n\n{root}\n\n请将 Embr 文件夹移到可写的位置（例如“文档”下，不要放在 Program Files 中）后重新启动。",
     "Embr is already running from this folder:\n\n{root}\n\nSwitch to the open window. Two copies in different folders do not conflict.": "Embr 已从此文件夹运行：\n\n{root}\n\n请切换到已打开的窗口。位于不同文件夹的两份 Embr 互不冲突。",
-    "The data in this folder was written by a newer version of Embr and cannot be opened by {version}:\n\n{detail}\n\nUse the newer Embr, or a copy of Embr in another folder.": "此文件夹中的数据由更新版本的 Embr 写入，{version} 无法打开：\n\n{detail}\n\n请使用更新版本的 Embr，或使用位于其他文件夹的 Embr。",
+    "The data in this folder was written by a newer version of Embr and cannot be opened by Embr {version}:\n\n{detail}\n\nUse the newer Embr, or a copy of Embr in another folder.": "此文件夹中的数据由更新版本的 Embr 写入，Embr {version} 无法打开：\n\n{detail}\n\n请使用更新版本的 Embr，或使用位于其他文件夹的 Embr。",
     "Embr cannot use these folders:\n\n{lines}\n\nRename and continue: what is in the way is renamed (nothing is deleted) and new folders are created. Exit: nothing is changed.": "Embr 无法使用以下文件夹：\n\n{lines}\n\n改名后继续：将占用的文件或文件夹改名保留（不删除任何内容），并新建所需的文件夹。退出：不作任何改动。",
     "{path}: a file has this name": "{path}：已有同名文件",
     "{path}: cannot be read ({detail})": "{path}：无法读取（{detail}）",
@@ -731,7 +788,7 @@ TEXT: dict[str, str] = {
     "{0} · updated {1}": "{0} · 更新于 {1}",
     "updated {0}": "更新于 {0}",
     "Build changed: confirm entries": "构建已变化：请确认条目",
-    "Target switched: rebuild": "目标芯片已切换：请重新编译",
+    "Target switched: rebuild": "目标已切换：请重新编译",
     "Build incomplete": "构建不完整",
     "Build output missing": "构建产物缺失",
     "Build in progress": "正在编译",
@@ -740,11 +797,10 @@ TEXT: dict[str, str] = {
     "This project was created by a newer version of Embr and is read-only here.": "此项目由更新版本的 Embr 创建，在此版本中只读。",
     "Quick flash": "快速烧录",
     "Skip Connect & identify and flash directly. The chip is still identified and checked during the flash; writing is refused if the chip does not match or a security feature is on.": (
-        "跳过“连接并识别”，直接烧录。烧录时仍会识别芯片并进行安全检查；"
-        "芯片不符或已启用安全功能时拒绝写入。"
+        "跳过“连接并识别”，直接烧录。烧录时仍会识别并检查芯片；芯片不符或已启用安全功能时拒绝写入。"
     ),
     "This firmware is for several chips or has no chip selected, so the board must be identified first.": (
-        "此固件包含多种芯片或尚未选择芯片，需要先“连接并识别”设备。"
+        "此固件适用于多种芯片或尚未选择芯片，需要先“连接并识别”设备。"
     ),
     "Quick flash over USB-OTG: put the board into download mode as described by its vendor before flashing; Cancel is available while waiting.": (
         "快速烧录（USB-OTG）：烧录前按设备厂商的说明让设备进入下载模式；等待时可以取消。"
@@ -753,7 +809,7 @@ TEXT: dict[str, str] = {
         "快速烧录（USB-Serial/JTAG）：会尝试自动复位；若运行中的固件未保留此外设，"
         "连接会超时，此时请按设备厂商的说明进入下载模式。"
     ),
-    "Quick flash with erase on: the whole flash of the board on {0} will be erased without identifying it first.": (
-        "快速烧录且已勾选擦除：将擦除 {0} 上设备的整片 flash，且事先不进行识别。"
+    "Quick flash with erase on: the whole flash of the board on {0} is erased without a prior Connect & identify.": (
+        "快速烧录且已勾选擦除：将擦除 {0} 上设备的整片 flash，事先不经过“连接并识别”。"
     ),
 }

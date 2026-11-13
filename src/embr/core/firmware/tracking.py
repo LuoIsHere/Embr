@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from embr.core import chipinfo
 from embr.core.firmware.entries import resolve_partitions
 from embr.core.firmware.filecache import FileCache
 from embr.core.firmware.image_header import ImageHeader, format_revision
@@ -241,18 +242,17 @@ def resolve(
         incomplete.append(N_("the build output has no app image"))
 
     images = [d for d in derived if d.kind in (EntryKind.BOOTLOADER, EntryKind.APP) and d.header]
-    chip_sides = [(f"build output ({c})", c) for c in build.declared_chips]
-    chip_sides += [
-        (f"{d.name} header", d.header.chip) for d in images if d.header and d.header.chip
-    ]
-    chips = {c for _, c in chip_sides}
+    header_chips = [(d.name, d.header.chip) for d in images if d.header and d.header.chip]
+    chips = {*build.declared_chips, *(c for _, c in header_chips)}
     chip = next(iter(chips)) if len(chips) == 1 else None
     if len(chips) > 1:
-        incomplete.append("chips differ: " + ", ".join(f"{s}: {c}" for s, c in chip_sides))
-    versions = [("build", build.idf_version)] if build.idf_version else []
-    versions += [(d.name, d.header.idf_ver) for d in images if d.header and d.header.idf_ver]
-    if len({v[:_IDF_VER_CHARS] for _, v in versions}) > 1:
-        incomplete.append("ESP-IDF versions differ: " + ", ".join(f"{s} {v}" for s, v in versions))
+        incomplete.append(_chips_differ(build.declared_chips, header_chips))
+    header_versions = [(d.name, d.header.idf_ver) for d in images if d.header and d.header.idf_ver]
+    versions = [v for _, v in header_versions]
+    if build.idf_version:
+        versions.append(build.idf_version)
+    if len({v[:_IDF_VER_CHARS] for v in versions}) > 1:
+        incomplete.append(_versions_differ(build.idf_version, header_versions))
 
     renamed = _renamed_app(last, last_entries, derived, chip or firmware.chip)
     resolved = _resolved_firmware(firmware, build, chip, derived, renamed)
@@ -266,9 +266,13 @@ def resolve(
         problems = incomplete
     elif build.configured_target and chip and build.configured_target != chip:
         state = ResolveState.TARGET_SWITCHED
+        configured = chipinfo.display_name(build.configured_target)
+        built = chipinfo.display_name(chip)
         problems = [
-            f"configured target: {build.configured_target}, build output: {chip}. "
-            "The target was switched; rebuild the project."
+            N_(
+                f"configured target: {configured}, build output: {built}. The target was "
+                "switched; rebuild the project."
+            )
         ]
     else:
         state = ResolveState.OK
@@ -593,7 +597,8 @@ def _changes(
     old_chip, new_chip = doc_str(last, "chip"), doc_str(snapshot, "chip")
     chip_changed = bool(old_chip and new_chip and old_chip != new_chip)
     if chip_changed:
-        add(ChangeKind.CHIP, "", old_chip, new_chip, N_(f"Target chip: {old_chip} -> {new_chip}"))
+        old_name, new_name = chipinfo.display_name(old_chip), chipinfo.display_name(new_chip)
+        add(ChangeKind.CHIP, "", old_chip, new_chip, N_(f"Target chip: {old_name} -> {new_name}"))
         add(
             ChangeKind.GROUP_HINT,
             "",
@@ -680,6 +685,25 @@ def _changes(
             add(ChangeKind.MANUAL_ADDRESS, name, manual, "", text)
 
     return changes
+
+
+def _chips_differ(declared: tuple[str, ...], headers: list[tuple[str, str]]) -> str:
+    """The build declares, or the bootloader and app headers name, more than one chip."""
+    build = ", ".join(chipinfo.display_name(c) for c in dict.fromkeys(declared))
+    images = ", ".join(f"{name} ({chipinfo.display_name(c)})" for name, c in headers)
+    if build and images:
+        return N_(f"chips differ: the build declares {build}; image headers: {images}")
+    if build:
+        return N_(f"chips differ: the build declares {build}")
+    return N_(f"chips differ: image headers: {images}")
+
+
+def _versions_differ(build: str | None, headers: list[tuple[str, str]]) -> str:
+    """The build and the bootloader and app headers name different ESP-IDF versions."""
+    images = ", ".join(f"{name} ({version})" for name, version in headers)
+    if build:
+        return N_(f"ESP-IDF versions differ: the build uses {build}; image headers: {images}")
+    return N_(f"ESP-IDF versions differ: image headers: {images}")
 
 
 def _flash_text(doc: Document) -> str:

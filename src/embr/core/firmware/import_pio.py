@@ -563,7 +563,7 @@ def read_env(
             and found.address != address
             and found.kind in (EntryKind.BOOTLOADER, EntryKind.APP, EntryKind.PARTITION_TABLE)
         ):
-            note = (
+            note = N_(
                 f"listed at 0x{address:X}; the {found.kind.value} image belongs at "
                 f"0x{found.address:X} (the listed address is used)"
             )
@@ -587,7 +587,7 @@ def read_env(
         elif boot is not None:
             note = ""
             if otadata.offset != BOOT_APP0_PIO_ADDRESS:
-                note = (
+                note = N_(
                     f"PlatformIO writes {BOOT_APP0} at 0x{BOOT_APP0_PIO_ADDRESS:X}; placed at "
                     f"the otadata partition (0x{otadata.offset:X})"
                 )

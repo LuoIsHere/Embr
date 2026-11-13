@@ -92,12 +92,7 @@ class _Sort:
 
 
 def chip_name(chip: str | None) -> str:
-    if chip is None:
-        return ""
-    try:
-        return chipinfo.get_chip(chip).display_name
-    except chipinfo.UnknownChipError:
-        return chip
+    return "" if chip is None else chipinfo.display_name(chip)
 
 
 def chips_text(mcus: tuple[str, ...]) -> str:
@@ -603,6 +598,7 @@ class Sidebar(QWidget):
         self.search.addAction(self._search_icon, QLineEdit.ActionPosition.LeadingPosition)
         self.new_button = button(tr(f"{PLUS} New   firmware · project"), "newbtn")
         self.new_menu = QMenu(self)
+        self.new_menu.setToolTipsVisible(True)
         self.new_menu.addAction(tr("New firmware"), self.new_firmware.emit).setToolTip(
             tr("fixed, add entries by hand")
         )

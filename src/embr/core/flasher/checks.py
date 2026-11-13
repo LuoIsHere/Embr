@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from embr.core import chipinfo
 from embr.core.firmware.image_header import NO_MAX_REVISION
 from embr.core.flasher.plan import PlanEntry
 from embr.i18n import N_
@@ -84,16 +85,31 @@ def check_security(state: SecurityState) -> list[Check]:
 
 def check_chip(detected: str, firmware_chip: str | None, entries: Sequence[PlanEntry]) -> Check:
     """REFUSE if the firmware chip or any entry's image chip differs from the detected chip;
-    the message names every party's value. Entries without an image chip are ignored."""
-    parties = [("board", detected)]
-    if firmware_chip is not None:
-        parties.append(("firmware", firmware_chip))
-    parties += [(e.name, e.image_chip) for e in entries if e.image_chip is not None]
-    mismatched = [(who, chip) for who, chip in parties if chip != detected]
-    if mismatched:
-        detail = ", ".join(f"{who}: {chip}" for who, chip in parties)
-        return Check(CHIP, CheckLevel.REFUSE, N_(f"chip mismatch ({detail})"))
-    return Check(CHIP, CheckLevel.PASS, N_(f"{detected}: board, firmware and images agree"))
+    the message names the board's chip and every party that differs from it, by display
+    name. Entries without an image chip are ignored."""
+    board = chipinfo.display_name(detected)
+    firmware = chipinfo.display_name(firmware_chip) if firmware_chip else None
+    others = ", ".join(
+        f"{e.name} ({chipinfo.display_name(e.image_chip)})"
+        for e in entries
+        if e.image_chip is not None and e.image_chip != detected
+    )
+    if firmware_chip is not None and firmware_chip != detected:
+        if others:
+            message = N_(
+                f"chip mismatch: the board is {board}, the firmware is for {firmware}; "
+                f"images for another chip: {others}"
+            )
+        else:
+            message = N_(f"chip mismatch: the board is {board}, the firmware is for {firmware}")
+        return Check(CHIP, CheckLevel.REFUSE, message)
+    if others:
+        return Check(
+            CHIP,
+            CheckLevel.REFUSE,
+            N_(f"chip mismatch: the board is {board}; images for another chip: {others}"),
+        )
+    return Check(CHIP, CheckLevel.PASS, N_(f"{board}: board, firmware and images agree"))
 
 
 def revision_incompatibility(state: ChipState, entry: PlanEntry) -> str | None:
@@ -111,20 +127,20 @@ def revision_incompatibility(state: ChipState, entry: PlanEntry) -> str | None:
         use_full = not (min_full == 0 and legacy != 0)
     else:
         use_full = True
+    name = entry.name
     if use_full:
         if min_full <= state.rev_full <= max_full:
             return None
+        low, high, chip = _rev(min_full), _rev(max_full), _rev(state.rev_full)
         if max_full == NO_MAX_REVISION:
-            need = f"{_rev(min_full)} or higher"
-        elif min_full == 0:
-            need = f"{_rev(max_full)} or lower"
-        else:
-            need = f"{_rev(min_full)} - {_rev(max_full)}"
-        return f"{entry.name} requires chip revision {need}, chip is {_rev(state.rev_full)}"
+            return N_(f"{name} requires chip revision {low} or higher, chip is {chip}")
+        if min_full == 0:
+            return N_(f"{name} requires chip revision {high} or lower, chip is {chip}")
+        return N_(f"{name} requires chip revision {low} to {high}, chip is {chip}")
     rev = state.minor if state.chip == "esp32c3" else state.major
     if rev >= legacy:
         return None
-    return f"{entry.name} requires chip revision {legacy} or higher, chip is {rev}"
+    return N_(f"{name} requires chip revision {legacy} or higher, chip is {rev}")
 
 
 def check_revisions(state: ChipState, entries: Sequence[PlanEntry]) -> Check:

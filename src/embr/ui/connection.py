@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from embr.app.checklist import CheckItem, CheckState
 from embr.app.identify import IdentifySnapshot
+from embr.core.flasher.protocol import InfoEvent
 from embr.core.serial import ConnectionType, PortInfo, baud_adjustable
 from embr.i18n import N_, tr
 from embr.ui import icons
@@ -375,9 +376,12 @@ class ConnectionPanel(QWidget):
             else label(tr("reset, running"))
         )
         rows: list[tuple[str, QWidget]] = [
-            (N_("Chip"), label(f"{chip_name(info.chip)} {info.revision}")),
+            (N_("Chip"), label(_chip_text(info))),
             ("MAC", label(info.mac or "—", mono=True)),
-            (N_("Flash"), label(tr(f"{info.flash_size} (detected)") if info.flash_size else "—")),
+            (
+                N_("Flash size"),
+                label(tr(f"{info.flash_size} (detected)") if info.flash_size else "—"),
+            ),
             (
                 N_("Security"),
                 label(
@@ -560,6 +564,13 @@ def _check(item: CheckItem, state_text: str) -> QHBoxLayout:
         text.addWidget(detail)
     row.addLayout(text, 1)
     return row
+
+
+def _chip_text(info: InfoEvent) -> str:
+    """Chip row of the identity panel: "ESP32-S3 v0.2"; the revision is not read in
+    secure download mode (negative major)."""
+    name = chip_name(info.chip)
+    return f"{name} {info.revision}" if info.major >= 0 else tr(f"{name} (revision unknown)")
 
 
 def _left(widget: QWidget) -> QWidget:

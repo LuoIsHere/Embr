@@ -28,7 +28,7 @@ ALREADY_RUNNING = N_(
 )
 NEWER_DATA = N_(
     "The data in this folder was written by a newer version of Embr and cannot be opened by "
-    "{version}:\n\n{detail}\n\nUse the newer Embr, or a copy of Embr in another folder."
+    "Embr {version}:\n\n{detail}\n\nUse the newer Embr, or a copy of Embr in another folder."
 )
 FOLDERS_UNUSABLE = N_(
     "Embr cannot use these folders:\n\n{lines}\n\nRename and continue: what is in the way "

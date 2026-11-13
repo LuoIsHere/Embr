@@ -30,6 +30,7 @@ from embr.app.library import Library, PioPreview
 from embr.app.merging import MergeOptions, Merger
 from embr.app.packages import ExportCheck, default_group, default_package_name
 from embr.build import build_time
+from embr.core import chipinfo
 from embr.core.firmware.entries import AddressError, parse_address
 from embr.core.firmware.import_idf import (
     IdfBuild,
@@ -355,8 +356,11 @@ def about(parent: QWidget, esptool_version: str) -> None:
     dialog.text(COPYRIGHT)
     when = build_time() or tr(DEVELOPMENT_BUILD)
     dialog.text(tr(f"Build time: {when}"))
-    for caption, url in ((N_("Repository"), REPOSITORY), (N_("Releases"), RELEASES)):
-        link = QLabel(f'{tr(caption)}: <a href="{url}">{url.removeprefix("https://")}</a>')
+    for url in (REPOSITORY, RELEASES):
+        anchor = f'<a href="{url}">{url.removeprefix("https://")}</a>'
+        link = QLabel(
+            tr(f"Repository: {anchor}") if url == REPOSITORY else tr(f"Releases: {anchor}")
+        )
         link.setTextFormat(Qt.TextFormat.RichText)
         link.setOpenExternalLinks(False)
         link.linkActivated.connect(_open_url)
@@ -742,7 +746,7 @@ def archive_version(
     notes.setPlaceholderText(tr("why this version is kept"))
     dialog.field(tr("Notes"), notes)
     copied = [e for e in entries if e.file.startswith("path:")]
-    lines = "".join(f"<br>•&nbsp;{html.escape(e.name)} ({e.size:,} bytes)" for e in copied)
+    lines = "".join("<br>•&nbsp;" + tr(f"{html.escape(e.name)} ({e.size:,} bytes)") for e in copied)
     dialog.text(
         tr(
             f"A new archived firmware is created next to <b>{html.escape(source_name)}</b>, which "
@@ -803,7 +807,8 @@ def clean_archive(
     if unused:
         size = sum(f.size for f in unused)
         lines = "".join(
-            f"<br>•&nbsp;{f.sha256[:12]}… {f.size:,} bytes, archived {f.first_archived[:10]}"
+            "<br>•&nbsp;"
+            + tr(f"{f.sha256[:12]}… {f.size:,} bytes, archived {f.first_archived[:10]}")
             for f in unused[:12]
         )
         more = tr(f"<br>…and {len(unused) - 12} more") if len(unused) > 12 else ""
@@ -932,7 +937,8 @@ def erase_flash(parent: QWidget, port: str, info: InfoEvent) -> bool:
         tr("Erase flash"),
         [
             tr(
-                f"Erase the whole flash of the {html.escape(info.chip)} on <b>{html.escape(port)}"
+                f"Erase the whole flash of the {chipinfo.display_name(info.chip)} on "
+                f"<b>{html.escape(port)}"
                 f"</b> (MAC {html.escape(info.mac or '?')})?"
             ),
             tr(
@@ -986,7 +992,8 @@ def read_flash(
     placement = PlacementFields(dialog, library, project_id, device)
     dialog.text(
         tr(
-            "Imported, the content is also kept in the archive as a new fixed firmware with one "
+            "When imported, the content is also kept in the archive as a new fixed firmware with "
+            "one "
             "merged entry. A dump includes NVS and may contain Wi-Fi credentials and other secrets."
         )
     )

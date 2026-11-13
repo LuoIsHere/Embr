@@ -147,9 +147,15 @@ def _mixed_p4_lines(library: Library, firmware_id: str, tmp_path: Path) -> Merge
 
 # the reason is the one the dialog shows (app.chips.merge_problem())
 REFUSED: dict[str, tuple[Callable[[Library, str, Path], MergeOptions], str]] = {
-    "no_chip": (_no_chip, "data.bin has no MCU"),
-    "mixed_mcu": (_mixed_mcu, "Checked entries are for esp32p4 v0-v1 and esp32s3"),
-    "mixed_p4_lines": (_mixed_p4_lines, "Checked entries are for esp32p4 v0-v1 and esp32p4 v3"),
+    "no_chip": (_no_chip, "No MCU set for data.bin"),
+    "mixed_mcu": (
+        _mixed_mcu,
+        "Checked entries are for different MCUs: ESP32-P4 v0\u2013v1, ESP32-S3",
+    ),
+    "mixed_p4_lines": (
+        _mixed_p4_lines,
+        "Checked entries are for different MCUs: ESP32-P4 v0\u2013v1, ESP32-P4 v3",
+    ),
     "pad_without_flash_size": (_pad_without_flash_size, "fw: flash size unknown"),
 }
 

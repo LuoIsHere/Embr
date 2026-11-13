@@ -146,6 +146,14 @@ HINT_JTAG = N_(
 )
 QUICK_KEY = "quick_flash"
 """settings.ini [ui] quick_flash: the Quick flash switch, off by default."""
+RENAME_IN_PROJECT = N_(
+    "Unique within the project; a duplicate gets a numeric suffix. Flash records keep the name "
+    "used at the time."
+)
+RENAME_STANDALONE = N_(
+    "Unique among standalone firmware; a duplicate gets a numeric suffix. Flash records keep "
+    "the name used at the time."
+)
 HINT_QUICK_NEEDS_ID = N_(
     "This firmware is for several chips or has no chip selected, so the board must be "
     "identified first."
@@ -479,16 +487,12 @@ class EmbrWindow(FrameWindow):
             self.show_in_explorer(firmware_location(firmware))
             return
         if name == "rename":
-            scope = tr("the project") if firmware.project_id else tr("standalone firmware")
             text = dialogs.ask_text(
                 self,
                 tr("Rename firmware"),
                 tr("Name"),
                 firmware.name,
-                tr(
-                    f"Unique within {scope}; a duplicate gets a numeric suffix. Flash records keep "
-                    "the name used at the time."
-                ),
+                tr(RENAME_IN_PROJECT if firmware.project_id else RENAME_STANDALONE),
                 tr("Rename"),
             )
             if text:
@@ -713,7 +717,7 @@ class EmbrWindow(FrameWindow):
         """The hint above Flash: what the last job left behind, else what to do first. With
         Quick flash on and a firmware selected: why it still needs Connect &
         identify, or how the connection enters download mode, and a warning when the whole
-        flash would be erased without identifying the board."""
+        flash would be erased without a prior Connect & identify."""
         outcome = self._last_outcome
         if outcome is not None and outcome.result == RecordResult.OK:
             if outcome.kind == JobKind.FLASH and outcome.native_usb:
@@ -722,6 +726,7 @@ class EmbrWindow(FrameWindow):
                 outcome.kind == JobKind.IDENTIFY
                 and snapshot is not None
                 and snapshot.info.in_download_mode
+                and not snapshot.info.security.secure_download_mode  # a flash is refused
             ):
                 return HINT_DOWNLOAD_MODE, "ok"
         if port is None or (snapshot is not None and snapshot.port.device == port.device):
@@ -741,8 +746,8 @@ class EmbrWindow(FrameWindow):
             return HINT_QUICK_NEEDS_ID, "ok"
         if firmware.erase_all:
             erase = N_(
-                f"Quick flash with erase on: the whole flash of the board on {port.device} will "
-                "be erased without identifying it first."
+                f"Quick flash with erase on: the whole flash of the board on {port.device} is "
+                "erased without a prior Connect & identify."
             )
             return erase, "warn"
         if port.connection == ConnectionType.USB_OTG:
@@ -1647,7 +1652,7 @@ class EmbrWindow(FrameWindow):
         try:
             firmware = self._library.create_from_files(files, node.project_id, node.device, name)
         except (FolderError, OSError, ValueError) as exc:
-            dialogs.notice(self, tr("Nothing added"), [_text(exc)])
+            dialogs.notice(self, tr("Nothing added"), [html.escape(tr(_text(exc)), quote=False)])
             return
         self.note("dim", f"[new] fixed firmware '{firmware.name}' from {len(files)} file(s)")
         self.select_firmware(firmware.id)
@@ -1666,7 +1671,7 @@ class EmbrWindow(FrameWindow):
         try:
             result = self._library.add_files(firmware_id, files)
         except (TrackingEntriesError, FolderError, OSError, ValueError) as exc:
-            dialogs.notice(self, tr("Nothing added"), [_text(exc)])
+            dialogs.notice(self, tr("Nothing added"), [html.escape(tr(_text(exc)), quote=False)])
             return
         name = self._library.firmware(firmware_id).name
         if result.added:

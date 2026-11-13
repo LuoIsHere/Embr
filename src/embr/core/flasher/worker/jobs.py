@@ -1,5 +1,6 @@
 """identify and flash jobs. Runs inside the worker process only."""
 
+import dataclasses
 import hashlib
 from collections.abc import Callable
 from pathlib import Path
@@ -57,9 +58,14 @@ def _refuse_secured(esp: ESPLoader, after: str, send: Send, outcome: str) -> Non
 
 
 def identify(plan: IdentifyPlan, send: Send) -> None:
+    """Connect -> InfoEvent -> reset as plan.after -> ResultEvent(OK). A chip in secure
+    download mode is not reset (most ROM commands are unavailable), so it stays in download
+    mode and the InfoEvent says so."""
     esp = _connect(plan.port, plan.before)
     try:
         esp, info, _ = _read_chip(esp, plan.stub, plan.after == "no-reset")
+        if info.security.secure_download_mode:
+            info = dataclasses.replace(info, in_download_mode=True)
         send(info)
         if not info.security.secure_download_mode:
             reset_chip(esp, plan.after)

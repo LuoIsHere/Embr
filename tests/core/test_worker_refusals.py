@@ -9,7 +9,7 @@ import pytest
 from embr_testkit import idf_entries
 
 from embr.core.flasher.checks import ChipState, SecurityState
-from embr.core.flasher.plan import ErasePlan, FlashPlan, FlashSettings, ReadPlan
+from embr.core.flasher.plan import ErasePlan, FlashPlan, FlashSettings, IdentifyPlan, ReadPlan
 from embr.core.flasher.protocol import (
     Event,
     InfoEvent,
@@ -28,9 +28,15 @@ SECURED = SecurityState(secure_download_mode=False, flash_encryption=True, secur
 class FakeChip:
     """What the jobs do to the connected chip."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, reset_fails: bool = False) -> None:
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        reset_fails: bool = False,
+        security: SecurityState = SECURED,
+    ) -> None:
         self.calls: list[str] = []
         self.reset_fails = reset_fails
+        self.security = security
         monkeypatch.setattr(jobs, "_connect", self._connect)
         monkeypatch.setattr(jobs, "_read_chip", self._read_chip)
         monkeypatch.setattr(jobs, "_close", self._close)
@@ -42,8 +48,8 @@ class FakeChip:
         return self
 
     def _read_chip(self, esp: object, *_args: object) -> tuple[object, InfoEvent, ChipState]:
-        info = InfoEvent("esp32s3", "v0.2", 0, 2, "aa:bb:cc:00:00:01", "8MB", SECURED, False)
-        return esp, info, ChipState("esp32s3", 0, 2, "8MB", SECURED)
+        info = InfoEvent("esp32s3", "v0.2", 0, 2, "aa:bb:cc:00:00:01", "8MB", self.security, False)
+        return esp, info, ChipState("esp32s3", 0, 2, "8MB", self.security)
 
     def _close(self, _esp: object) -> None:
         self.calls.append("close")
@@ -113,3 +119,17 @@ def test_a_reset_that_fails_is_a_warning_and_the_refusal_stands(
     assert [w.text for w in warning] == ["reset after the refusal failed: no reset in this mode"]
     result = sent[-1]
     assert isinstance(result, ResultEvent) and result.status == ResultStatus.REFUSED
+
+
+@pytest.mark.parametrize("sdm", [True, False], ids=["secure-download-mode", "plain"])
+def test_identify_says_where_it_leaves_the_chip(monkeypatch: pytest.MonkeyPatch, sdm: bool) -> None:
+    # a chip in secure download mode is not reset, so it stays in download mode
+    security = SecurityState(secure_download_mode=sdm, flash_encryption=False, secure_boot=False)
+    chip = FakeChip(monkeypatch, security=security)
+    sent: list[Event] = []
+    plan = IdentifyPlan("COM250", ConnectionType.UART_BRIDGE, "default-reset", "hard-reset")
+    jobs.identify(plan, sent.append)
+
+    assert chip.calls == (["close"] if sdm else ["reset hard-reset", "close"])
+    info = [e for e in sent if isinstance(e, InfoEvent)]
+    assert [i.in_download_mode for i in info] == [sdm]

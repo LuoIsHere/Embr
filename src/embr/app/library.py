@@ -26,6 +26,7 @@ from embr.app.chips import (
     fits,
     for_chip,
     image_header,
+    not_for_board,
 )
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
@@ -999,8 +1000,7 @@ class Library:
         mcus = firmware_mcus(self._ctx, firmware)
         revision = board_revision(state.major, state.minor)
         if mcus and not any(fits(m, state.chip, revision) for m in mcus):
-            names = ", ".join(m.label for m in mcus)
-            return f"firmware is for {names}, the board is {state.chip} {_revision_text(state)}"
+            return not_for_board(mcus, state.chip, _revision_text(state))
         if revision is None:  # secure download mode: the revision was not read
             return None
         for entry in sorted_entries([e for e in firmware.entries if e.enabled]):
@@ -1106,8 +1106,10 @@ def _revision_text(state: ChipState) -> str:
 def _refuse_tracking(firmware: Firmware) -> None:
     if firmware.source.tracking:
         raise TrackingEntriesError(
-            f"entries of '{firmware.name}' come from its build directory; archive this "
-            "version or create a fixed firmware to add files"
+            N_(
+                f"Entries of {firmware.name} come from its build directory; archive this "
+                "version or create a fixed firmware to add files"
+            )
         )
 
 

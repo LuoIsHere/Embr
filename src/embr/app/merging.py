@@ -148,7 +148,8 @@ class Merger:
         firmware = status.firmware
         if not status.state.flashable:
             reasons = status.problems or tuple(c.message for c in status.changes[:3])
-            raise PlanError(f"{firmware.name} cannot be merged now: " + "; ".join(reasons))
+            why = "; ".join(reasons)
+            raise PlanError(N_(f"{firmware.name} cannot be merged now: {why}"))
         enabled = sorted_entries([e for e in firmware.entries if e.enabled])
         if not enabled:
             raise PlanError(N_(f"{firmware.name} has no enabled entries"))

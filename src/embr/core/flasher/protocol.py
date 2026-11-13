@@ -53,7 +53,8 @@ class InfoEvent:
     flash_size: str | None
     security: SecurityState
     in_download_mode: bool
-    """True when the job leaves the chip in ROM download mode (after = no-reset)."""
+    """True when the job leaves the chip in ROM download mode: after = no-reset, or an
+    identify of a chip in secure download mode (not reset)."""
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from embr.app.chips import board_revision, firmware_mcus, fits, for_chip
+from embr.app.chips import board_revision, firmware_mcus, fits, for_chip, not_for_board
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, declared_flash_size, line_low, plan_entries
 from embr.app.identify import IdentifySnapshot
@@ -120,14 +120,8 @@ def preflight(
     except PlanError:  # reported by the layout item
         entries = []
     if mcus and not any(fits(m, info.chip, revision) for m in mcus):
-        names = ", ".join(m.label for m in mcus)
-        items.append(
-            CheckItem(
-                CheckState.REFUSE,
-                "Chip",
-                N_(f"the firmware is for {names}, the board is {info.chip} {info.revision}"),
-            )
-        )
+        reason = not_for_board(mcus, info.chip, info.revision)
+        items.append(CheckItem(CheckState.REFUSE, "Chip", reason))
     else:
         chip = check_chip(info.chip, None, entries)
         items.append(_item(chip))

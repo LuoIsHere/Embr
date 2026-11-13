@@ -23,6 +23,7 @@ from embr.core.firmware.image_header import ImageHeader, read_image_header
 from embr.core.firmware.image_sniff import sniff
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware
+from embr.i18n import N_
 
 
 @dataclass(frozen=True, order=True)
@@ -39,10 +40,7 @@ class Mcu:
     @property
     def label(self) -> str:
         """For the UI: "ESP32-S3", "ESP32-P4 v3" (the line label, with an en dash)."""
-        try:
-            name = chipinfo.get_chip(self.chip).display_name
-        except chipinfo.UnknownChipError:
-            name = self.chip
+        name = chipinfo.display_name(self.chip)
         line = next((ln for ln in chipinfo.revision_lines(self.chip) if ln.name == self.line), None)
         return f"{name} {line.label}" if line else name
 
@@ -51,6 +49,14 @@ def board_revision(major: int, minor: int) -> int | None:
     """major * 100 + minor of an identified chip; None when it could not be read
     (secure download mode reports a negative major)."""
     return major * 100 + minor if major >= 0 else None
+
+
+def not_for_board(mcus: tuple[Mcu, ...], chip: str, revision: str) -> str:
+    """Why a firmware for `mcus` does not fit the identified board: its chip `chip` at
+    `revision` ("v0.2"; "" when it could not be read), by display name."""
+    names = ", ".join(m.label for m in mcus)
+    board = f"{chipinfo.display_name(chip)} {revision}".rstrip()
+    return N_(f"the firmware is for {names}, the board is {board}")
 
 
 def image_mcu(context: AppContext, entry: Entry) -> Mcu | None:
@@ -162,8 +168,8 @@ def for_chip(
 
 def merge_problem(context: AppContext, firmware: Firmware) -> str | None:
     """Why the enabled entries cannot be merged into one image, or None: they are for more
-    than one MCU ("Checked entries are for esp32p4 and esp32s3", "... for esp32p4 v0-v1 and
-    esp32p4 v3": Mcu.key), or an enabled entry has no MCU ("storage.bin has no MCU")."""
+    than one MCU ("Checked entries are for different MCUs: ESP32-P4 v3, ESP32-S3", by
+    Mcu.label), or an enabled entry has no MCU ("No MCU set for storage.bin")."""
     mcus = firmware_mcus(context, firmware)
     found: set[Mcu] = set()
     for entry in firmware.entries:
@@ -171,11 +177,12 @@ def merge_problem(context: AppContext, firmware: Firmware) -> str | None:
             continue
         mcu = _entry_mcu(context, firmware, entry, mcus)
         if mcu is None:
-            return f"{entry.name} has no MCU"
+            return N_(f"No MCU set for {entry.name}")
         found.add(mcu)
     found = _without_covered(found)
     if len(found) > 1:
-        return f"Checked entries are for {' and '.join(sorted(m.key for m in found))}"
+        labels = ", ".join(sorted(m.label for m in found))
+        return N_(f"Checked entries are for different MCUs: {labels}")
     return None
 
 

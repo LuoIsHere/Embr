@@ -118,6 +118,15 @@ def get_chip(name: str) -> ChipInfo:
     raise UnknownChipError(name)
 
 
+def display_name(name: str) -> str:
+    """The chip's display name for the UI and its messages ("esp32s3" -> "ESP32-S3"); an
+    unknown name is returned as it is."""
+    try:
+        return get_chip(name).display_name
+    except UnknownChipError:
+        return name
+
+
 def chip_for_image_id(chip_id: int) -> ChipInfo | None:
     """Chip whose image header chip ID is `chip_id`, or None."""
     return next((c for c in supported_chips() if c.image_chip_id == chip_id), None)

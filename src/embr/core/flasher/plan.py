@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from embr.core.serial import ConnectionType
+from embr.i18n import N_
 
 DEFAULT_UART_BAUD = 460800
 """Default baud rate for UART bridges, same as `idf.py flash`."""
@@ -127,23 +128,27 @@ def adjust_reset(
         new_before = "no-reset"
         if before != new_before:
             reasons.append(
-                f"before={before} -> no-reset: on USB-OTG the chip only appears in ROM "
-                "download mode, it cannot be reset into it"
+                N_(
+                    f"before={before} -> no-reset: on USB-OTG the chip only appears in ROM "
+                    "download mode, it cannot be reset into it"
+                )
             )
     elif connection == ConnectionType.USB_SERIAL_JTAG:
         if after == "hard-reset":
             new_after = "watchdog-reset"
             reasons.append(
-                "after=hard-reset -> watchdog-reset: on USB-Serial/JTAG an RTS reset may "
-                "leave the chip in download mode"
+                N_(
+                    "after=hard-reset -> watchdog-reset: on USB-Serial/JTAG an RTS reset may "
+                    "leave the chip in download mode"
+                )
             )
     else:
         if before == "usb-reset":
             new_before = "default-reset"
-            reasons.append("before=usb-reset -> default-reset: not a USB-Serial/JTAG port")
+            reasons.append(N_("before=usb-reset -> default-reset: not a USB-Serial/JTAG port"))
         if after == "watchdog-reset":
             new_after = "hard-reset"
-            reasons.append("after=watchdog-reset -> hard-reset: not a native USB port")
+            reasons.append(N_("after=watchdog-reset -> hard-reset: not a native USB port"))
     return new_before, new_after, tuple(reasons)
 
 

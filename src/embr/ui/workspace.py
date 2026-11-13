@@ -641,8 +641,13 @@ class EntriesTab(QWidget):
         if not locked and not unfit:
             flags |= Qt.ItemFlag.ItemIsUserCheckable
         check.setFlags(flags)
-        if unfit:
-            check.setToolTip(tr(f"For {mcu.label if mcu else 'no MCU'}; the board is {board}"))
+        if board is not None and unfit:
+            name = chipinfo.display_name(board)
+            check.setToolTip(
+                tr(f"For {mcu.label}; the board is {name}")
+                if mcu
+                else tr(f"No MCU set; the board is {name}")
+            )
         check.setCheckState(Qt.CheckState.Checked if entry.enabled else Qt.CheckState.Unchecked)
         self.table.setItem(row, 0, check)
         address = QLineEdit("" if entry.address is None else f"0x{entry.address:X}")
@@ -896,6 +901,7 @@ class EntriesTab(QWidget):
             return
         derived = firmware.source.tracking
         menu = QMenu(self)
+        menu.setToolTipsVisible(True)  # explains a disabled Remove entry
         relocate = menu.addAction(tr("Re-locate…"))
         relocate.setEnabled(entry.file.startswith("path:") and not derived)
         archive = menu.addAction(tr("Archive this file"))
@@ -1057,7 +1063,7 @@ class ParamsTab(QWidget):
         self._add(
             tr("Group"),
             label(group, tone="2"),
-            tr("change via the ⋯ menu → Move, or drag in the sidebar"),
+            tr("change via the ⋯ menu → Move to project…, or drag in the sidebar"),
         )
         notes = NotesEdit(
             firmware.notes, tr("What this firmware is, which board revision, why it exists…")
@@ -1067,7 +1073,7 @@ class ParamsTab(QWidget):
         self._add(
             tr("Notes"),
             notes,
-            tr("shown in grey next to the name; saved when the field loses focus"),
+            tr("shown in grey below the name; saved when the field loses focus"),
         )
         tags = QLineEdit(", ".join(firmware.tags))
         tags.setPlaceholderText(tr("comma-separated, e.g. release, s3"))
@@ -1178,7 +1184,7 @@ class ParamsTab(QWidget):
             tr("exists") if Path(firmware.build_ref.path).is_dir() else tr("not found"),
             tr(f"last resolved {str(resolved).replace('T', ' ')}") if resolved else "",
             f"ESP-IDF {status.idf_version}" if status and status.idf_version else "",
-            tr(f"{'board' if env else 'sdkconfig'} target {status.configured_target}")
+            _target_text(status.configured_target, bool(env))
             if status and status.configured_target
             else "",
         ]
@@ -1504,9 +1510,9 @@ class FirmwareView(QWidget):
             self.banner.show_text(
                 tr(
                     f"Target switched, rebuild needed: the configuration targets "
-                    f"<b>{status.configured_target}</b>, the build output is still "
-                    f"<b>{firmware.chip}</b>. {rebuild}; flashing, archiving and merging are "
-                    "blocked until then."
+                    f"<b>{chipinfo.display_name(status.configured_target or '')}</b>, the build "
+                    f"output is still <b>{chipinfo.display_name(firmware.chip or '')}</b>. "
+                    f"{rebuild}; flashing, archiving and merging are blocked until then."
                 )
             )
         elif status.state == ResolveState.INCOMPLETE:
@@ -1520,11 +1526,16 @@ class FirmwareView(QWidget):
             self.banner.show_text(tr("The build output is being written; checking again shortly."))
         elif status.state == ResolveState.MISSING:
             resolved = (firmware.last_resolved or {}).get("resolved_at")
-            when = str(resolved).replace("T", " ") if resolved else "never"
+            when = str(resolved).replace("T", " ")
             self.banner.show_text(
                 tr(
                     f"{problems}. Last resolved {when}; the entries below are that snapshot and "
                     "cannot be flashed until the directory exists again."
+                )
+                if resolved
+                else tr(
+                    f"{problems}. Never resolved; flashing is blocked until the directory exists "
+                    "again."
                 ),
                 tr("Change directory…"),
                 "directory",
@@ -1579,10 +1590,20 @@ def _summary(record: FlashRecord) -> str:
     return text
 
 
+ADDRESS_SOURCES = {AddressSource.AUTO: N_("auto"), AddressSource.MANUAL: N_("manual")}
+"""Address source column: detected from the file, or typed by the user."""
+
+
+def _target_text(target: str, pio: bool) -> str:
+    """The configured target chip: from the env's board in platformio.ini, or sdkconfig."""
+    name = chipinfo.display_name(target)
+    return tr(f"platformio.ini target {name}") if pio else tr(f"sdkconfig target {name}")
+
+
 def _address_source(entry: Entry) -> str:
     if entry.address_source == AddressSource.PARTITION:
         return tr(f"partition {entry.partition}")
-    return entry.address_source.value
+    return tr(ADDRESS_SOURCES[entry.address_source])
 
 
 def _derived(text: str) -> QWidget:
