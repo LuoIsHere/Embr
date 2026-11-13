@@ -204,24 +204,26 @@ def check_capacity(
     return checks
 
 
-def check_files(entries: Sequence[PlanEntry]) -> Check:
+def read_files(entries: Sequence[PlanEntry]) -> tuple[Check, list[bytes]]:
     """Read every entry's file and compare size and sha256 with the plan. REFUSE naming the
-    first missing or changed file."""
+    first missing or changed file, with no data; PASS with the content of each file, in
+    the order of `entries`: exactly the bytes whose hash was checked, to be written."""
+    payloads: list[bytes] = []
     for e in entries:
         path = Path(e.path)
         if not path.is_file():
-            return Check(FILES, CheckLevel.REFUSE, N_(f"{e.name}: file missing ({e.path})"))
+            return Check(FILES, CheckLevel.REFUSE, N_(f"{e.name}: file missing ({e.path})")), []
         data = path.read_bytes()
         if len(data) != e.size or hashlib.sha256(data).hexdigest() != e.sha256:
-            return Check(
-                FILES, CheckLevel.REFUSE, N_(f"{e.name}: content changed since it was checked")
-            )
+            changed = N_(f"{e.name}: content changed since it was checked")
+            return Check(FILES, CheckLevel.REFUSE, changed), []
+        payloads.append(data)
     passed = (
         N_("1 file: name, path and hash match")
         if len(entries) == 1
         else N_(f"{len(entries)} files: name, path and hash match")
     )
-    return Check(FILES, CheckLevel.PASS, passed)
+    return Check(FILES, CheckLevel.PASS, passed), payloads
 
 
 def flash_size_bytes(size: str) -> int | None:

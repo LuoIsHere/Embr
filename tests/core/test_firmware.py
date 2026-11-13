@@ -8,14 +8,16 @@ from pathlib import Path
 
 import pytest
 import tomli_w
-from embr_testkit import FIXTURES, IDF
+from embr_testkit import FIXTURES, IDF, write_newer
 
+from embr.core.firmware import store as store_module
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import (
     FIRMWARE_SCHEMA_VERSION,
     PARAMS,
     AddressSource,
     Entry,
+    EntryOverride,
     Firmware,
     ReadOnlyFieldError,
     Source,
@@ -47,6 +49,19 @@ def _reopen(store: FirmwareStore) -> FirmwareStore:
 def _comparable(fw: Firmware, *ignore: str) -> dict[str, object]:
     data = asdict(replace(fw, updated_at=""))
     return {k: v for k, v in data.items() if k not in ignore}
+
+
+def _count_parses(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Paths parsed by any FirmwareStore from now on."""
+    parsed: list[Path] = []
+    load = store_module.load_document
+
+    def counted(path: Path, **kwargs: object) -> object:
+        parsed.append(path)
+        return load(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_module, "load_document", counted)
+    return parsed
 
 
 def _path_entry(path: Path, kind: EntryKind, address: int) -> Entry:
@@ -136,6 +151,71 @@ def test_move_changes_only_project_and_device(store: FirmwareStore) -> None:
     reloaded = _reopen(store).get(fw.id)
     assert _comparable(reloaded, "project_id", "device") == unchanged
     assert file.exists()
+
+
+def test_unchanged_files_are_parsed_once(
+    store: FirmwareStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made = [store.create(name) for name in ("A", "B", "C")]
+    store = _reopen(store)  # nothing parsed yet
+    parsed = _count_parses(monkeypatch)
+    assert [f.name for f in store.all()] == ["A", "B", "C"]
+    assert len(parsed) == 3
+    store.all()
+    store.get(made[0].id)
+    store.in_scope(None)
+    assert len(parsed) == 3  # nothing changed on disk: nothing parsed again
+
+    file = store.directory / f"{made[1].id}.toml"
+    doc = tomllib.loads(file.read_text(encoding="utf-8"))
+    doc["notes"] = "edited outside Embr"
+    write_newer(file, tomli_w.dumps(doc).encode())
+    assert store.get(made[1].id).notes == "edited outside Embr"
+    assert parsed[3:] == [file]
+    store.save(store.get(made[2].id))
+    store.all()
+    assert parsed[4:] == [store.directory / f"{made[2].id}.toml"]
+
+
+def test_returned_firmware_are_independent_copies(store: FirmwareStore) -> None:
+    fw = store.create("App", project_id=new_id())
+    fw.tags = ["release"]
+    fw.entries = [_path_entry(APP, EntryKind.APP, 0x10000)]
+    fw.entry_overrides = {"app": EntryOverride(address=0x20000)}
+    fw.last_resolved = {"entries": [{"name": "app.bin", "address": "0x10000"}]}
+    store.save(fw)
+    kept = _comparable(store.get(fw.id))
+
+    changed = store.get(fw.id)
+    changed.tags.append("x")
+    changed.entries[0].name = "x.bin"
+    changed.entry_overrides["app"].address = 0x30000
+    assert changed.last_resolved is not None
+    changed.last_resolved["entries"][0]["name"] = "x.bin"  # type: ignore[index]
+    changed.name = "x"
+    for listed in store.all():
+        listed.entries.clear()
+    assert _comparable(store.get(fw.id)) == kept
+
+
+def test_move_many_names_each_in_turn(
+    store: FirmwareStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = new_id()
+    store.create("App")
+    first = store.create("App", project_id=project, device="G")
+    second = store.create("App", project_id=new_id())
+    store.all()
+    parsed = _count_parses(monkeypatch)
+    moved = store.move_many([first.id, second.id], None)
+    assert [(f.name, f.project_id, f.device) for f in moved] == [
+        ("App (2)", None, ""),
+        ("App (3)", None, ""),
+    ]
+    assert parsed == []  # every file was already parsed and unchanged
+    assert sorted(f.name for f in store.in_scope(None)) == ["App", "App (2)", "App (3)"]
+    with pytest.raises(KeyError):
+        store.move_many([new_id()], None)
 
 
 def test_default_names() -> None:

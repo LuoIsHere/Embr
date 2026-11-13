@@ -15,9 +15,9 @@ from embr.core.flasher.checks import (
     SecurityState,
     check_capacity,
     check_chip,
-    check_files,
     check_revisions,
     check_security,
+    read_files,
     refuses,
     revision_incompatibility,
 )
@@ -159,7 +159,7 @@ def copied(tmp_path: Path) -> list[PlanEntry]:
         target = tmp_path / Path(entry.path).name
         shutil.copyfile(entry.path, target)
         entries.append(make_entry(entry.address, target))
-    assert check_files(entries).level is CheckLevel.PASS
+    assert read_files(entries)[0].level is CheckLevel.PASS
     return entries
 
 
@@ -167,18 +167,27 @@ def test_changed_file_refuses(copied: list[PlanEntry]) -> None:
     data = bytearray(Path(copied[1].path).read_bytes())
     data[100] ^= 0xFF  # same size, different content
     Path(copied[1].path).write_bytes(bytes(data))
-    check = check_files(copied)
+    check, payloads = read_files(copied)
     assert (check.name, check.level) == (FILES, CheckLevel.REFUSE)
     assert copied[1].name in check.message or Path(copied[1].path).name in check.message
+    assert payloads == []
 
 
 def test_missing_file_refuses(copied: list[PlanEntry]) -> None:
     Path(copied[2].path).unlink()
-    check = check_files(copied)
+    check, payloads = read_files(copied)
     assert (check.name, check.level) == (FILES, CheckLevel.REFUSE)
     assert copied[2].name in check.message or Path(copied[2].path).name in check.message
+    assert payloads == []
 
 
 def test_passed_files_are_counted(copied: list[PlanEntry]) -> None:
-    assert check_files(copied).message == "3 files: name, path and hash match"
-    assert check_files(copied[:1]).message == "1 file: name, path and hash match"
+    assert read_files(copied)[0].message == "3 files: name, path and hash match"
+    assert read_files(copied[:1])[0].message == "1 file: name, path and hash match"
+
+
+def test_checked_files_come_back_as_read(copied: list[PlanEntry]) -> None:
+    """The worker writes these bytes: the ones whose hash was just checked."""
+    check, payloads = read_files(copied)
+    assert check.level is CheckLevel.PASS
+    assert payloads == [Path(e.path).read_bytes() for e in copied]

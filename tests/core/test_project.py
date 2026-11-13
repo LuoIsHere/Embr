@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import tomli_w
 
+from embr.core.firmware import store as store_module
 from embr.core.firmware.model import Source
 from embr.core.firmware.store import FirmwareStore, ReadOnlyError
 from embr.core.project import (
@@ -86,6 +87,36 @@ def test_delete_project_makes_firmware_standalone(stores: Stores) -> None:
     assert moved.name == "App (2)"
     assert firmware.get(standalone.id).name == "App"
     assert len(firmware.all()) == 2
+
+
+def test_delete_project_reads_each_firmware_file_once(
+    stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, firmware = stores
+    project = projects.create("P")
+    for i in range(6):
+        projects.create_firmware(firmware, project.id, f"App {i}")
+    firmware.create("Other")
+    reopened = FirmwareStore(firmware.directory, firmware.backup_root)
+    parsed: list[Path] = []
+    load = store_module.load_document
+
+    def counted(path: Path, **kwargs: object) -> object:
+        parsed.append(path)
+        return load(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_module, "load_document", counted)
+    projects.delete(project.id, reopened)
+    assert len(parsed) == len(set(parsed)) == 7
+    assert sorted(f.name for f in reopened.in_scope(None)) == [
+        "App 0",
+        "App 1",
+        "App 2",
+        "App 3",
+        "App 4",
+        "App 5",
+        "Other",
+    ]
 
 
 def test_delete_project_with_firmware(stores: Stores) -> None:

@@ -55,6 +55,8 @@ PLUS = chr(0xFF0B)
 """Full-width plus, as in the UI mock."""
 TIMES = chr(0xD7)
 """Multiplication sign: tag for a missing source."""
+SEARCH_DELAY_MS = 150
+"""query_changed is sent once typing has paused this long (each search rebuilds the tree)."""
 DIMMED = 0.45
 
 
@@ -621,7 +623,11 @@ class Sidebar(QWidget):
         layout.addWidget(self.search)
         layout.addWidget(self.new_button)
         layout.addWidget(self.tree, 1)
-        self.search.textChanged.connect(self.query_changed.emit)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DELAY_MS)
+        self._search_timer.timeout.connect(lambda: self.query_changed.emit(self.search.text()))
+        self.search.textChanged.connect(self._typed)
         self.tree.itemClicked.connect(self._clicked)
         self.tree.files_dropped.connect(self.files_dropped.emit)
         self.tree.projects_reordered.connect(self.projects_reordered.emit)
@@ -632,6 +638,9 @@ class Sidebar(QWidget):
         self._selected: tuple[str, str] | None = None
         self._dimmed: Mapping[str, str] = {}
         self._busy_id: str | None = None
+
+    def _typed(self, _text: str) -> None:
+        self._search_timer.start()  # restarted by every key
 
     def apply_palette(self, p: Palette) -> None:
         self._search_icon.setIcon(icons.icon("search", p.fg_3))

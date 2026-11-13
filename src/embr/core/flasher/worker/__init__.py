@@ -4,7 +4,7 @@ Started as `Embr.exe --worker` (or `python -m embr --worker`).
 
 Event order for a flash job:
 1. CheckEvent(RESET, WARN) for each plan.adjustments entry, else one CheckEvent(RESET, PASS)
-2. CheckEvent(FILES) from check_files(); REFUSE -> ResultEvent(REFUSED), port never opened
+2. CheckEvent(FILES) from read_files(); REFUSE -> ResultEvent(REFUSED), port never opened
 3. connect -> InfoEvent
 4. CheckEvents from check_security(); any REFUSE -> ResultEvent(REFUSED), nothing written
    (with secure download mode nothing else is read from the chip)
@@ -26,6 +26,7 @@ import sys
 import threading
 import traceback
 from contextlib import redirect_stdout
+from pathlib import Path
 from typing import TextIO
 
 from embr.core.flasher.plan import ErasePlan, IdentifyPlan, ReadPlan
@@ -33,9 +34,10 @@ from embr.core.flasher.protocol import ErrorEvent, Event, ProtocolError, decode_
 
 
 def run(stdin: TextIO, stdout: TextIO) -> int:
-    """Read one task from `stdin`, run it, write events to `stdout` (one JSON line each,
-    flushed per line) and return the process exit code: 0 when a ResultEvent was sent,
-    non-zero after an ErrorEvent. Every exception becomes an ErrorEvent."""
+    """Read the path of a task file (UTF-8 JSON, see runner.start()) from `stdin`, run the
+    task, write events to `stdout` (one JSON line each, flushed per line) and return the
+    process exit code: 0 when a ResultEvent was sent, non-zero after an ErrorEvent. Every
+    exception becomes an ErrorEvent."""
     lock = threading.Lock()
 
     def send(event: Event) -> None:
@@ -45,8 +47,8 @@ def run(stdin: TextIO, stdout: TextIO) -> int:
             stdout.flush()
 
     try:
-        task = decode_task(stdin.read())
-    except ProtocolError as exc:
+        task = decode_task(Path(stdin.read().strip()).read_text(encoding="utf-8"))
+    except (ProtocolError, OSError, UnicodeDecodeError) as exc:
         send(ErrorEvent(f"invalid task: {exc}", ""))
         return 2
 

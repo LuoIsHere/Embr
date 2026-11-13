@@ -20,7 +20,7 @@ from pathlib import Path
 from embr.app.chips import (
     board_revision,
     chip_choosable,
-    entry_mcu,
+    entry_mcus,
     firmware_chips,
     firmware_mcus,
     fits,
@@ -844,10 +844,9 @@ class Library:
         firmware = self._ctx.firmware.get(firmware_id)
         if firmware.source.tracking or chip not in firmware_chips(self._ctx, firmware):
             return []
+        mcus = entry_mcus(self._ctx, firmware)
         unticked = [
-            e
-            for e in firmware.entries
-            if e.enabled and not fits(entry_mcu(self._ctx, firmware, e), chip, revision)
+            e for e in firmware.entries if e.enabled and not fits(mcus[e.id], chip, revision)
         ]
         for entry in unticked:
             entry.enabled = False
@@ -1003,9 +1002,10 @@ class Library:
             return not_for_board(mcus, state.chip, _revision_text(state))
         if revision is None:  # secure download mode: the revision was not read
             return None
+        by_entry = entry_mcus(self._ctx, firmware)
         for entry in sorted_entries([e for e in firmware.entries if e.enabled]):
             header = image_header(self._ctx, entry)
-            mcu = entry_mcu(self._ctx, firmware, entry)
+            mcu = by_entry[entry.id]
             if header is None or not fits(mcu, state.chip, revision):  # others are left out
                 continue
             planned = PlanEntry(

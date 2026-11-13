@@ -7,12 +7,13 @@ import pytest
 import tomli_w
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QTreeWidgetItem
 
 from embr.core.project import PROJECT_SCHEMA_VERSION
 from embr.ui import reorder
 from embr.ui.reorder import Block, Slide
-from embr.ui.sidebar import FirmwareTree
+from embr.ui.sidebar import SEARCH_DELAY_MS, FirmwareTree
 from embr.ui.window import EmbrWindow
 
 # pyright: reportPrivateUsage=false
@@ -224,7 +225,7 @@ def test_no_reorder_while_searching(window: EmbrWindow) -> None:
         window.library.create_project(name)
     tree = _shown(window)
     window.sidebar_panel.search.setText("a")
-    QApplication.processEvents()
+    QTest.qWait(SEARCH_DELAY_MS + 50)
     _press_and_move(
         tree,
         _at(tree, _row(tree, "project", "Alpha a")),

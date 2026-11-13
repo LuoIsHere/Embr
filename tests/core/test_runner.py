@@ -4,14 +4,18 @@ Every wait has a timeout and every job is cancelled on the way out, so a broken
 implementation fails instead of hanging.
 """
 
+import dataclasses
 import re
 import socket
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from pathlib import Path
 
+import pytest
 from embr_testkit import WORKER_TIMEOUT, idf_entries
 
 from embr.core.flasher.plan import FlashPlan, FlashSettings, IdentifyPlan
@@ -23,7 +27,9 @@ from embr.core.flasher.protocol import (
     ResultEvent,
     ResultStatus,
     Task,
+    decode_task,
     encode_event,
+    encode_task,
 )
 from embr.core.flasher.runner import JobHandle, start
 from embr.core.serial import ConnectionType
@@ -142,3 +148,37 @@ def test_cancel_while_connecting() -> None:
             assert server.closed.wait(5), "connection not released after cancel"
     finally:
         server.stop()
+
+
+def test_large_task_does_not_wait_for_the_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task larger than a pipe holds (long paths, many entries) is handed over at once,
+    even to a worker that is slow to start reading, and leaves no file behind."""
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    entry = idf_entries("esp32s3_hello")[0]
+    folder = "很长的中文目录名称-" * 8
+    plan = FlashPlan(
+        port="COM1",
+        connection=ConnectionType.UART_BRIDGE,
+        baud=115200,
+        chip="esp32s3",
+        before="default-reset",
+        after="hard-reset",
+        stub=True,
+        flash=FlashSettings(),
+        entries=tuple(
+            dataclasses.replace(entry, path=f"{folder}/{i:03d}-{entry.name}") for i in range(200)
+        ),
+        erase_all=False,
+        skip_flashed=True,
+    )
+    assert len(encode_task(plan).encode("utf-8")) > 64 * 1024
+    slow = [sys.executable, "-c", "import time; time.sleep(2)"]
+    started = time.monotonic()
+    with running(plan, slow) as (handle, _):
+        assert time.monotonic() - started < 1.0
+        (task_file,) = tmp_path.glob("embr-task-*.json")
+        assert decode_task(task_file.read_text(encoding="utf-8")) == plan
+        assert handle.wait(WORKER_TIMEOUT)
+    assert list(tmp_path.glob("embr-task-*")) == []

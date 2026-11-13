@@ -1,9 +1,10 @@
 """Everything a running Embr works on, opened from the portable data folder."""
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from embr.core.archive import Archive
+from embr.core.firmware.filecache import FileCache
 from embr.core.firmware.store import FirmwareStore
 from embr.core.history import History
 from embr.core.logs import LogBook
@@ -23,6 +24,10 @@ class AppContext:
     logs: LogBook
     settings: Settings
     archive: Archive
+    files: FileCache = field(default_factory=FileCache)
+    """Hashes (and small contents) of entry and build files, shared by the tracker, the
+    checklist and image headers; a file is read again only after its size or modification
+    time changed."""
 
     def close(self) -> None:
         """Save the settings and close the database (closed also when saving fails)."""

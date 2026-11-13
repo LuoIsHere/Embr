@@ -1340,10 +1340,19 @@ class RecordsTab(QWidget):
         layout.addWidget(hint)
         layout.addLayout(self.list)
         layout.addStretch(1)
+        self._shown: tuple[str, int] | None = None
+        """(firmware id, history version) of the rows shown."""
 
     def show_firmware(self, firmware: Firmware) -> None:
+        """Rows for the firmware's records; kept as they are while neither the firmware nor
+        the records changed (records are snapshots: nothing else alters a row)."""
+        history = self._owner.context.history
+        shown = (firmware.id, history.version)
+        if shown == self._shown:
+            return
+        self._shown = shown
         clear_layout(self.list)
-        records = self._owner.context.history.query(firmware_id=firmware.id)
+        records = history.query(firmware_id=firmware.id)
         if not records:
             self.list.addWidget(label(tr("No flash records yet."), tone="3"))
             return

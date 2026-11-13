@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from collections.abc import Callable
@@ -105,18 +106,22 @@ def decode_lines(stdout: str) -> list[Event]:
     return [decode_event(line) for line in stdout.splitlines() if line.strip()]
 
 
-def run_worker(stdin_text: str) -> tuple[int, list[Event]]:
-    """Run `python -m embr --worker`; a hang fails the test through TimeoutExpired."""
-    proc = subprocess.run(
-        [sys.executable, "-m", "embr", "--worker"],
-        input=stdin_text,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=WORKER_TIMEOUT,
-        cwd=REPO,
-        check=False,
-    )
+def run_worker(task_text: str) -> tuple[int, list[Event]]:
+    """Run `python -m embr --worker` on a task file holding `task_text`, as runner.start()
+    does; a hang fails the test through TimeoutExpired."""
+    with tempfile.TemporaryDirectory() as folder:
+        task_file = Path(folder) / "task.json"
+        task_file.write_text(task_text, encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, "-m", "embr", "--worker"],
+            input=f"{task_file}\n",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=WORKER_TIMEOUT,
+            cwd=REPO,
+            check=False,
+        )
     return proc.returncode, decode_lines(proc.stdout)
 
 

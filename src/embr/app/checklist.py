@@ -173,7 +173,9 @@ def _item(check: Check) -> CheckItem:
 
 def _table(context: AppContext, firmware: Firmware) -> tuple[PartitionTable | None, list[Problem]]:
     try:
-        return enabled_partition_table(firmware, lambda e: read_entry(e, context.paths.archive))
+        return enabled_partition_table(
+            firmware, lambda e: read_entry(e, context.paths.archive, context.files)
+        )
     except OSError:  # the files item reports the missing file
         return None, []
 
@@ -203,7 +205,7 @@ def _files(context: AppContext, firmware: Firmware, chip: str | None) -> CheckIt
             N_(f"enable at least one entry for {chip}") if chip else N_("enable at least one entry")
         )
         return CheckItem(CheckState.REFUSE, N_("No entries enabled"), detail)
-    states = {e.name: entry_state(e, context.paths.archive) for e in enabled}
+    states = {e.name: entry_state(e, context.paths.archive, context.files) for e in enabled}
     missing = [n for n, s in states.items() if s == FileState.MISSING]
     changed = [n for n, s in states.items() if s == FileState.CHANGED]
     if missing:

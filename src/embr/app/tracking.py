@@ -125,7 +125,7 @@ class Tracker:
         on_ready callback."""
         self._ctx = context
         self._pio = pio or PioConfigs()
-        self._cache = cache or FileCache()
+        self._cache = cache or context.files
         self._clock = clock
         self._status: dict[str, TrackStatus] = {}
         self._prints: dict[str, Fingerprint] = {}

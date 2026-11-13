@@ -117,6 +117,37 @@ def test_query_filters_newest_first_with_limit(history: History) -> None:
     assert ids(history.query(limit=2)) == [r4.id, r3.id]
 
 
+def test_each_record_reads_back_its_own_entries(history: History) -> None:
+    """The entries of all records come from one query; each record still gets its own, in
+    their order, also with a filter and a limit."""
+    records = [
+        _record(
+            timestamp=f"2026-10-29T1{i}:00:00",
+            entries=tuple(
+                RecordEntry(f"r{i}-e{j}.bin", 0x1000 * (5 - j), f"{i}{j}" * 32, 100 + j, "data")
+                for j in range(i + 1)
+            ),
+        )
+        for i in range(4)
+    ]
+    records.append(_record(timestamp="2026-10-29T15:00:00", firmware_id=new_id()))
+    for record in records:
+        history.add(record)
+    assert history.query(firmware_id=FIRMWARE) == records[3::-1]
+    assert history.query(firmware_id=FIRMWARE, limit=2) == records[3:1:-1]
+    assert history.query(firmware_id=new_id()) == []
+
+
+def test_version_goes_up_with_each_added_record(history: History) -> None:
+    start = history.version
+    record = _record()
+    history.add(record)
+    assert history.version == start + 1
+    with pytest.raises(ValueError):
+        history.add(record)  # refused: nothing changed
+    assert history.version == start + 1
+
+
 @pytest.mark.parametrize("spelling", ["AA-BB-CC-DD-EE-FF", "aabbccddeeff", "AA:bb:CC:dd:EE:ff"])
 def test_mac_any_spelling_is_stored_and_matched_normalized(history: History, spelling: str) -> None:
     assert normalize_mac(spelling) == MAC

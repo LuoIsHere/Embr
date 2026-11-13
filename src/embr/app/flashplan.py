@@ -4,7 +4,7 @@ and the equivalent command line come from the same plan.
 
 from pathlib import Path
 
-from embr.app.chips import Mcu, entry_mcu, firmware_mcus, fits, for_chip, image_header
+from embr.app.chips import Mcu, entry_mcus, firmware_mcus, fits, for_chip, image_header
 from embr.app.context import AppContext
 from embr.core import chipinfo
 from embr.core.firmware.entries import enabled_partition_table, sorted_entries
@@ -47,7 +47,8 @@ def plan_entries(
     planned: list[PlanEntry] = []
     enabled = [e for e in firmware.entries if e.enabled]
     if chip is not None:
-        enabled = [e for e in enabled if fits(entry_mcu(context, firmware, e), chip, revision)]
+        mcus = entry_mcus(context, firmware)
+        enabled = [e for e in enabled if fits(mcus[e.id], chip, revision)]
     for entry in sorted_entries(enabled):
         if entry.address is None:
             raise PlanError(f"{entry.name} has no address")
@@ -96,7 +97,9 @@ def assemble_plan(
     entries = plan_entries(context, firmware, write_files=write_files, chip=chip, revision=revision)
     view = for_chip(context, firmware, chip, revision)
     try:
-        table, _ = enabled_partition_table(view, lambda e: read_entry(e, context.paths.archive))
+        table, _ = enabled_partition_table(
+            view, lambda e: read_entry(e, context.paths.archive, context.files)
+        )
     except OSError:  # the files check reports the missing table
         table = None
     flash = firmware.flash

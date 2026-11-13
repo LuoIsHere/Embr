@@ -1,9 +1,7 @@
 """identify and flash jobs. Runs inside the worker process only."""
 
 import dataclasses
-import hashlib
 from collections.abc import Callable
-from pathlib import Path
 
 from esptool.cmds import (  # pyright: ignore[reportUnknownVariableType]  # untyped **kwargs
     attach_flash,
@@ -79,20 +77,10 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
         send(CheckEvent(checks.RESET, CheckLevel.WARN, reason))
     if not plan.adjustments:
         send(CheckEvent(checks.RESET, CheckLevel.PASS, f"before={plan.before}, after={plan.after}"))
-    if _send_checks(send, [checks.check_files(plan.entries)]):
+    files, payloads = checks.read_files(plan.entries)  # written as read and checked
+    if _send_checks(send, [files]):
         send(ResultEvent(ResultStatus.REFUSED, "entry files do not match the plan"))
         return
-    # write exactly the bytes whose hash was checked
-    payloads = [Path(e.path).read_bytes() for e in plan.entries]
-    for entry, data in zip(plan.entries, payloads, strict=True):
-        if hashlib.sha256(data).hexdigest() != entry.sha256:
-            send(
-                CheckEvent(
-                    checks.FILES, CheckLevel.REFUSE, f"{entry.name}: changed while preparing"
-                )
-            )
-            send(ResultEvent(ResultStatus.REFUSED, "entry files do not match the plan"))
-            return
 
     esp = _connect(plan.port, plan.before)
     try:

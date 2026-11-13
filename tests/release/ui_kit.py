@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
 )
 
 from embr.i18n import Language, tr
+from embr.ui.sidebar import SEARCH_DELAY_MS
 
 LANGUAGES = pytest.mark.parametrize(
     "language", [Language.ENGLISH, Language.ZH_CN], ids=["en", "zh_CN"]
@@ -381,7 +382,7 @@ def placement_of(window: Any, name: str) -> tuple[str | None, str]:
 
 def search(window: Any, text: str) -> None:
     kit.type_text(window.sidebar_panel.search, text)
-    kit.pump(50)
+    kit.pump(SEARCH_DELAY_MS + 50)
 
 
 # ---- drag and drop ----------------------------------------------------------------------

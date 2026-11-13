@@ -137,11 +137,12 @@ class ProjectStore:
         path = self._path(project_id)
         if not path.is_file():
             raise KeyError(project_id)
-        for fw in firmware.in_scope(project_id):
-            if delete_firmware:
-                firmware.delete(fw.id)
-            else:
-                firmware.move(fw.id, None)
+        members = [fw.id for fw in firmware.in_scope(project_id)]
+        if delete_firmware:
+            for firmware_id in members:
+                firmware.delete(firmware_id)
+        else:
+            firmware.move_many(members, None)
         path.unlink()
 
     def add_group(self, project_id: str, name: str) -> Project:
@@ -161,9 +162,8 @@ class ProjectStore:
             raise DuplicateGroupError(new)
         project.devices[project.devices.index(old)] = new
         self.save(project)
-        for fw in firmware.in_scope(project_id):
-            if fw.device == old:
-                firmware.move(fw.id, project_id, new)
+        members = [fw.id for fw in firmware.in_scope(project_id) if fw.device == old]
+        firmware.move_many(members, project_id, new)
         return project
 
     def reorder_groups(self, project_id: str, names: Sequence[str]) -> Project:
@@ -181,9 +181,8 @@ class ProjectStore:
         project = self.get(project_id)
         project.devices.remove(name)
         self.save(project)
-        for fw in firmware.in_scope(project_id):
-            if fw.device == name:
-                firmware.move(fw.id, project_id, "")
+        members = [fw.id for fw in firmware.in_scope(project_id) if fw.device == name]
+        firmware.move_many(members, project_id, "")
         return project
 
     def create_firmware(

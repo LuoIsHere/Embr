@@ -16,8 +16,10 @@ from app_testkit import (
     snapshot,
 )
 
+from embr.app import chips
 from embr.app.checklist import CheckItem, CheckState, can_flash, flash_ready, preflight
 from embr.app.context import AppContext
+from embr.app.flashplan import preview_command
 from embr.app.identify import IdentifySnapshot
 from embr.app.library import Library
 from embr.core.flasher.checks import SecurityState
@@ -60,6 +62,41 @@ def test_changed_file_refuses_files(library: Library, context: AppContext, tmp_p
     items = preflight(context, firmware, BRIDGE, None)
     assert states(items) == [PASS, REFUSE, PASS, LATER]
     assert not can_flash(items)
+
+
+def test_unchanged_files_are_not_read_again(
+    library: Library, context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The panel is refreshed often: hashes, image headers and the partition table come from
+    context.files while the files are unchanged, and a changed file is read once."""
+    files = copy_files(HELLO, tmp_path)
+    firmware = fixed_firmware(library, files)
+    board = snapshot(BRIDGE, info("esp32s3", 0, 2))
+
+    def refresh() -> list[CheckItem]:
+        preview_command(context, firmware, BRIDGE, 921600, "esp32s3", 2)
+        return preflight(context, firmware, BRIDGE, board)
+
+    assert can_flash(refresh())
+    reads: list[Path] = []
+    read_bytes = Path.read_bytes
+
+    def counted(self: Path) -> bytes:
+        reads.append(self)
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    refresh()
+    assert reads == []
+
+    with files[2].open("ab") as file:
+        file.write(b"\0" * 16)
+    monkeypatch.setattr(chips, "_headers", {})  # as after a restart: no header known yet
+    assert not can_flash(refresh())
+    assert {p.resolve() for p in reads} == {files[2]}
+    count = len(reads)
+    assert not can_flash(refresh())
+    assert len(reads) == count
 
 
 def test_reset_adjusted_on_usb_serial_jtag_warns(library: Library, context: AppContext) -> None:

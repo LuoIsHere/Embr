@@ -98,6 +98,12 @@ class History:
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._db = connection
+        self._version = 0
+
+    @property
+    def version(self) -> int:
+        """Goes up with every add(), so a view can tell whether the records changed."""
+        return self._version
 
     def add(self, record: FlashRecord) -> None:
         """Insert a record and its entries in one transaction. The MAC is stored normalized.
@@ -120,6 +126,7 @@ class History:
                 )
         except sqlite3.IntegrityError as exc:
             raise ValueError(f"record {record.id} already exists") from exc
+        self._version += 1
 
     def get(self, record_id: str) -> FlashRecord:
         """Raises KeyError if missing."""
@@ -159,16 +166,24 @@ class History:
         return self._select(clause, params)
 
     def _select(self, clause: str, params: list[object]) -> list[FlashRecord]:
+        """Two queries whatever the number of records: the records, then the entries of
+        all of them."""
         names = ", ".join(_RECORD_COLUMNS)
         rows = self._db.execute(f"SELECT {names} FROM flash_records {clause}", params).fetchall()
+        if not rows:
+            return []
+        found: dict[str, list[tuple[object, ...]]] = {}
+        for record_id, *entry in self._db.execute(
+            "SELECT record_id, name, address, sha256, size, kind, skipped FROM record_entries"
+            f" WHERE record_id IN (SELECT id FROM flash_records {clause})"
+            " ORDER BY record_id, position",
+            params,
+        ):
+            found.setdefault(_str(record_id), []).append(tuple(entry))
         records: list[FlashRecord] = []
         for row in rows:
             v: dict[str, object] = dict(zip(_RECORD_COLUMNS, row, strict=True))
-            entries = self._db.execute(
-                "SELECT name, address, sha256, size, kind, skipped FROM record_entries"
-                " WHERE record_id = ? ORDER BY position",
-                [v["id"]],
-            ).fetchall()
+            entries = found.get(_str(v["id"]), [])
             records.append(
                 FlashRecord(
                     id=_str(v["id"]),

@@ -4,8 +4,10 @@ import contextlib
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import IO
 
 from embr.core.flasher.protocol import (
@@ -35,9 +37,16 @@ class JobHandle:
     background thread. Exactly one ResultEvent or ErrorEvent ends every job; after
     cancel() it is ResultEvent(status=CANCELLED)."""
 
-    def __init__(self, process: subprocess.Popen[bytes], on_event: Callable[[Event], None]) -> None:
+    def __init__(
+        self,
+        process: subprocess.Popen[bytes],
+        on_event: Callable[[Event], None],
+        task_file: Path | None = None,
+    ) -> None:
+        """`task_file` is deleted once the worker has exited."""
         self._process = process
         self._on_event = on_event
+        self._task_file = task_file
         self._lock = threading.Lock()
         self._done = threading.Event()
         self._ended = False  # a terminal event was delivered
@@ -111,6 +120,9 @@ class JobHandle:
 
     def _finish(self) -> None:
         code = self._process.wait()
+        if self._task_file is not None:
+            with contextlib.suppress(OSError):
+                self._task_file.unlink()
         self._stderr_thread.join(timeout=1)
         self._exit_code = code
         if self._cancelled:
@@ -129,22 +141,34 @@ def start(
 ) -> JobHandle:
     """Start a worker for `task`. `command` overrides worker_command() (tests).
     A worker that exits without a ResultEvent or ErrorEvent produces an ErrorEvent
-    carrying its exit code and stderr."""
+    carrying its exit code and stderr.
+
+    The task goes to a temporary file and stdin carries only its path: a pipe holds a few
+    KB, so writing a large task straight to stdin would block this (the GUI) thread until
+    the worker has started up and reads it. The file is deleted when the worker exits."""
+    descriptor, name = tempfile.mkstemp(prefix="embr-task-", suffix=".json")
+    task_file = Path(name)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as f:
+        f.write(encode_task(task))
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    process = subprocess.Popen(
-        list(command or worker_command()),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        creationflags=flags,
-    )
+    try:
+        process = subprocess.Popen(
+            list(command or worker_command()),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            creationflags=flags,
+        )
+    except BaseException:
+        task_file.unlink()
+        raise
     stdin: IO[bytes] | None = process.stdin
     assert stdin is not None
     try:
-        stdin.write(encode_task(task).encode("utf-8"))
+        stdin.write(f"{task_file}\n".encode())
         stdin.close()
     except OSError:  # worker died before reading; the reader reports it
         pass
-    return JobHandle(process, on_event)
+    return JobHandle(process, on_event, task_file)
