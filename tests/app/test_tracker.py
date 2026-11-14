@@ -17,6 +17,8 @@ from app_testkit import (
     fixed_firmware,
     flip_last_byte,
     idf_project,
+    link_build,
+    make_newer,
     move_app,
 )
 
@@ -27,6 +29,7 @@ from embr.app.library import Library
 from embr.app.tracking import SETTLE_SECONDS, BuildChangedError, Tracker
 from embr.core.firmware.filecache import FileCache
 from embr.core.firmware.tracking import EntryMark, ResolveState, digest
+from embr.i18n import Language, current, set_language, tr
 
 APP = "app:hello_esp32s3.bin"
 
@@ -95,12 +98,53 @@ def test_recently_written_file_means_building(context: AppContext, tmp_path: Pat
     recent = (rig.clock.now - datetime.timedelta(seconds=SETTLE_SECONDS / 4)).timestamp()
     os.utime(rig.app, (recent, recent))
 
-    assert rig.tracker.check(rig.firmware_id).state is ResolveState.BUILDING
+    status = rig.tracker.check(rig.firmware_id)
+    assert status.state is ResolveState.BUILDING
     with pytest.raises(BuildChangedError) as raised:
         rig.tracker.verify_for_flash(rig.firmware_id, shown)
     assert raised.value.building
+    language = current()
+    set_language(Language.ZH_CN)
+    try:
+        (problem,) = status.problems
+        assert problem == "The build output changed moments ago; waiting for it to settle."
+        assert tr(problem) == "构建产物刚刚有变化，正在等待写入完成。"  # noqa: RUF001
+    finally:
+        set_language(language)
 
     rig.clock.advance(SETTLE_SECONDS + 1)  # BUILDING was not cached
+    assert rig.tracker.check(rig.firmware_id).state is ResolveState.OK
+
+
+def test_libraries_newer_than_the_app_mean_building(context: AppContext, tmp_path: Path) -> None:
+    """New libraries compiled, app not linked yet: the flash files have been unchanged for
+    longer than SETTLE_SECONDS, but the build is still running and nothing old is accepted
+    with something new."""
+    rig = _rig(context, tmp_path)
+    linked = link_build(rig.build)
+    assert rig.tracker.check(rig.firmware_id).state is ResolveState.OK
+    shown = rig.tracker.check(rig.firmware_id).digest
+
+    make_newer(linked.library, than=linked.image)
+    status = rig.tracker.check(rig.firmware_id)
+    assert status.state is ResolveState.BUILDING
+    (problem,) = status.problems
+    assert problem.startswith(f"{linked.image.name} is older than the files it is built from.")
+    with pytest.raises(BuildChangedError) as raised:
+        rig.tracker.verify_for_flash(rig.firmware_id, shown)
+    assert raised.value.building
+    language = current()
+    set_language(Language.ZH_CN)
+    try:
+        assert tr(problem) == (
+            f"{linked.image.name} 比生成它的文件旧。如果当前没有在构建，可能是上次构建被中断，"  # noqa: RUF001
+            "或这些文件在构建后被改动；请重新构建工程。"  # noqa: RUF001
+        )
+    finally:
+        set_language(language)
+
+    make_newer(linked.elf, than=linked.library)  # linked; the same image written again
+    make_newer(linked.image, than=linked.elf)
     assert rig.tracker.check(rig.firmware_id).state is ResolveState.OK
 
 

@@ -56,6 +56,14 @@ TEXT: dict[str, str] = {
     "The build output is still being written; flash again in a moment.": (
         "构建产物仍在写入；请稍后再烧录。"
     ),
+    "The build output changed moments ago; waiting for it to settle.": (
+        "构建产物刚刚有变化，正在等待写入完成。"
+    ),
+    "{0} is older than the files it is built from. If no build is running, the last build "
+    "may have been interrupted or those files changed after it; rebuild the project.": (
+        "{0} 比生成它的文件旧。如果当前没有在构建，可能是上次构建被中断，"
+        "或这些文件在构建后被改动；请重新构建工程。"
+    ),
     "{0} changed since it was shown ({1}); review it and press Flash again.": (
         "{0} 在显示（{1}）之后已变化；请核对后再按 Flash。"
     ),

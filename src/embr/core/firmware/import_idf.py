@@ -15,6 +15,7 @@ from embr.i18n import N_
 
 FLASHER_ARGS = "flasher_args.json"
 PROJECT_DESCRIPTION = "project_description.json"
+BOOTLOADER_DESCRIPTION = f"bootloader/{PROJECT_DESCRIPTION}"
 
 
 class IdfBuildError(ValueError):
@@ -45,6 +46,17 @@ class BuildFile:
 
 
 @dataclass(frozen=True)
+class ImageLink:
+    """How the build made an image (the app, or the bootloader of its subproject), from
+    project_description.json."""
+
+    image: Path
+    elf: Path
+    libraries: tuple[Path, ...]
+    """build_component_info "file" of every component that has one."""
+
+
+@dataclass(frozen=True)
 class IdfBuild:
     build_dir: Path
     files: tuple[BuildFile, ...]
@@ -67,15 +79,24 @@ class IdfBuild:
     """project_description.json "git_revision" (the IDF_VER string, e.g. "v6.1")."""
     config_file: Path | None
     """project_description.json "config_file", else <project_path>/sdkconfig, else None."""
+    links: tuple[ImageLink, ...] = ()
+    """The app's and the bootloader's, when their project_description.json name them."""
 
     @property
     def inputs(self) -> tuple[Path, ...]:
-        """Every file a re-check must stat: flasher_args.json, project_description.json,
-        the config file (when known) and all flash files."""
-        paths = [self.build_dir / FLASHER_ARGS, self.build_dir / PROJECT_DESCRIPTION]
+        """Every file a re-check must stat: flasher_args.json, the project_description.json
+        of the build and of its bootloader, the config file (when known), all flash files,
+        and the ELFs and libraries of `links` (a build updates the libraries long before it
+        links new images)."""
+        paths = [
+            self.build_dir / FLASHER_ARGS,
+            self.build_dir / PROJECT_DESCRIPTION,
+            self.build_dir / BOOTLOADER_DESCRIPTION,
+        ]
         if self.config_file is not None:
             paths.append(self.config_file)
-        return (*paths, *(f.path for f in self.files))
+        linked = [p for link in self.links for p in (link.elf, *link.libraries)]
+        return (*paths, *(f.path for f in self.files), *linked)
 
 
 def normalize_arg(value: str) -> str:
@@ -117,6 +138,11 @@ def read_build(build_dir: Path) -> IdfBuild:
         target=_str(desc.get("target")),
         idf_version=_str(desc.get("git_revision")),
         config_file=_config_file(desc),
+        links=tuple(
+            link
+            for root, found in ((build_dir, desc), (build_dir / "bootloader", None))
+            if (link := _link(root, found)) is not None
+        ),
     )
 
 
@@ -136,6 +162,50 @@ def configured_target(config_file: Path | None) -> str | None:
 def default_firmware_name(build: IdfBuild) -> str:
     """project_name, else the name of the build directory's parent folder."""
     return build.project_name or build.build_dir.resolve().parent.name
+
+
+def unbuilt_image(build: IdfBuild) -> str | None:
+    """File name of an image the build has not finished, else None. Once ninja has built
+    something, it is newer than everything it was made from, so the app or bootloader
+    image is unfinished while it is older than its ELF, or its ELF is older than one of
+    the component libraries linked into it. A build that compiled new libraries but has not
+    linked yet looks complete by its flash files alone; this tells it apart. Files that
+    are missing are left out, so a build without ELFs or libraries passes."""
+    for link in build.links:
+        elf_time, image_time = _mtime(link.elf), _mtime(link.image)
+        if elf_time is None or image_time is None:
+            continue
+        times = (_mtime(p) for p in link.libraries)
+        newest = max((t for t in times if t is not None), default=None)
+        if image_time < elf_time or (newest is not None and elf_time < newest):
+            return link.image.name
+    return None
+
+
+def _link(root: Path, desc: dict[str, object] | None) -> ImageLink | None:
+    """ImageLink from the project_description.json in `root` (`desc` when already read);
+    None when it is missing, unreadable or names no ELF and image."""
+    if desc is None:
+        try:
+            desc = _load(root / PROJECT_DESCRIPTION)
+        except IdfBuildError:
+            return None
+    elf, image = _str(desc.get("app_elf")), _str(desc.get("app_bin"))
+    if elf is None or image is None:
+        return None
+    libraries = tuple(
+        Path(file)
+        for info in _table(desc.get("build_component_info")).values()
+        if (file := _str(_table(info).get("file"))) is not None
+    )
+    return ImageLink(root / image, root / elf, libraries)
+
+
+def _mtime(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
 
 
 def build_dir_below(path: Path) -> Path | None:

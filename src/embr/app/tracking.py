@@ -28,6 +28,7 @@ from embr.core.firmware.import_idf import (
     IdfBuildError,
     configured_target,
     read_build,
+    unbuilt_image,
 )
 from embr.core.firmware.import_pio import (
     APP_FILE,
@@ -156,12 +157,17 @@ class Tracker:
         print_ = fingerprint(inputs)
         newest = print_.newest_mtime_ns
         settling = settle and firmware.source.tracking and newest is not None
+        problem: str | None = None
         if settling and now.timestamp() - (newest or 0) / 1e9 < SETTLE_SECONDS:
-            building = dataclasses.replace(
-                status,
-                state=ResolveState.BUILDING,
-                problems=("The build output changed moments ago; waiting for it to settle.",),
+            problem = N_("The build output changed moments ago; waiting for it to settle.")
+        elif settling and (image := self._unbuilt(firmware)) is not None:
+            problem = N_(
+                f"{image} is older than the files it is built from. If no build is running, "
+                "the last build may have been interrupted or those files changed after it; "
+                "rebuild the project."
             )
+        if problem is not None:
+            building = dataclasses.replace(status, state=ResolveState.BUILDING, problems=(problem,))
             self._status[firmware_id] = building
             self._inputs[firmware_id] = inputs
             self._prints.pop(firmware_id, None)  # look again next time
@@ -351,6 +357,18 @@ class Tracker:
             env_gone=resolution.env_gone,
         )
         return status, inputs, resolution
+
+    @staticmethod
+    def _unbuilt(firmware: Firmware) -> str | None:
+        """import_idf.unbuilt_image() of an IDF firmware's build directory: new libraries
+        are compiled but the images are not linked yet (they stay unchanged for longer
+        than SETTLE_SECONDS while the app links), so the build is still running."""
+        if firmware.source != Source.IDF_BUILD or firmware.build_ref is None:
+            return None
+        try:
+            return unbuilt_image(read_build(Path(firmware.build_ref.path)))
+        except IdfBuildError:  # reported by the resolution itself
+            return None
 
     def _resolve_idf(
         self, firmware: Firmware, now: datetime.datetime

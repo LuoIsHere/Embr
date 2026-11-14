@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from embr_testkit import IDF, edit_json, idf_expect, idf_project
+from embr_testkit import IDF, edit_json, idf_expect, idf_project, link_build, make_newer
 
 from embr.core.firmware.import_idf import (
     BuildMissingError,
@@ -20,6 +20,7 @@ from embr.core.firmware.import_idf import (
     default_firmware_name,
     normalize_arg,
     read_build,
+    unbuilt_image,
 )
 
 
@@ -53,6 +54,30 @@ def test_read_build(sample: str) -> None:
         *(f.path for f in build.files),
     }
     assert default_firmware_name(build) == source["project_name"]
+
+
+def test_unbuilt_image_follows_ninja_order(tmp_path: Path) -> None:
+    """An image older than its ELF, or an ELF older than a library linked into it, is not
+    finished; the ELFs and libraries are inputs, so a re-check notices them change."""
+    build = idf_project("esp32s3_hello", tmp_path)
+    assert unbuilt_image(read_build(build)) is None  # no ELF or library: nothing to tell
+    app = link_build(build)
+    boot = link_build(build, "bootloader")
+    found = read_build(build)
+    assert [link.image for link in found.links] == [app.image, boot.image]
+    assert {app.elf, app.library, boot.elf, boot.library} <= set(found.inputs)
+    assert unbuilt_image(found) is None
+
+    make_newer(app.library, than=app.image)  # compiled, not linked yet
+    assert unbuilt_image(found) == app.image.name
+    make_newer(app.elf, than=app.library)  # linked, image not generated yet
+    assert unbuilt_image(found) == app.image.name
+    make_newer(app.image, than=app.elf)
+    assert unbuilt_image(found) is None
+    make_newer(boot.library, than=boot.image)
+    assert unbuilt_image(found) == "bootloader.bin"
+    boot.elf.unlink()  # a file that is gone tells nothing
+    assert unbuilt_image(found) is None
 
 
 def test_normalize_arg() -> None:

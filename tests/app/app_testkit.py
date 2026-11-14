@@ -10,6 +10,7 @@ import shutil
 import time
 import tomllib
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any, cast
 
@@ -244,6 +245,49 @@ def flip_last_byte(path: Path) -> None:
     data = bytearray(path.read_bytes())
     data[-1] ^= 0xFF
     write_newer(path, bytes(data))
+
+
+@dataclass(frozen=True)
+class Linked:
+    """What a finished ninja build leaves for one image."""
+
+    image: Path
+    elf: Path
+    library: Path
+
+
+def link_build(build: Path, root: str = "") -> Linked:
+    """Give a copied build (root "": its app; "bootloader": its bootloader subproject) an
+    ELF and a component library named in project_description.json, as a finished build
+    leaves them: library, then ELF, then image, a second apart, two hours in the past."""
+    folder = build / root if root else build
+    desc_file = folder / "project_description.json"
+    if desc_file.is_file():
+        desc = cast(dict[str, Any], json.loads(desc_file.read_text(encoding="utf-8")))
+    else:  # the samples keep no description of their bootloader subproject
+        desc: dict[str, Any] = {"app_bin": "bootloader.bin"}
+    image = folder / cast(str, desc["app_bin"])
+    elf = image.with_suffix(".elf")
+    library = folder / "esp-idf" / "main" / "libmain.a"
+    library.parent.mkdir(parents=True, exist_ok=True)
+    elf.write_bytes(b"elf")
+    library.write_bytes(b"library")
+    desc["app_elf"] = elf.name
+    desc["build_component_info"] = {
+        "main": {"file": str(library), "type": "LIBRARY"},
+        "log": {"file": "", "type": "CONFIG_ONLY"},
+    }
+    desc_file.write_text(json.dumps(desc, indent=4), encoding="utf-8")
+    base = time.time_ns() - 7200 * 10**9
+    for i, path in enumerate((desc_file, library, elf, image)):
+        os.utime(path, ns=(base + i * 10**9, base + i * 10**9))
+    return Linked(image, elf, library)
+
+
+def make_newer(path: Path, than: Path) -> None:
+    """Set `path`'s modification time a second after `than`'s."""
+    later = than.stat().st_mtime_ns + 10**9
+    os.utime(path, ns=(later, later))
 
 
 # ---- PlatformIO projects (same helpers as tests/core/embr_testkit.py) --------------------
