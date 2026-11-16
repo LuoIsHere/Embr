@@ -9,6 +9,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from app_testkit import (
@@ -161,6 +162,25 @@ def test_preview_pio(context: AppContext, tmp_path: Path) -> None:
 
     with pytest.raises(EnvDirError):
         rig.library.preview_pio(rig.root / ".pio" / "libdeps" / ESP32)
+
+
+def test_preview_pio_with_followers_reads_no_firmware(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The import dialog takes pio_followers() on the UI thread; the preview then runs on a
+    background thread without opening a firmware file, which a save on the UI thread may be
+    replacing at that moment."""
+    rig = _rig(context, tmp_path)
+    [first] = rig.library.import_pio(rig.root, [ESP32])
+    followers = rig.library.pio_followers()
+
+    def refused(*_: object) -> NoReturn:
+        raise AssertionError("a firmware file was read")
+
+    monkeypatch.setattr(context.firmware, "all", refused)
+    monkeypatch.setattr(context.firmware, "get", refused)
+    preview = rig.library.preview_pio(rig.build(S3), followers)
+    assert [(e.name, e.tracked_by) for e in preview.envs] == [(ESP32, first.id), (S3, None)]
 
 
 def test_preview_pio_without_the_pio_config(context: AppContext, tmp_path: Path) -> None:

@@ -634,10 +634,11 @@ def import_pio(
         status.setText(tr("Reading the PlatformIO project…"))
         sync_ok()
         dialog.fit()
+        followers = library.pio_followers()  # the firmware files are read here, not in work()
 
         def work() -> None:
             try:
-                result: PioPreview | str = library.preview_pio(path)
+                result: PioPreview | str = library.preview_pio(path, followers)
             except (PioBuildError, OSError) as exc:
                 result = tr(str(exc))
             with contextlib.suppress(RuntimeError):  # the dialog is gone

@@ -12,7 +12,7 @@ import dataclasses
 import hashlib
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -504,13 +504,30 @@ class Library:
             None,
         )
 
-    def preview_pio(self, build_dir: Path) -> PioPreview:
+    def pio_followers(self) -> dict[tuple[str, str], str]:
+        """(project root, env) -> id of the PIO firmware following that env, for
+        preview_pio(); roots are keyed as tracking_firmware_for_env() compares them. Reads
+        every firmware file, so take it on the UI thread."""
+        found: dict[tuple[str, str], str] = {}
+        for f in self._ctx.firmware.all():
+            if f.source == Source.PIO_BUILD and f.build_ref is not None and f.build_ref.env:
+                found.setdefault((_path_key(Path(f.build_ref.path)), f.build_ref.env), f.id)
+        return found
+
+    def preview_pio(
+        self, build_dir: Path, followers: Mapping[tuple[str, str], str] | None = None
+    ) -> PioPreview:
         """What importing the env folder `build_dir` (`<project>/.pio/build/<env>`) and its
         sibling envs would bring, for the import dialog. Blocking: runs
-        PioConfigs.load() (about two seconds), so call it off the UI thread. EnvDirError
-        propagates; pio problems go into config_error, env read errors into problem."""
+        PioConfigs.load() (about two seconds), so call it off the UI thread, with
+        `followers` from pio_followers() taken on the UI thread before: then no firmware
+        file is read here (on Windows a file open in one thread cannot be replaced by a
+        save in another). None reads them here. EnvDirError propagates; pio problems go
+        into config_error, env read errors into problem."""
         picked = env_ref(build_dir)
         root = picked.project_root
+        if followers is None:
+            followers = self.pio_followers()
         pio = self._tracker.pio
         config = pio.load(root)
         manual = self.framework_pkg_default()
@@ -518,7 +535,6 @@ class Library:
         for name in ini_envs(root):
             ref = EnvRef(root, name)
             built = is_built(ref)
-            tracked = self.tracking_firmware_for_env(root, name)
             env_config = config.envs.get(name)
             build: PioBuild | None = None
             problem: str | None = None
@@ -533,7 +549,7 @@ class Library:
                 PioEnvChoice(
                     name=name,
                     built=built,
-                    tracked_by=tracked.id if tracked is not None else None,
+                    tracked_by=followers.get((_path_key(root), name)),
                     board=env_config.board if env_config is not None else None,
                     build=build,
                     problem=problem,
