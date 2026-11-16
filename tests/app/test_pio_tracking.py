@@ -214,6 +214,30 @@ def test_rebuild_with_new_content_is_followed(context: AppContext, tmp_path: Pat
     assert status.marks[entry_key(EntryKind.APP, "firmware.bin")] is EntryMark.CHANGED
 
 
+def test_a_rebuild_reads_each_changed_file_once(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading the env and classifying its files go through the tracker's cache: after a
+    rebuild the changed file is read once and the unchanged ones not at all."""
+    rig = _rig(context, tmp_path)
+    [firmware] = rig.library.import_pio(rig.root, [ESP32])
+    rig.tracker.check(firmware.id)
+    app = rig.build(ESP32) / "firmware.bin"
+    assert app.stat().st_size > 64 * 1024  # too big for the cache to keep its content
+    flip_last_byte(app)
+    reads: list[str] = []
+    read_bytes = Path.read_bytes
+
+    def counted(self: Path) -> bytes:
+        if self.suffix == ".bin":
+            reads.append(self.name)
+        return read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    assert rig.tracker.check(firmware.id).state is ResolveState.UPDATED
+    assert reads == ["firmware.bin"]
+
+
 def test_a_progname_rename_is_followed(context: AppContext, tmp_path: Path) -> None:
     rig = _rig(context, tmp_path)
     [firmware] = rig.library.import_pio(rig.root, [ESP32])

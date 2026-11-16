@@ -23,9 +23,7 @@ from embr.core.firmware.image_header import ImageHeader, format_revision
 from embr.core.firmware.image_sniff import (
     PARTITION_TABLE_MAX_SIZE,
     PartitionTable,
-    SniffResult,
     parse_partition_table,
-    sniff,
 )
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, EntryOverride, Firmware, FlashParams
@@ -431,23 +429,15 @@ def _classify(
         return _Derived(file, BLANK_NAME, EntryKind.OTADATA, key, sha, file.blank_size, None, False)
     name = file.path.name
     try:
-        sha, size = cache.digest(file.path)
-        found = _sniffed.get((sha, table))
-        if found is None:  # hash, size and sniff from one read: the key matches the result
-            loaded = cache.load(file.path)
-            sha, size = loaded.sha256, loaded.size
-            found = sniff(loaded.data, name, table)
-            _sniffed[(sha, table)] = found
+        found = cache.sniff(file.path, table)  # hash, size and kind from the same content
     except OSError:
         known = last_kinds.get(name)
         kind = EntryKind(known) if known else (file.expected or EntryKind.UNKNOWN)
         return _Derived(file, name, kind, entry_key(kind, name), "", 0, None, True)
-    kind, header = found.kind, found.header
-    return _Derived(file, name, kind, entry_key(kind, name), sha, size, header, False)
-
-
-_sniffed: dict[tuple[str, PartitionTable | None], SniffResult] = {}
-"""sniff() results by content hash and partition table; both fully determine the result."""
+    kind, header = found.value.kind, found.value.header
+    return _Derived(
+        file, name, kind, entry_key(kind, name), found.sha256, found.size, header, False
+    )
 
 
 def _renamed_app(

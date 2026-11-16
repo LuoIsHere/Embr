@@ -16,7 +16,6 @@ from app_testkit import (
     snapshot,
 )
 
-from embr.app import chips
 from embr.app.checklist import CheckItem, CheckState, can_flash, flash_ready, preflight
 from embr.app.context import AppContext
 from embr.app.flashplan import preview_command
@@ -91,7 +90,6 @@ def test_unchanged_files_are_not_read_again(
 
     with files[2].open("ab") as file:
         file.write(b"\0" * 16)
-    monkeypatch.setattr(chips, "_headers", {})  # as after a restart: no header known yet
     assert not can_flash(refresh())
     assert {p.resolve() for p in reads} == {files[2]}
     count = len(reads)

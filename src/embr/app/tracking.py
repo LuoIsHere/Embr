@@ -20,7 +20,7 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.pio import FRAMEWORK_PKG_KEY, PIO_SECTION, PioConfigs
 from embr.core.firmware.filecache import FileCache, Fingerprint, fingerprint
-from embr.core.firmware.files import FileState, confirm_entry
+from embr.core.firmware.files import FileState, confirm_entry, entry_file, entry_state
 from embr.core.firmware.import_idf import (
     FLASHER_ARGS,
     PROJECT_DESCRIPTION,
@@ -437,7 +437,11 @@ class Tracker:
         )
         try:
             build = read_env(
-                ref, core=self._pio.core_dir, manual_package=manual, config=self._pio.env(ref)
+                ref,
+                core=self._pio.core_dir,
+                manual_package=manual,
+                config=self._pio.env(ref),
+                cache=self._cache,
             )
         except PioBuildMissingError:
             return missing(firmware, N_(f"{ref.build_dir}: build output not found")), fallback
@@ -474,12 +478,13 @@ class Tracker:
         marks: dict[str, EntryMark] = {}
         inputs: list[Path] = []
         problems: list[str] = []
+        archive = self._ctx.paths.archive
         for entry in firmware.entries:
-            path = self._entry_path(entry)
+            path = entry_file(entry, archive)
             if path is None:
                 continue
             inputs.append(path)
-            state = self._fixed_state(entry, path)
+            state = entry_state(entry, archive, self._cache)
             if state == FileState.MISSING:
                 marks[entry.id] = EntryMark.MISSING
                 problems.append(f"{entry.name}: file missing")
@@ -504,25 +509,6 @@ class Tracker:
             updated_at=None,
         )
         return status, tuple(inputs)
-
-    def _entry_path(self, entry: Entry) -> Path | None:
-        scheme, _, rest = entry.file.partition(":")
-        if scheme == "path":
-            return Path(rest)
-        if scheme == "archive":
-            return self._ctx.paths.archive / f"{rest}.bin"
-        return None
-
-    def _fixed_state(self, entry: Entry, path: Path) -> FileState:
-        """files.entry_state() through the cache."""
-        try:
-            sha, size = self._cache.digest(path)
-        except OSError:
-            return FileState.MISSING
-        if entry.file.startswith("archive:"):
-            return FileState.OK if sha == entry.sha256 else FileState.CHANGED
-        same = path.name == entry.name and size == entry.size and sha == entry.sha256
-        return FileState.OK if same else FileState.CHANGED
 
 
 def _app_names(firmware: Firmware) -> tuple[str, ...]:

@@ -8,6 +8,7 @@ import pytest
 from embr_testkit import IDF
 
 from embr.core.firmware.entries import entry_from_file
+from embr.core.firmware.filecache import FileCache
 from embr.core.firmware.files import (
     FileState,
     confirm_entry,
@@ -69,6 +70,25 @@ def test_path_entry_ok_changed_missing(tmp_path: Path, archive: Path) -> None:
     renamed = entry_from_file(_copy(APP, tmp_path / "other"))
     renamed.name = "other.bin"
     assert entry_state(renamed, archive) != FileState.OK
+
+
+@pytest.mark.parametrize("cached", [False, True], ids=["read", "cache"])
+def test_an_unreadable_file_is_missing(
+    tmp_path: Path, archive: Path, monkeypatch: pytest.MonkeyPatch, cached: bool
+) -> None:
+    """A file that exists but cannot be read (locked, or gone right after the check) is
+    MISSING rather than an error, with or without a cache."""
+    path = _copy(APP, tmp_path / "build")
+    entry = entry_from_file(path)
+    real = Path.read_bytes
+
+    def locked(self: Path) -> bytes:
+        if self == path:
+            raise PermissionError(str(self))
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", locked)
+    assert entry_state(entry, archive, FileCache() if cached else None) == FileState.MISSING
 
 
 def test_archive_entries_checked_by_sha256(archive: Path) -> None:

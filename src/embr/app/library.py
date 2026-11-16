@@ -952,7 +952,7 @@ class Library:
             return self._ctx.firmware.get(firmware_id)
         archive = self._ctx.paths.archive
         for entry in firmware.entries:
-            if entry_state(entry, archive) == FileState.CHANGED:
+            if entry_state(entry, archive, self._ctx.files) == FileState.CHANGED:
                 confirm_entry(entry, archive)
         self._save(firmware)
         self.check_files(firmware_id)
@@ -961,7 +961,7 @@ class Library:
     # ---- helpers ----------------------------------------------------------------------
 
     def _read(self, entry: Entry) -> bytes:
-        return read_entry(entry, self._ctx.paths.archive)
+        return read_entry(entry, self._ctx.paths.archive, self._ctx.files)
 
     def _save(self, firmware: Firmware) -> None:
         self._ctx.firmware.save(firmware)

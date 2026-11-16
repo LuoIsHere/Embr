@@ -107,7 +107,7 @@ class Archiver:
             raise ValueError(f"{firmware.name}: this entry comes from the build output")
         if not entry.file.startswith(_PATH):
             raise ValueError(f"{entry.name} is not a file on disk")
-        if entry_state(entry, self._ctx.paths.archive) != FileState.OK:
+        if entry_state(entry, self._ctx.paths.archive, self._ctx.files) != FileState.OK:
             raise PlanError(f"{entry.name}: file missing or changed since it was recorded")
         record = self._ctx.archive.add(
             Path(entry.file.removeprefix(_PATH)),

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from embr.app.context import AppContext
 from embr.core import chipinfo
-from embr.core.firmware.files import entry_file, read_entry
+from embr.core.firmware.files import entry_file
 from embr.core.firmware.image_header import ImageHeader, read_image_header
 from embr.core.firmware.image_sniff import sniff
 from embr.core.firmware.kinds import EntryKind
@@ -110,36 +110,27 @@ def fits(mcu: Mcu | None, chip: str, revision: int | None) -> bool:
 
 
 def image_header(context: AppContext, entry: Entry) -> ImageHeader | None:
-    """Header of a bootloader, app or merged entry (for merged images, its bootloader).
-    Cached by content hash: the recorded one, else the hash context.files keeps for the
-    file as it is now, so a file is read again only after it changed. None for other kinds
-    and for unreadable files."""
+    """Header of a bootloader, app or merged entry (for merged images, its bootloader) as
+    its file is now. Derived through context.files, so a file is read again only after it
+    changed. None for other kinds and for missing or unreadable files."""
     if entry.kind not in (EntryKind.BOOTLOADER, EntryKind.APP, EntryKind.MERGED):
         return None
-    if entry.sha256 in _headers:
-        return _headers[entry.sha256]
     path = entry_file(entry, context.paths.archive)
+    if path is None:
+        return None
+    merged = entry.kind == EntryKind.MERGED
     try:
-        if path is None:
-            return _parse_header(entry, read_entry(entry, context.paths.archive))
-        known = context.files.known(path)
-        if known is not None and known in _headers:
-            return _headers[known]
-        loaded = context.files.load(path)
+        return context.files.derive(
+            path, ("header", merged), lambda data: _parse_header(data, merged=merged)
+        ).value
     except OSError:
         return None
-    header = _parse_header(entry, loaded.data)
-    _headers[loaded.sha256] = header
-    return header
 
 
-def _parse_header(entry: Entry, data: bytes) -> ImageHeader | None:
-    if entry.kind == EntryKind.MERGED:
-        return sniff(data, entry.name).header
+def _parse_header(data: bytes, *, merged: bool) -> ImageHeader | None:
+    if merged:  # sniff() finds the bootloader inside; the file name plays no part
+        return sniff(data, "").header
     return read_image_header(data)
-
-
-_headers: dict[str, ImageHeader | None] = {}
 
 
 def image_chip(context: AppContext, entry: Entry) -> str | None:

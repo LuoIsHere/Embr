@@ -1,12 +1,16 @@
-"""File fingerprints and a hash cache for re-checking firmware sources cheaply: a stat per file
-decides whether anything needs reading, and a file is hashed again only when its size or
-modification time changed."""
+"""File fingerprints and a cache of file contents and what is derived from them, for
+re-checking firmware sources cheaply: a stat per file decides whether anything needs reading,
+a file is hashed again only when its size or modification time changed, and a value derived
+from a content (its classification, its image header) is computed once per content."""
 
 import hashlib
 import stat
-from collections.abc import Iterable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
+
+from embr.core.firmware.image_sniff import PartitionTable, SniffResult, sniff
 
 
 @dataclass(frozen=True)
@@ -63,20 +67,64 @@ class Loaded:
     sha256: str
     size: int
     data: bytes
+    path: Path
+
+
+@dataclass(frozen=True)
+class Derived[T]:
+    """A value computed from one content of a file, with that content's hash and size."""
+
+    sha256: str
+    size: int
+    value: T
 
 
 class FileCache:
-    """sha256, size and content of files, cached by (path, size, mtime_ns). A cached value
-    is used only while the file's stat still matches; otherwise the file is read again.
+    """sha256, size and content of files, cached by (path, size, mtime_ns), and values
+    derived from a content (derive(), sniff()), cached by content hash. A cached value is
+    used only while the file's stat still matches; otherwise the file is read again.
     Hash and size always come from one read of the content, never from separate stats.
     A file whose stat changes while it is read (a build writing it) is not cached.
     Content is kept only for files up to `keep_bytes` (image headers and partition tables
-    are read from it); larger files are re-read when needed."""
+    are read from it); larger files are re-read when needed, unless what is needed was
+    derived from them already. Derived values go once no cached file has their content.
+    Not thread-safe: a thread other than the UI thread uses a cache of its own."""
 
     def __init__(self, keep_bytes: int = 64 * 1024) -> None:
         self._keep = keep_bytes
         self._files: dict[str, _Cached] = {}
+        self._derived: dict[str, dict[Hashable, object]] = {}
         self._hashed = 0
+
+    def derive[T](
+        self, file: Path | Loaded, key: Hashable, compute: Callable[[bytes], T]
+    ) -> Derived[T]:
+        """compute(content) of the file as it is now (`file` a path), or of a content
+        load() returned (`file` a Loaded: nothing is read again), with that content's hash
+        and size. Cached by content hash and `key`, which must name everything else
+        compute() depends on: the same content gives the same value whatever path holds it.
+        Raises OSError for a path."""
+        if isinstance(file, Path):
+            cached = self._current(file)
+            values = self._derived.get(cached.sha256 or "")
+            if cached.sha256 is not None and values is not None and key in values:
+                return Derived(cached.sha256, cached.size, cast(T, values[key]))
+            file = self.load(file)
+        values = self._derived.get(file.sha256)
+        if values is not None and key in values:
+            return Derived(file.sha256, file.size, cast(T, values[key]))
+        value = compute(file.data)
+        if self._holds(file.sha256):  # read while stable: kept as long as the content is
+            self._derived.setdefault(file.sha256, {})[key] = value
+        return Derived(file.sha256, file.size, value)
+
+    def sniff(
+        self, file: Path | Loaded, table: PartitionTable | None = None
+    ) -> Derived[SniffResult]:
+        """image_sniff.sniff() of the file under its own name, through derive(). Raises
+        OSError for a path."""
+        name = file.name if isinstance(file, Path) else file.path.name
+        return self.derive(file, ("sniff", name, table), lambda data: sniff(data, name, table))
 
     def digest(self, path: Path) -> tuple[str, int]:
         """(hex sha256, size) of the same content. Raises OSError (FileNotFoundError when
@@ -91,7 +139,7 @@ class FileCache:
         """Hash, size and whole content from one read. Raises OSError."""
         cached = self._current(path)
         if cached.sha256 is not None and cached.content is not None:
-            return Loaded(cached.sha256, cached.size, cached.content)
+            return Loaded(cached.sha256, cached.size, cached.content, path)
         return self._load(path)
 
     def sha256(self, path: Path) -> str:
@@ -131,7 +179,7 @@ class FileCache:
 
     def forget(self, path: Path) -> None:
         """Drop everything cached for a path."""
-        self._files.pop(str(path), None)
+        self._put(str(path), None)
 
     @property
     def hashed(self) -> int:
@@ -143,13 +191,25 @@ class FileCache:
         """Cache entry matching the file's current stat (a fresh one after a change)."""
         stamp = _stamp(path)
         if stamp.size is None or stamp.mtime_ns is None:
-            self._files.pop(str(path), None)
+            self._put(str(path), None)
             raise FileNotFoundError(str(path))
         cached = self._files.get(stamp.path)
         if cached is None or (cached.size, cached.mtime_ns) != (stamp.size, stamp.mtime_ns):
             cached = _Cached(stamp.size, stamp.mtime_ns)
-            self._files[stamp.path] = cached
+            self._put(stamp.path, cached)
         return cached
+
+    def _put(self, key: str, entry: _Cached | None) -> None:
+        """Replace (None: drop) what is cached for a path. Values derived from its old
+        content go too when no other cached file has that content."""
+        old = self._files.pop(key, None)
+        if entry is not None:
+            self._files[key] = entry
+        if old is not None and old.sha256 is not None and not self._holds(old.sha256):
+            self._derived.pop(old.sha256, None)
+
+    def _holds(self, sha256: str) -> bool:
+        return any(c.sha256 == sha256 for c in self._files.values())
 
     def _load(self, path: Path) -> Loaded:
         """Read and hash; cache the result only when the file's stat was the same before
@@ -159,13 +219,12 @@ class FileCache:
         data = path.read_bytes()
         after = _stamp(path)
         self._hashed += 1
-        loaded = Loaded(hashlib.sha256(data).hexdigest(), len(data), data)
+        loaded = Loaded(hashlib.sha256(data).hexdigest(), len(data), data, path)
         if before == after and after.size == len(data) and after.mtime_ns is not None:
-            self._files[after.path] = _Cached(
-                len(data), after.mtime_ns, loaded.sha256, data if len(data) <= self._keep else None
-            )
+            kept = data if len(data) <= self._keep else None
+            self._put(after.path, _Cached(len(data), after.mtime_ns, loaded.sha256, kept))
         else:  # matches no stamp: agrees() says no and the next access reads again
-            self._files[str(path)] = _Cached(-1, -1)
+            self._put(str(path), _Cached(-1, -1))
         return loaded
 
 

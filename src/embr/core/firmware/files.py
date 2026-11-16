@@ -30,19 +30,22 @@ def entry_file(entry: Entry, archive_dir: Path) -> Path | None:
 def entry_state(entry: Entry, archive_dir: Path, cache: FileCache | None = None) -> FileState:
     """ "path:" entries: the file must exist, its name must equal entry.name, and its sha256
     and size must match. "archive:" entries: archive_dir/<sha256>.bin must exist with that
-    hash. "blank:" entries are always OK. With `cache`, a file is hashed again only after
-    its size or modification time changed."""
+    hash. "blank:" entries are always OK. A file that cannot be read is MISSING. With
+    `cache`, a file is hashed again only after its size or modification time changed."""
     scheme, _, rest = entry.file.partition(":")
     if scheme == "blank":
         return FileState.OK
     path = entry_file(entry, archive_dir)
-    if path is None or not path.is_file():
+    if path is None:
         return FileState.MISSING
-    if cache is not None:
-        sha, size = cache.digest(path)
-    else:
-        data = path.read_bytes()
-        sha, size = _sha256(data), len(data)
+    try:
+        if cache is not None:
+            sha, size = cache.digest(path)
+        else:
+            data = path.read_bytes()
+            sha, size = _sha256(data), len(data)
+    except OSError:
+        return FileState.MISSING
     if scheme == "archive":
         return FileState.OK if sha == rest else FileState.CHANGED
     same = path.name == entry.name and size == entry.size and sha == entry.sha256

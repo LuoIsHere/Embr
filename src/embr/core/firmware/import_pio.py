@@ -21,13 +21,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+from embr.core.firmware.filecache import FileCache, Loaded
 from embr.core.firmware.image_header import ImageHeader
-from embr.core.firmware.image_sniff import (
-    SUBTYPE_OTADATA,
-    TYPE_DATA,
-    parse_partition_table,
-    sniff,
-)
+from embr.core.firmware.image_sniff import SUBTYPE_OTADATA, TYPE_DATA, parse_partition_table
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams
 from embr.i18n import N_
@@ -469,8 +465,10 @@ def read_env(
     core: Path,
     manual_package: str = "",
     config: EnvConfig | None = None,
+    cache: FileCache | None = None,
 ) -> PioBuild:
-    """Read the env's build.
+    """Read the env's build. Files are read and classified through `cache` (a new one when
+    None), once each; a resolve through the same cache then reads none of them again.
 
     Framework: from `config` when it names arduino or espidf, else espidf when the build
     folder has flasher_args.json, else arduino.
@@ -500,7 +498,8 @@ def read_env(
     notes: list[str] = []
     problems: list[str] = []
     inputs = [*ini_files(ref.project_root), build_dir / IDEDATA, build_dir]
-    contents: dict[Path, bytes | None] = {}
+    cache = cache if cache is not None else FileCache()
+    contents: dict[Path, Loaded | None] = {}
     images, why = read_idedata(ref)
     listed_boot: Path | None = None
     if images is not None:
@@ -518,25 +517,25 @@ def read_env(
         notes.append(N_(f"{why}; the build folder was scanned instead"))
         if framework == Framework.ESPIDF and (build_dir / FLASHER_ARGS).is_file():
             inputs.append(build_dir / FLASHER_ARGS)
-            raw = _espidf_files(build_dir, _newest_app(build_dir, notes, contents)[0])
+            raw = _espidf_files(build_dir, _newest_app(build_dir, notes, contents, cache)[0])
         else:
             raw = []
     for _, path, _, _ in raw:
         if path not in contents:
-            contents[path] = _read(path)
+            contents[path] = _read(path, cache)
     if source == ImageSource.SCAN and not raw:
-        _, older = _newest_app(build_dir, notes, contents)
+        _, older = _newest_app(build_dir, notes, contents, cache)
         for path in sorted(build_dir.glob("*.bin")):
             if path in older:
                 continue
             if path not in contents:
-                contents[path] = _read(path)
+                contents[path] = _read(path, cache)
             raw.append((-1, path, _kind_by_name(path.name), False))
     table = next(
         (
             t
             for data in contents.values()
-            if data is not None and (t := parse_partition_table(data)) is not None
+            if data is not None and (t := parse_partition_table(data.data)) is not None
         ),
         None,
     )
@@ -546,7 +545,7 @@ def read_env(
         if data is None:  # listed but unreadable: the resolver reports it missing
             files.append(PioFile(max(address, 0), path, kind))
             continue
-        found = sniff(data, path.name, table)
+        found = cache.sniff(data, table).value
         if not listed:
             if found.kind == EntryKind.MERGED:
                 notes.append(N_(f"{path.name}: a merged image; left out"))
@@ -607,7 +606,7 @@ def read_env(
         if f.path is not None
         and f.kind in (EntryKind.BOOTLOADER, EntryKind.APP)
         and (data := contents.get(f.path)) is not None
-        and (header := sniff(data, f.path.name, table).header) is not None
+        and (header := cache.sniff(data, table).value.header) is not None
     }
     flash = _flash(headers.get(EntryKind.BOOTLOADER))
     app_header = headers.get(EntryKind.APP)
@@ -678,9 +677,9 @@ def _strings(value: object) -> tuple[str, ...]:
     return ()
 
 
-def _read(path: Path) -> bytes | None:
+def _read(path: Path, cache: FileCache) -> Loaded | None:
     try:
-        return path.read_bytes()
+        return cache.load(path)
     except OSError:
         return None
 
@@ -703,7 +702,7 @@ def _kind_by_name(name: str) -> EntryKind | None:
 
 
 def _newest_app(
-    build_dir: Path, notes: list[str], contents: dict[Path, bytes | None]
+    build_dir: Path, notes: list[str], contents: dict[Path, Loaded | None], cache: FileCache
 ) -> tuple[Path, tuple[Path, ...]]:
     """(app image, older app images) of a scanned build folder: of the .bin
     files that read as an app, the newest; the older ones are noted. firmware.bin when none
@@ -711,9 +710,9 @@ def _newest_app(
     apps: list[tuple[int, Path]] = []
     for path in sorted(build_dir.glob("*.bin")):
         if path not in contents:
-            contents[path] = _read(path)
+            contents[path] = _read(path, cache)
         data = contents[path]
-        if data is None or sniff(data, path.name).kind != EntryKind.APP:
+        if data is None or cache.sniff(data).value.kind != EntryKind.APP:
             continue
         with contextlib.suppress(OSError):
             apps.append((path.stat().st_mtime_ns, path))

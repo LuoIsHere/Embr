@@ -225,7 +225,8 @@ class Operations:
         enabled = [e for e in for_chip(self._ctx, firmware, chip, revision).entries if e.enabled]
         if not enabled:  # e.g. firmware for another chip: no job, no "ok" record of nothing
             raise PlanError(f"{firmware.name}: no ticked entries for this {chip} board")
-        bad = [e.name for e in enabled if entry_state(e, self._ctx.paths.archive) != FileState.OK]
+        archive, files = self._ctx.paths.archive, self._ctx.files
+        bad = [e.name for e in enabled if entry_state(e, archive, files) != FileState.OK]
         if bad:
             raise PlanError(f"{', '.join(bad)}: file missing or changed since it was recorded")
         plan = assemble_plan(self._ctx, firmware, port, baud, chip=chip, revision=revision)

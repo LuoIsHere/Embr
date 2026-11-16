@@ -883,8 +883,9 @@ class EntriesTab(QWidget):
         for entry in firmware.entries:
             if entry.enabled and entry.kind.value == "partition_table":
                 try:
+                    context = self._owner.context
                     table = parse_partition_table(
-                        read_entry(entry, self._owner.context.paths.archive)
+                        read_entry(entry, context.paths.archive, context.files)
                     )
                 except OSError:
                     return []
