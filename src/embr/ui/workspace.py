@@ -59,13 +59,18 @@ from embr.ui.connection import CONNECTION_LABELS
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS
 from embr.ui.widgets import (
+    ClickRow,
     ElidedLabel,
+    browse_row,
     button,
     clear_layout,
     danger_action,
     elided,
+    field_caption,
     label,
+    small,
     tag,
+    titled_box,
 )
 
 EN_DASH = f" {chr(0x2013)} "
@@ -134,10 +139,10 @@ class Header(QWidget):
         self.row.setSpacing(8)
         self._firmware: Firmware | None = None
         self.notes = elided("", tone="3")  # ends in "…" at its actual width
-        self.notes.setStyleSheet("font-size: 12px;")
+        small(self.notes)
         self._notes_tip = ""
         self.files_updated = label("", tone="3")
-        self.files_updated.setStyleSheet("font-size: 12px;")
+        small(self.files_updated)
         self.files_updated.hide()
         self.menu_button = button("⋯", "ibtn", tooltip=tr("Firmware actions"))
         self.menu = QMenu(self)
@@ -272,8 +277,8 @@ def lift_to_baseline(heading: QLabel, reference: QLabel) -> None:
     fonts as styled, so it holds for any font, size and hinting."""
     heading.ensurePolished()
     reference.ensurePolished()
-    big, small = QFontMetricsF(heading.font()), QFontMetricsF(reference.font())
-    offset = (big.ascent() - big.height() / 2) - (small.ascent() - small.height() / 2)
+    big, little = QFontMetricsF(heading.font()), QFontMetricsF(reference.font())
+    offset = (big.ascent() - big.height() / 2) - (little.ascent() - little.height() / 2)
     heading.setContentsMargins(0, 0, 0, max(0, round(2 * offset)))
 
 
@@ -1096,19 +1101,15 @@ class ParamsTab(QWidget):
             )
 
     def _add(self, title: str, widget: QWidget, note: str = "") -> None:
-        caption = label(title, tone="3")
-        caption.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.grid.addWidget(caption, self._row, 0)
+        self.grid.addWidget(field_caption(title), self._row, 0)
         if note:
             box = QWidget()
             column = QVBoxLayout(box)
             column.setContentsMargins(0, 0, 0, 0)
             column.setSpacing(2)
             column.addWidget(widget)
-            small = label(note, tone="3")
-            small.setStyleSheet("font-size: 12px;")
-            small.setWordWrap(True)
-            column.addWidget(small)
+            remark = small(label(note, tone="3", wrap=True))
+            column.addWidget(remark)
             widget = box
         self.grid.addWidget(widget, self._row, 1)
         self._row += 1
@@ -1132,16 +1133,15 @@ class ParamsTab(QWidget):
         move.clicked.connect(lambda: self._relocate_folder(firmware))
         row.addWidget(move)
         column.addLayout(row)
-        small = label(
+        remark = label(
             tr(
                 "fixed firmware: files must be in this folder or below it; entries are recorded "
                 "by name, path and hash"
             ),
             tone="3",
+            wrap=True,
         )
-        small.setStyleSheet("font-size: 12px;")
-        small.setWordWrap(True)
-        column.addWidget(small)
+        column.addWidget(small(remark))
         return tr("Files folder"), box
 
     def _relocate_folder(self, firmware: Firmware) -> None:
@@ -1186,12 +1186,10 @@ class ParamsTab(QWidget):
             if status and status.configured_target
             else "",
         ]
-        small = label(" · ".join(f for f in facts if f), tone="3")
-        small.setStyleSheet("font-size: 12px;")
-        column.addWidget(small)
+        column.addWidget(small(label(" · ".join(f for f in facts if f), tone="3")))
         for line in status.build_notes if status else ():
             note = label(tr(line), tone="3", wrap=True)
-            note.setStyleSheet("font-size: 12px;")
+            small(note)
             column.addWidget(note)
         return box
 
@@ -1214,7 +1212,7 @@ class ParamsTab(QWidget):
         )
         path.setReadOnly(locked)
         path.editingFinished.connect(lambda: self._set_package(firmware, path.text()))
-        browse = button(tr("Browse…"), "ibtn")
+        row, browse = browse_row(path, "ibtn")
         browse.setEnabled(not locked)
 
         def pick() -> None:
@@ -1226,12 +1224,9 @@ class ParamsTab(QWidget):
                 self._set_package(firmware, chosen)
 
         browse.clicked.connect(pick)
-        box = QWidget()
-        row = QHBoxLayout(box)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        row.addWidget(path, 1)
-        row.addWidget(browse)
+        box = QWidget()
+        box.setLayout(row)
         return box
 
     def _set_package(self, firmware: Firmware, text: str) -> None:
@@ -1332,7 +1327,7 @@ class RecordsTab(QWidget):
             tr("Click a record to show its section of that day's log (logs/YYYY-MM-DD.log)."),
             tone="3",
         )
-        hint.setStyleSheet("font-size: 12px;")
+        small(hint)
         layout.addWidget(hint)
         layout.addLayout(self.list)
         layout.addStretch(1)
@@ -1378,18 +1373,14 @@ class RecordsTab(QWidget):
         return row
 
 
-class RecordRow(QFrame):
+class RecordRow(ClickRow):
     clicked = Signal(str, str)
     """log file name, segment id."""
 
     def __init__(self, log_file: str, segment_id: str) -> None:
         super().__init__()
-        self.setObjectName("rec")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._target = (log_file, segment_id)
-
-    def mousePressEvent(self, event: object) -> None:  # type: ignore[override]
-        self.clicked.emit(*self._target)
+        self.pressed.connect(lambda: self.clicked.emit(*self._target))
 
 
 class NotesEdit(QPlainTextEdit):
@@ -1646,15 +1637,7 @@ def _cell(widget: QWidget, left: int = 4) -> QWidget:
 
 
 def _box(title: str, lines: list[str]) -> QWidget:
-    frame = QFrame()
-    frame.setObjectName("box")
-    frame.setMaximumWidth(640)
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(0, 0, 0, 8)
-    layout.setSpacing(4)
-    head = QLabel(title)
-    head.setObjectName("boxhead")
-    layout.addWidget(head)
+    frame, layout = titled_box(title, 4)
     for line in lines:
         item = label(f"•  {line}", tone="2", wrap=True)
         item.setContentsMargins(10, 0, 10, 0)

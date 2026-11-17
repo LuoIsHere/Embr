@@ -46,7 +46,7 @@ from embr.core.package import PACKAGE_SUFFIX, Package
 from embr.core.storage.paths import AppPaths
 from embr.i18n import N_, tr
 from embr.ui.adapters.jobs import MainThreadDispatcher
-from embr.ui.widgets import button, label
+from embr.ui.widgets import browse_row, button, label, warning_label
 
 IMPORT_LABEL = N_("Import into Embr as a firmware")
 """Read flash and merge: keep the result in the firmware list too (checked by default)."""
@@ -319,11 +319,7 @@ def settings(parent: QWidget, paths: AppPaths, library: Library) -> None:
     package.setPlaceholderText(
         tr(f"auto-detect (now: {detected})") if detected else tr("auto-detect (nothing found)")
     )
-    browse = button(tr("Browse…"))
-    row = QHBoxLayout()
-    row.setSpacing(6)
-    row.addWidget(package, 1)
-    row.addWidget(browse)
+    row, browse = browse_row(package)
 
     def pick() -> None:
         chosen = QFileDialog.getExistingDirectory(dialog, tr("Framework package"), package.text())
@@ -410,11 +406,7 @@ def import_idf(
     dialog = Dialog(parent, tr("Import ESP-IDF build"), tr("Import"), danger=False)
     folder = QLineEdit()
     folder.setPlaceholderText(tr(r"e.g. D:\work\my_project\build"))
-    browse = button(tr("Browse…"))
-    row = QHBoxLayout()
-    row.setSpacing(6)
-    row.addWidget(folder, 1)
-    row.addWidget(browse)
+    row, browse = browse_row(folder)
     dialog.body.addWidget(label(tr("Build directory (contains flasher_args.json)"), tone="3"))
     dialog.body.addLayout(row)
     preview = label("", tone="2", wrap=True)
@@ -551,11 +543,7 @@ def import_pio(
     dialog = Dialog(parent, tr("Import PlatformIO build"), tr("Import"), danger=False)
     folder = QLineEdit()
     folder.setPlaceholderText(tr(r"e.g. D:\work\my_project\.pio\build\esp32dev"))
-    browse = button(tr("Browse…"))
-    row = QHBoxLayout()
-    row.setSpacing(6)
-    row.addWidget(folder, 1)
-    row.addWidget(browse)
+    row, browse = browse_row(folder)
     dialog.body.addWidget(label(tr(r"Env build folder (.pio\build\<env>)"), tone="3"))
     dialog.body.addLayout(row)
     status = label("", tone="2", wrap=True)
@@ -881,11 +869,7 @@ def merge(
     pad = QCheckBox(tr("pad to the whole flash size"))
     dialog.body.addWidget(pad)
     output = QLineEdit(str(default_output))
-    browse = button(tr("Browse…"))
-    row = QHBoxLayout()
-    row.setSpacing(6)
-    row.addWidget(output, 1)
-    row.addWidget(browse)
+    row, browse = browse_row(output)
     dialog.body.addWidget(label(tr("Save as"), tone="3"))
     dialog.body.addLayout(row)
     add = QCheckBox(tr(IMPORT_LABEL))
@@ -1004,11 +988,7 @@ def read_flash(
     range_row = dialog.row((tr("Start address (hex)"), start), (tr("Size (hex)"), size))
     mac = (info.mac or "unknown").replace(":", "")
     output = QLineEdit(str(folder / f"{info.chip}_{mac}_{datetime.now():%Y%m%d-%H%M%S}.bin"))
-    browse = button(tr("Browse…"))
-    row = QHBoxLayout()
-    row.setSpacing(6)
-    row.addWidget(output, 1)
-    row.addWidget(browse)
+    row, browse = browse_row(output)
     dialog.body.addWidget(label(tr("Save to"), tone="3"))
     dialog.body.addLayout(row)
     add = QCheckBox(tr(IMPORT_LABEL))
@@ -1230,10 +1210,8 @@ def import_package(
 
 def _warning(dialog: Dialog, text: str) -> QLabel:
     """Rich text in the warning hint style (as above the Flash button)."""
-    widget = label(text, wrap=True)
+    widget = warning_label(text)
     widget.setTextFormat(Qt.TextFormat.RichText)
-    widget.setProperty("hint", "warn")
-    widget.setContentsMargins(9, 7, 9, 7)  # not padding: see connection.HintLabel
     dialog.body.addWidget(widget)
     return widget
 
@@ -1248,11 +1226,7 @@ def _dump_warning(names: list[str]) -> str:
 
 def _save_field(dialog: Dialog, default: Path) -> QLineEdit:
     output = QLineEdit(str(default))
-    browse = button(tr("Browse…"))
-    row = QHBoxLayout()
-    row.setSpacing(6)
-    row.addWidget(output, 1)
-    row.addWidget(browse)
+    row, browse = browse_row(output)
     dialog.body.addWidget(label(tr("Save as"), tone="3"))
     dialog.body.addLayout(row)
 
@@ -1280,17 +1254,4 @@ def _target_ok(dialog: Dialog, output: QLineEdit) -> bool:
     path = _package_path(output)
     if path.is_dir() or not path.parent.is_dir():
         return False
-    if not path.exists():
-        return True
-    accepted, _ = confirm(
-        dialog,
-        tr("Replace file"),
-        [
-            tr(
-                f"<b>{html.escape(path.name)}</b> already exists in "
-                f"{html.escape(str(path.parent))}. Replace it?"
-            )
-        ],
-        tr("Replace"),
-    )
-    return accepted
+    return _replace_ok(dialog, path)

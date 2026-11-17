@@ -3,15 +3,18 @@
 import html
 from collections.abc import Callable
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QLayout,
     QMenu,
     QPushButton,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
     QWidgetAction,
 )
@@ -132,6 +135,67 @@ def button(text: str, kind: str | None = None, *, tooltip: str = "") -> QPushBut
         widget.setToolTip(tooltip)
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     return widget
+
+
+def small[W: QWidget](widget: W) -> W:
+    """Secondary text a size smaller (notes and remarks under a field)."""
+    widget.setStyleSheet("font-size: 12px;")
+    return widget
+
+
+def field_caption(title: str) -> QLabel:
+    """Caption in the left column of a two-column form, level with the field's top."""
+    caption = label(title, tone="3")
+    caption.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    return caption
+
+
+def browse_row(field: QWidget, kind: str | None = None) -> tuple[QHBoxLayout, QPushButton]:
+    """`field` stretched beside a "Browse…" button (`kind` as for button()), for path
+    inputs; the caller connects the button."""
+    browse = button(tr("Browse…"), kind)
+    row = QHBoxLayout()
+    row.setSpacing(6)
+    row.addWidget(field, 1)
+    row.addWidget(browse)
+    return row, browse
+
+
+def warning_label(text: str) -> QLabel:
+    """Wrapped text in the warning hint style (as above the Flash button)."""
+    widget = label(text, wrap=True)
+    widget.setProperty("hint", "warn")
+    widget.setContentsMargins(9, 7, 9, 7)  # not padding: see connection.HintLabel
+    return widget
+
+
+def titled_box(title: str, spacing: int = 0) -> tuple[QFrame, QVBoxLayout]:
+    """A framed box (at most 640 px wide) headed by `title`; its content goes into the
+    returned layout, `spacing` apart."""
+    frame = QFrame()
+    frame.setObjectName("box")
+    frame.setMaximumWidth(640)
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(0, 0, 0, 8)
+    layout.setSpacing(spacing)
+    head = QLabel(title)
+    head.setObjectName("boxhead")
+    layout.addWidget(head)
+    return frame, layout
+
+
+class ClickRow(QFrame):
+    """A framed row (theme: #rec) that reacts to a press anywhere on it."""
+
+    pressed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("rec")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self.pressed.emit()
 
 
 def clear_layout(layout: QLayout) -> None:

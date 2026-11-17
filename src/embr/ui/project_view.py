@@ -2,7 +2,7 @@
 
 import html
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -22,18 +22,27 @@ from embr.i18n import tr
 from embr.ui import dialogs
 from embr.ui.owner import Owner
 from embr.ui.sidebar import chips_text
-from embr.ui.widgets import button, clear_layout, label, tag
+from embr.ui.widgets import (
+    ClickRow,
+    button,
+    clear_layout,
+    field_caption,
+    label,
+    small,
+    tag,
+    titled_box,
+    warning_label,
+)
 from embr.ui.workspace import NotesEdit
 
 
-class FirmwareLink(QFrame):
+class FirmwareLink(ClickRow):
     clicked = Signal(str)
 
     def __init__(self, firmware: Firmware, chips: tuple[str, ...]) -> None:
         super().__init__()
-        self.setObjectName("rec")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._id = firmware.id
+        self.pressed.connect(lambda: self.clicked.emit(self._id))
         row = QHBoxLayout(self)
         row.setContentsMargins(4, 6, 4, 6)
         text = QVBoxLayout()
@@ -43,9 +52,6 @@ class FirmwareLink(QFrame):
         row.addLayout(text, 1)
         if chips:
             row.addWidget(tag(chips_text(chips), "gray"))
-
-    def mousePressEvent(self, event: object) -> None:  # type: ignore[override]
-        self.clicked.emit(self._id)
 
 
 class ProjectView(QScrollArea):
@@ -96,12 +102,9 @@ class ProjectView(QScrollArea):
         self.content.addLayout(row)
         self.content.addStretch(1)
         if project.read_only:  # shown, never changed
-            warning = label(
-                tr("This project was created by a newer version of Embr and is read-only here."),
-                wrap=True,
+            warning = warning_label(
+                tr("This project was created by a newer version of Embr and is read-only here.")
             )
-            warning.setProperty("hint", "warn")
-            warning.setContentsMargins(9, 7, 9, 7)
             self.content.insertWidget(0, warning)
             for field in self._fields:
                 field.setEnabled(False)
@@ -109,9 +112,7 @@ class ProjectView(QScrollArea):
             delete.setEnabled(False)
 
     def _add(self, title: str, widget: QWidget) -> None:
-        caption = label(title, tone="3")
-        caption.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._grid.addWidget(caption, self._row, 0)
+        self._grid.addWidget(field_caption(title), self._row, 0)
         self._grid.addWidget(widget, self._row, 1)
         self._fields.append(widget)
         self._row += 1
@@ -171,7 +172,7 @@ class ProjectView(QScrollArea):
             ),
             tone="3",
         )
-        note.setStyleSheet("font-size: 12px;")
+        small(note)
         column.addWidget(note)
         return box
 
@@ -210,7 +211,7 @@ class ProjectView(QScrollArea):
             tone="3",
             wrap=True,
         )
-        note.setStyleSheet("font-size: 12px;")
+        small(note)
         note.setMaximumWidth(560)
         column.addWidget(note)
         return box
@@ -228,15 +229,7 @@ class ProjectView(QScrollArea):
 
     def _firmware_box(self, project: Project) -> QWidget:
         members = self._owner.library.project_firmware(project.id)
-        frame = QFrame()
-        frame.setObjectName("box")
-        frame.setMaximumWidth(640)
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(0, 0, 0, 8)
-        layout.setSpacing(0)
-        head = QLabel(tr(f"Firmware in this project ({len(members)})"))
-        head.setObjectName("boxhead")
-        layout.addWidget(head)
+        frame, layout = titled_box(tr(f"Firmware in this project ({len(members)})"))
         inner = QVBoxLayout()
         inner.setContentsMargins(10, 4, 10, 0)
         inner.setSpacing(0)

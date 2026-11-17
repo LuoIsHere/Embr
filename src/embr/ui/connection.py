@@ -25,7 +25,7 @@ from embr.ui import icons
 from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
 from embr.ui.theme import Palette
-from embr.ui.widgets import Switch, button, clear_layout, label, restyle, tag
+from embr.ui.widgets import Switch, button, clear_layout, label, restyle, small, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
 CONNECTION_LABELS: dict[str, str] = {
@@ -400,7 +400,7 @@ class ConnectionPanel(QWidget):
         for row, (key, widget) in enumerate(rows):
             caption = label(tr(key), tone="3")
             grid.addWidget(caption, row, 0, Qt.AlignmentFlag.AlignTop)
-            widget.setStyleSheet("font-size: 12px;")
+            small(widget)
             if isinstance(widget, QLabel):
                 widget.setWordWrap(True)
             grid.addWidget(widget, row, 1)
@@ -553,14 +553,14 @@ def _check(item: CheckItem, state_text: str) -> QHBoxLayout:
     text = QVBoxLayout()
     text.setSpacing(1)
     title = label(tr(item.title), tone="2", wrap=True)
-    title.setStyleSheet("font-size: 12px;")
+    small(title)
     # the first line sits level with the pill: same height, text centred in it
     title.setMinimumHeight(pill.sizeHint().height())
     title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     text.addWidget(title)
     if item.detail:
         detail = label(tr(item.detail), tone="3", wrap=True)
-        detail.setStyleSheet("font-size: 12px;")
+        small(detail)
         text.addWidget(detail)
     row.addLayout(text, 1)
     return row
