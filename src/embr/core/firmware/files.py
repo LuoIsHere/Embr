@@ -5,7 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from embr.core.firmware.filecache import FileCache
-from embr.core.firmware.model import Entry, Firmware
+from embr.core.firmware.model import Entry
 
 
 class FileState(StrEnum):
@@ -50,11 +50,6 @@ def entry_state(entry: Entry, archive_dir: Path, cache: FileCache | None = None)
         return FileState.OK if sha == rest else FileState.CHANGED
     same = path.name == entry.name and size == entry.size and sha == entry.sha256
     return FileState.OK if same else FileState.CHANGED
-
-
-def firmware_states(firmware: Firmware, archive_dir: Path) -> dict[str, FileState]:
-    """entry_state() of every entry (enabled or not), keyed by entry id."""
-    return {e.id: entry_state(e, archive_dir) for e in firmware.entries}
 
 
 def read_entry(entry: Entry, archive_dir: Path, cache: FileCache | None = None) -> bytes:

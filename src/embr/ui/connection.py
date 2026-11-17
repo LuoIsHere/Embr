@@ -25,7 +25,7 @@ from embr.ui import icons
 from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
 from embr.ui.theme import Palette
-from embr.ui.widgets import Switch, button, clear_layout, label, tag
+from embr.ui.widgets import Switch, button, clear_layout, label, restyle, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
 CONNECTION_LABELS = {
@@ -436,7 +436,7 @@ class ConnectionPanel(QWidget):
         """Shown above Flash until the user clicks it away (hint_dismissed)."""
         self.hint.setText(tr(text))
         self.hint.setProperty("hint", kind)
-        _repolish(self.hint)
+        restyle(self.hint)
         self.hint.fit_text()
         self.hint.setVisible(bool(text))
 
@@ -478,7 +478,7 @@ class ConnectionPanel(QWidget):
 
     def _mark_erase_all(self) -> None:
         self.erase_all.setProperty("warn", "1" if self.erase_all.isChecked() else "0")
-        _repolish(self.erase_all)
+        restyle(self.erase_all)
 
     # ---- flash and progress -----------------------------------------------------------
 
@@ -495,7 +495,7 @@ class ConnectionPanel(QWidget):
             self.flash.setProperty("kind", "primary")
         self.flash.setAccessibleName(f"{self._flash_text.text()} ({'+'.join(self._keys)})")
         for widget in (self.flash, self._flash_text):
-            _repolish(widget)
+            restyle(widget)
         self._paint_keys()
         self.erase_all.setEnabled(not running and self.erase_all.isEnabled())
         self.quick.setEnabled(not running)
@@ -580,9 +580,3 @@ def _left(widget: QWidget) -> QWidget:
     row.addWidget(widget)
     row.addStretch(1)
     return box
-
-
-def _repolish(widget: QWidget) -> None:
-    """Apply style sheet rules that depend on a property just changed."""
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)

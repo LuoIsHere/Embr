@@ -253,7 +253,6 @@ class EmbrWindow(FrameWindow):
         self._last_outcome: JobOutcome | None = None
         self._dismissed_hint: tuple[int, str | None, str] | None = None
         """(id of the job outcome, port, text) of the hint the user clicked away."""
-        self._job_firmware: str | None = None
         self._ports_pending = False
         self._scheme = SchemeWatcher(self)
         self._theme = ui_settings.load_choice(context.settings, "theme", THEMES, "system")
@@ -930,7 +929,6 @@ class EmbrWindow(FrameWindow):
         except (BusyError, OSError) as exc:
             self.note("error", f"[identify] {exc}")
             return
-        self._job_firmware = None
         self._job_kind = JobKind.IDENTIFY
         self.connection.set_running(True)
         self.connection.show_progress(0, N_("Connecting…"))
@@ -969,7 +967,6 @@ class EmbrWindow(FrameWindow):
             self.note("error", f"[flash] {exc}")
             self._refresh_right()
             return
-        self._job_firmware = firmware_id
         self._job_kind = JobKind.FLASH
         self._schedule.touch(firmware_id)
         self.connection.set_running(True)
@@ -1034,7 +1031,6 @@ class EmbrWindow(FrameWindow):
         if not isinstance(outcome, JobOutcome):
             return
         self._last_outcome = outcome
-        self._job_firmware = None
         self._job_kind = None
         self.connection.set_running(False)
         if self._language_dialog is not None:  # Restart was waiting for the job
@@ -1592,7 +1588,6 @@ class EmbrWindow(FrameWindow):
         except (BusyError, OSError, ValueError) as exc:
             self.note("error", f"[{kind.value}] {exc}")
             return
-        self._job_firmware = None
         self._job_kind = kind
         self.connection.set_running(True)
         self.connection.show_progress(0, N_("Connecting…"))

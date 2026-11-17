@@ -2,7 +2,6 @@
 
 import struct
 from dataclasses import dataclass
-from pathlib import Path
 from typing import cast
 
 from esptool.bin_image import ESP32FirmwareImage, ImageSegment, LoadFirmwareImage
@@ -92,11 +91,6 @@ def read_image_header(data: bytes) -> ImageHeader | None:
         has_bootloader_desc=has_bootloader_desc,
         idf_ver=idf_ver,
     )
-
-
-def read_image_header_file(path: Path) -> ImageHeader | None:
-    """read_image_header() on a file's contents."""
-    return read_image_header(path.read_bytes())
 
 
 def _c_string(field: bytes) -> str | None:

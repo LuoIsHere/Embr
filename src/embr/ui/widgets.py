@@ -7,13 +7,11 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
-    QHBoxLayout,
     QLabel,
     QLayout,
     QMenu,
     QPushButton,
     QSizePolicy,
-    QVBoxLayout,
     QWidget,
     QWidgetAction,
 )
@@ -134,38 +132,6 @@ def button(text: str, kind: str | None = None, *, tooltip: str = "") -> QPushBut
         widget.setToolTip(tooltip)
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     return widget
-
-
-def hbox(*items: QWidget | QLayout | int | None, margins: int = 0, spacing: int = 6) -> QHBoxLayout:
-    """Row layout; an int adds that much fixed space, None adds a stretch."""
-    layout = QHBoxLayout()
-    _fill(layout, items, margins, spacing)
-    return layout
-
-
-def vbox(*items: QWidget | QLayout | int | None, margins: int = 0, spacing: int = 6) -> QVBoxLayout:
-    layout = QVBoxLayout()
-    _fill(layout, items, margins, spacing)
-    return layout
-
-
-def _fill(
-    layout: QHBoxLayout | QVBoxLayout,
-    items: tuple[QWidget | QLayout | int | None, ...],
-    margins: int,
-    spacing: int,
-) -> None:
-    layout.setContentsMargins(margins, margins, margins, margins)
-    layout.setSpacing(spacing)
-    for item in items:
-        if item is None:
-            layout.addStretch(1)
-        elif isinstance(item, int):
-            layout.addSpacing(item)
-        elif isinstance(item, QLayout):
-            layout.addLayout(item)
-        else:
-            layout.addWidget(item)
 
 
 def clear_layout(layout: QLayout) -> None:

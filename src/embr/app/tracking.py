@@ -202,7 +202,7 @@ class Tracker:
         return self._status.get(firmware_id)
 
     def invalidate(self, firmware_id: str) -> None:
-        """The firmware itself changed (overrides, user entries, build directory, deleted):
+        """The firmware itself changed (overrides, build directory, deleted):
         the next check() resolves again even with an unchanged fingerprint."""
         self._prints.pop(firmware_id, None)
         self._inputs.pop(firmware_id, None)
@@ -399,7 +399,6 @@ class Tracker:
             firmware,
             derived,
             self._cache,
-            archive_dir=self._ctx.paths.archive,
             now=now.isoformat(timespec="seconds"),
         )
         return resolution, build.inputs
@@ -467,7 +466,6 @@ class Tracker:
             firmware,
             derived,
             self._cache,
-            archive_dir=self._ctx.paths.archive,
             now=now.isoformat(timespec="seconds"),
         )
         return resolution, build.inputs

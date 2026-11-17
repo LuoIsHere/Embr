@@ -113,16 +113,6 @@ def parse_partition_table(data: bytes) -> PartitionTable | None:
     return PartitionTable(tuple(partitions), has_md5, md5_ok)
 
 
-def find_merged(data: bytes) -> tuple[int, str] | None:
-    """(start offset, chip) if `data` is a merged image: for a candidate bootloader offset
-    BL (from chipinfo) and start T in {0, BL}, file offset BL - T holds a bootloader image
-    whose chip's bootloader offset is BL, and a partition table is found at file offset
-    0x8000 - T or, failing that, at a 0x1000-aligned offset in the first 64 KiB. None
-    otherwise."""
-    found = _find_merged(data)
-    return (found[0], found[1]) if found else None
-
-
 def app_address(table: PartitionTable | None) -> int:
     """factory partition, else the first OTA slot, else APP_DEFAULT_OFFSET."""
     if table is None:

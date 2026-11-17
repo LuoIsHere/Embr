@@ -142,25 +142,9 @@ class FileCache:
             return Loaded(cached.sha256, cached.size, cached.content, path)
         return self._load(path)
 
-    def sha256(self, path: Path) -> str:
-        """Hex sha256. Raises OSError (FileNotFoundError when the file is missing)."""
-        return self.digest(path)[0]
-
-    def size(self, path: Path) -> int:
-        """Size of the content sha256() hashed. Raises OSError."""
-        return self.digest(path)[1]
-
     def read(self, path: Path) -> bytes:
         """Whole content (also fills the sha256 cache). Raises OSError."""
         return self.load(path).data
-
-    def known(self, path: Path) -> str | None:
-        """The sha256 kept for the file as it is now (same size and modification time), None
-        when there is none or the file is missing. Never reads the content."""
-        try:
-            return self._current(path).sha256
-        except FileNotFoundError:
-            return None
 
     def head(self, path: Path, size: int) -> bytes:
         """The first `size` bytes (or fewer for a shorter file). Raises OSError."""

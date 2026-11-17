@@ -17,7 +17,6 @@ from embr.core.firmware.image_sniff import (
     SniffResult,
     app_address,
     blank_otadata,
-    find_merged,
     parse_partition_table,
     sniff,
 )
@@ -145,7 +144,6 @@ def test_segment_addresses_and_flash_map(sample: str) -> None:
 )
 def test_merged_images(file: Path, start: int, chip: str) -> None:
     data = file.read_bytes()
-    assert find_merged(data) == (start, chip)
     result = sniff(data, file.name)
     assert (result.kind, result.chip, result.address) == (EntryKind.MERGED, chip, start)
     assert result.partition_table is not None
@@ -156,10 +154,11 @@ def test_padded_and_single_images() -> None:
     # same as merge-bin --pad-to-size 4MB: 0xFF up to the flash size
     data = (SYNTH / "merged/esp32p4_offset_0x2000.bin").read_bytes()
     data += b"\xff" * (0x400000 - 0x2000 - len(data))
-    assert find_merged(data) == (0x2000, "esp32p4")
+    found = sniff(data, "padded.bin")
+    assert (found.kind, found.chip, found.address) == (EntryKind.MERGED, "esp32p4", 0x2000)
     # single images are not merged images
-    assert find_merged(_bootloader("esp32s3_hello").read_bytes()) is None
-    assert find_merged(idf_app_path("esp32_hello").read_bytes()) is None
+    assert sniff(_bootloader("esp32s3_hello").read_bytes(), "b.bin").kind != EntryKind.MERGED
+    assert sniff(idf_app_path("esp32_hello").read_bytes(), "a.bin").kind != EntryKind.MERGED
 
 
 @pytest.mark.parametrize("sample", ["esp32s3_hello", "esp32_hello"])
@@ -269,7 +268,6 @@ def test_bad_input_and_non_tables() -> None:
     truncated = _bootloader("esp32_hello").read_bytes()[:40]
     for data in (b"", b"\xe9", truncated):
         assert sniff(data, "x.bin").kind == EntryKind.UNKNOWN
-        assert find_merged(data) is None
         assert parse_partition_table(data) is None
     assert parse_partition_table(idf_app_path("esp32s3_hello").read_bytes()) is None
     assert parse_partition_table(bytes([0xFF]) * 0xC00) is None

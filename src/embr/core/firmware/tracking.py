@@ -190,9 +190,7 @@ def entry_key(kind: EntryKind, file_name: str) -> str:
     return f"{kind.value}:{file_name}"
 
 
-def resolve(
-    firmware: Firmware, build: DerivedBuild, cache: FileCache, *, archive_dir: Path, now: str
-) -> Resolution:
+def resolve(firmware: Firmware, build: DerivedBuild, cache: FileCache, *, now: str) -> Resolution:
     """Resolve `firmware` (a tracking firmware) against `build`. Never raises for a broken
     build; the state says what is wrong. In order of precedence:
     1. a build file missing, or a bootloader / app / partition table that cannot be parsed
@@ -211,9 +209,8 @@ def resolve(
     (DerivedFile.blank_size) become "otadata (blank)" entries that are never missing.
     DerivedFile.note and build.notes are passed on as entry_notes and build_notes.
     A derived entry whose override sets a manual address while the derived address changed
-    is NEEDS_CONFIRMATION (manual address kept). User entries are checked by name, path and
-    hash like fixed entries; a changed or missing user entry is NEEDS_CONFIRMATION or
-    INCOMPLETE respectively. `now` is stored in the snapshot."""
+    is NEEDS_CONFIRMATION (manual address kept). The entries all come from the build.
+    `now` is stored in the snapshot."""
     last = firmware.last_resolved
     last_entries = {doc_str(e, "key"): e for e in doc_tables(last or {}, "entries")}
     last_kinds = {doc_str(e, "name"): doc_str(e, "kind") for e in last_entries.values()}
@@ -347,8 +344,7 @@ def accept(firmware: Firmware, resolution: Resolution) -> None:
     """Store resolution.snapshot as last_resolved and apply what confirmation implies:
     on a chip change, the chip and flash parameters follow the build and the manual
     addresses of derived entries are dropped; the overrides of a renamed app file move to
-    its new name; overrides whose key matches no derived entry are dropped. User entries
-    are kept. Changed user entries take their new hash and size.
+    its new name; overrides whose key matches no derived entry are dropped.
     ValueError for states other than OK, UPDATED and NEEDS_CONFIRMATION."""
     if resolution.state not in (
         ResolveState.OK,

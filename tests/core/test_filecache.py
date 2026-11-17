@@ -45,30 +45,30 @@ def test_file_is_hashed_again_only_after_its_stat_changed(tmp_path: Path) -> Non
     write_newer(path, first)
     cache = FileCache()
 
-    assert cache.sha256(path) == hashlib.sha256(first).hexdigest()
-    assert (cache.size(path), cache.head(path, 4), cache.read(path)) == (100, first[:4], first)
-    assert cache.sha256(path) == hashlib.sha256(first).hexdigest()
+    assert cache.digest(path) == (hashlib.sha256(first).hexdigest(), 100)
+    assert (cache.head(path, 4), cache.read(path)) == (first[:4], first)
+    assert cache.digest(path)[0] == hashlib.sha256(first).hexdigest()
     assert cache.hashed == 1
 
     second = b"\x02" * 100  # same size, newer mtime
     write_newer(path, second)
-    assert cache.sha256(path) == hashlib.sha256(second).hexdigest()
+    assert cache.digest(path)[0] == hashlib.sha256(second).hexdigest()
     assert cache.hashed == 2
 
     third = b"\x03" * 50  # other size, same mtime
     st = path.stat()
     path.write_bytes(third)
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
-    assert cache.sha256(path) == hashlib.sha256(third).hexdigest()
+    assert cache.digest(path) == (hashlib.sha256(third).hexdigest(), 50)
     assert cache.hashed == 3
 
     cache.forget(path)
-    cache.sha256(path)
+    cache.digest(path)
     assert cache.hashed == 4
 
     path.unlink()
     with pytest.raises(FileNotFoundError):
-        cache.sha256(path)
+        cache.digest(path)
 
 
 def test_a_file_written_while_it_is_read_is_not_kept(

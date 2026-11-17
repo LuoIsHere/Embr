@@ -25,9 +25,8 @@ _PATH = "path:"
 class ArchiveUsage:
     file: ArchiveFile
     firmware_ids: tuple[str, ...]
-    """Ids of the firmware whose entries or user entries refer to the file, ordered by
-    firmware name; empty when
-    nothing refers to it (Clean archive deletes exactly those)."""
+    """Ids of the firmware whose entries refer to the file, ordered by firmware name;
+    empty when nothing refers to it (Clean archive deletes exactly those)."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -50,7 +49,7 @@ class Archiver:
 
     def preview(self, firmware_id: str) -> list[Entry]:
         """Entries an archived version would contain (the current resolution for tracking
-        firmware: derived entries with overrides plus user entries; enabled or not).
+        firmware: derived entries with overrides; enabled or not).
         PlanError when the firmware is not flashable (missing, incomplete, target switched,
         needs confirmation, a file changed)."""
         status = self._tracker.check(firmware_id)
@@ -144,7 +143,7 @@ class Archiver:
         ]
 
     def unreferenced(self) -> list[ArchiveFile]:
-        """Archive files no firmware refers to (entries and user entries of all firmware)."""
+        """Archive files no firmware refers to."""
         return self._ctx.archive.unreferenced(self._referenced())
 
     def clean(self, sha256s: list[str]) -> Cleaned:

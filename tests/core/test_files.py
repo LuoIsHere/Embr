@@ -13,7 +13,6 @@ from embr.core.firmware.files import (
     FileState,
     confirm_entry,
     entry_state,
-    firmware_states,
     read_entry,
     relocate,
 )
@@ -103,7 +102,7 @@ def test_archive_entries_checked_by_sha256(archive: Path) -> None:
     assert entry_state(entry, archive) != FileState.OK
 
 
-def test_blank_entry_and_firmware_states(tmp_path: Path, archive: Path) -> None:
+def test_blank_and_missing_entries(tmp_path: Path, archive: Path) -> None:
     blank = _stored_entry("blank:", b"\xff" * 0x2000, "otadata")
     assert entry_state(blank, archive) == FileState.OK
     assert read_entry(blank, archive) == b"\xff" * 0x2000
@@ -121,7 +120,7 @@ def test_blank_entry_and_firmware_states(tmp_path: Path, archive: Path) -> None:
         source=Source.MANUAL,
         entries=[blank, present, gone],
     )
-    assert firmware_states(fw, archive) == {
+    assert {e.id: entry_state(e, archive) for e in fw.entries} == {
         blank.id: FileState.OK,
         present.id: FileState.OK,
         gone.id: FileState.MISSING,

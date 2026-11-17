@@ -9,7 +9,6 @@ from embr.core.firmware.image_header import (
     NO_MAX_REVISION,
     format_revision,
     read_image_header,
-    read_image_header_file,
 )
 
 IDF_SAMPLES = sorted(p.name for p in IDF.iterdir() if p.is_dir())
@@ -18,7 +17,7 @@ IDF_SAMPLES = sorted(p.name for p in IDF.iterdir() if p.is_dir())
 @pytest.mark.parametrize("sample", IDF_SAMPLES)
 def test_idf_app_header_matches_expect(sample: str) -> None:
     expect = idf_expect(sample)
-    header = read_image_header_file(idf_app_path(sample))
+    header = read_image_header(idf_app_path(sample).read_bytes())
     assert header is not None
     assert header.chip == expect["chip"]
     assert header.chip_id == chip_defs()[expect["chip"]].IMAGE_CHIP_ID
@@ -34,14 +33,16 @@ def test_idf_app_header_matches_expect(sample: str) -> None:
     # the descriptors carry the same IDF_VER as the build metadata
     build = IDF / sample / "build"
     description = json.loads((build / "project_description.json").read_text(encoding="utf-8"))
-    boot = read_image_header_file(build / "bootloader/bootloader.bin")
+    boot = read_image_header((build / "bootloader/bootloader.bin").read_bytes())
     assert boot is not None
     assert header.idf_ver == boot.idf_ver == description["git_revision"][:31]
 
 
 def test_p4_rev1_and_rev3() -> None:
-    rev1 = read_image_header_file(idf_app_path("esp32p4_rev1_hello"))
-    rev3 = read_image_header_file(IDF / "esp32p4_rev3_hello/build/bootloader/bootloader.bin")
+    rev1 = read_image_header(idf_app_path("esp32p4_rev1_hello").read_bytes())
+    rev3 = read_image_header(
+        (IDF / "esp32p4_rev3_hello/build/bootloader/bootloader.bin").read_bytes()
+    )
     assert rev1 is not None and rev3 is not None
     assert (rev1.chip_id, rev1.min_rev_full, rev1.max_rev_full) == (18, 0, 199)
     assert (rev3.chip_id, rev3.min_rev_full, rev3.max_rev_full) == (18, 301, 399)
@@ -64,7 +65,7 @@ def test_non_images_return_none() -> None:
         FIXTURES / "synthetic/merged/esp32_offset_0x0.bin",  # starts with padding
     ]
     for path in files:
-        assert read_image_header_file(path) is None, path
+        assert read_image_header(path.read_bytes()) is None, path
     app = idf_app_path("esp32s3_hello").read_bytes()
     unknown_chip = app[:12] + (0x7777).to_bytes(2, "little") + app[14:]
     for data in (b"", b"\xe9", app[:16], app[:40], unknown_chip, b"\xff" * 64):

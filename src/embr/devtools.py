@@ -8,7 +8,6 @@ python -m embr.devtools flash -p COM3 --chip esp32s3 0x0:bootloader.bin 0x8000:p
 import argparse
 import hashlib
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -23,7 +22,6 @@ from embr.core.flasher.plan import (
     command_line,
 )
 from embr.core.flasher.protocol import (
-    ErrorEvent,
     Event,
     ProgressEvent,
     ResultEvent,
@@ -59,7 +57,6 @@ def _entry(spec: str) -> PlanEntry:
 
 
 def _run(task: Task) -> int:
-    done = threading.Event()
     status: list[ResultStatus | None] = [None]
 
     def on_event(event: Event) -> None:
@@ -68,8 +65,6 @@ def _run(task: Task) -> int:
         print(encode_event(event), flush=True)
         if isinstance(event, ResultEvent):
             status[0] = event.status
-        if isinstance(event, ResultEvent | ErrorEvent):
-            done.set()
 
     job = runner.start(task, on_event)
     try:

@@ -733,8 +733,7 @@ def test_resolve_blank_otadata_and_notes(tmp_path: Path) -> None:
     ref = _project(tmp_path, *ARDUINO)
     firmware = _pio_firmware(ref)
     derived = _derived(ref.build_dir, notes=("idedata.json is older than platformio.ini",))
-    archive = tmp_path / "archive"
-    first = resolve(firmware, derived, FileCache(), archive_dir=archive, now=NOW)
+    first = resolve(firmware, derived, FileCache(), now=NOW)
 
     assert first.state is ResolveState.OK, first.problems
     blank = next(e for e in first.firmware.entries if e.kind is EntryKind.OTADATA)
@@ -752,7 +751,7 @@ def test_resolve_blank_otadata_and_notes(tmp_path: Path) -> None:
     assert first.firmware.chip == "esp32"
 
     accept(firmware, first)
-    again = resolve(firmware, derived, FileCache(), archive_dir=archive, now=NOW)
+    again = resolve(firmware, derived, FileCache(), now=NOW)
     assert (again.state, again.changes) == (ResolveState.OK, ())
 
 
@@ -760,8 +759,6 @@ def test_resolve_build_problems_make_it_incomplete(tmp_path: Path) -> None:
     ref = _project(tmp_path, *ARDUINO)
     problem = "framework package D:/nowhere has no tools/partitions/boot_app0.bin"
     derived = _derived(ref.build_dir, problems=(problem,))
-    resolution = resolve(
-        _pio_firmware(ref), derived, FileCache(), archive_dir=tmp_path / "archive", now=NOW
-    )
+    resolution = resolve(_pio_firmware(ref), derived, FileCache(), now=NOW)
     assert resolution.state is ResolveState.INCOMPLETE
     assert problem in resolution.problems

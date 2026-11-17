@@ -61,9 +61,7 @@ def _derive(build_dir: Path) -> DerivedBuild:
 
 
 def _resolve(firmware: Firmware, build: Path) -> Resolution:
-    return resolve(
-        firmware, _derive(build), FileCache(), archive_dir=build.parent / "archive", now=NOW
-    )
+    return resolve(firmware, _derive(build), FileCache(), now=NOW)
 
 
 def _firmware(build: Path) -> Firmware:
@@ -137,7 +135,7 @@ def test_a_half_written_read_is_not_remembered_for_the_finished_file(
         return found
 
     monkeypatch.setattr(cache, "digest", digest_then_rewritten)
-    resolve(firmware, _derive(build), cache, archive_dir=tmp_path / "archive", now=NOW)
+    resolve(firmware, _derive(build), cache, now=NOW)
 
     write_newer(app, finished)  # the build is done: the content hashed first is back
     again = _resolve(firmware, build)
