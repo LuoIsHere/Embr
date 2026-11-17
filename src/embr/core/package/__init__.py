@@ -42,10 +42,13 @@ from embr.core.project import (
 from embr.core.storage.documents import (
     Document,
     Migration,
+    MissingMigrationError,
     NewerDocumentError,
     doc_opt_str,
     doc_str,
     doc_tables,
+    format_version,
+    migrate,
 )
 from embr.core.storage.ids import is_id, new_id
 from embr.i18n import N_
@@ -310,18 +313,24 @@ def _read_manifest(zf: zipfile.ZipFile, members: _Members) -> Manifest:
         doc: Document = tomllib.loads(_read(zf, members.manifest).decode("utf-8"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise PackageError(N_(f"{MANIFEST_NAME} cannot be read ({exc})")) from exc
-    version = doc.get("format_version")
-    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+    version = format_version(doc, "format_version")
+    if version is None:
         raise PackageError(N_(f"{MANIFEST_NAME}: missing or invalid format_version"))
     if version > PACKAGE_FORMAT_VERSION:
         raise NewerPackageError(
             N_(f"package format {version} is newer than this Embr supports; update Embr")
         )
-    for step in range(version, PACKAGE_FORMAT_VERSION):
-        if step not in _MIGRATIONS:
-            raise PackageError(N_(f"package format {step} is not supported"))
-        doc = _MIGRATIONS[step](doc)
-    return _manifest_from_doc({**doc, "format_version": PACKAGE_FORMAT_VERSION})
+    try:
+        doc = migrate(
+            doc,
+            key="format_version",
+            version=version,
+            current=PACKAGE_FORMAT_VERSION,
+            migrations=_MIGRATIONS,
+        )
+    except MissingMigrationError as exc:
+        raise PackageError(N_(f"package format {exc.step} is not supported")) from exc
+    return _manifest_from_doc(doc)
 
 
 def _manifest_to_doc(manifest: Manifest) -> Document:

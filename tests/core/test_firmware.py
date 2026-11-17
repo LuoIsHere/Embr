@@ -10,7 +10,6 @@ import pytest
 import tomli_w
 from embr_testkit import FIXTURES, IDF, write_newer
 
-from embr.core.firmware import store as store_module
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import (
     FIRMWARE_SCHEMA_VERSION,
@@ -30,6 +29,7 @@ from embr.core.firmware.store import (
     default_name_archived,
     default_name_from_files,
 )
+from embr.core.storage import documents as documents_module
 from embr.core.storage.ids import new_id
 
 APP = IDF / "esp32s3_ota_custom/build/ota_custom.bin"
@@ -54,13 +54,13 @@ def _comparable(fw: Firmware, *ignore: str) -> dict[str, object]:
 def _count_parses(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     """Paths parsed by any FirmwareStore from now on."""
     parsed: list[Path] = []
-    load = store_module.load_document
+    load = documents_module.load_document
 
     def counted(path: Path, **kwargs: object) -> object:
         parsed.append(path)
         return load(path, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(store_module, "load_document", counted)
+    monkeypatch.setattr(documents_module, "load_document", counted)
     return parsed
 
 
@@ -175,6 +175,25 @@ def test_unchanged_files_are_parsed_once(
     store.save(store.get(made[2].id))
     store.all()
     assert parsed[4:] == [store.directory / f"{made[2].id}.toml"]
+
+
+def test_unreadable_files_are_left_out_and_listed(store: FirmwareStore) -> None:
+    """Not TOML, or TOML whose content does not convert (an unknown source): skipped by
+    all(), listed by damaged(), and a KeyError for get(); the file is never changed."""
+    good = store.create("Good")
+    not_toml = store.directory / f"{new_id()}.toml"
+    not_toml.write_text("this is = = not toml", encoding="utf-8")
+    bad_source = store.directory / f"{new_id()}.toml"
+    doc = tomllib.loads((store.directory / f"{good.id}.toml").read_text(encoding="utf-8"))
+    bad_source.write_text(tomli_w.dumps({**doc, "source": "nonsense"}), encoding="utf-8")
+    before = bad_source.read_bytes()
+
+    assert [f.id for f in store.all()] == [good.id]
+    assert {d.path for d in store.damaged()} == {not_toml, bad_source}
+    with pytest.raises(KeyError):
+        store.get(bad_source.stem)
+    assert [f.id for f in store.all()] == [good.id]  # still left out once kept
+    assert bad_source.read_bytes() == before
 
 
 def test_returned_firmware_are_independent_copies(store: FirmwareStore) -> None:

@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import tomli_w
 
-from embr.core.firmware import store as store_module
 from embr.core.firmware.model import Source
 from embr.core.firmware.store import FirmwareStore, ReadOnlyError
 from embr.core.project import (
@@ -17,6 +16,7 @@ from embr.core.project import (
     ProjectDefaults,
     ProjectStore,
 )
+from embr.core.storage import documents as documents_module
 
 Stores = tuple[ProjectStore, FirmwareStore]
 
@@ -89,6 +89,32 @@ def test_delete_project_makes_firmware_standalone(stores: Stores) -> None:
     assert len(firmware.all()) == 2
 
 
+def test_unchanged_project_files_are_parsed_once(
+    stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Projects are kept like firmware: parsed again only after the file changed, and a
+    changed copy never reaches what is kept."""
+    projects, _ = stores
+    for name in ("A", "B"):
+        projects.create(name)
+    reopened = ProjectStore(projects.directory, projects.backup_root)
+    parsed: list[Path] = []
+    load = documents_module.load_document
+
+    def counted(path: Path, **kwargs: object) -> object:
+        parsed.append(path)
+        return load(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(documents_module, "load_document", counted)
+    first = reopened.all()
+    first[0].devices.append("changed in memory only")
+    assert [p.devices for p in reopened.all()] == [[], []]
+    assert len(parsed) == 2
+    reopened.rename(first[1].id, "C")
+    assert [p.name for p in reopened.all()] == ["A", "C"]
+    assert len(parsed) == 3
+
+
 def test_delete_project_reads_each_firmware_file_once(
     stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -99,13 +125,13 @@ def test_delete_project_reads_each_firmware_file_once(
     firmware.create("Other")
     reopened = FirmwareStore(firmware.directory, firmware.backup_root)
     parsed: list[Path] = []
-    load = store_module.load_document
+    load = documents_module.load_document
 
     def counted(path: Path, **kwargs: object) -> object:
         parsed.append(path)
         return load(path, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(store_module, "load_document", counted)
+    monkeypatch.setattr(documents_module, "load_document", counted)
     projects.delete(project.id, reopened)
     assert len(parsed) == len(set(parsed)) == 7
     assert sorted(f.name for f in reopened.in_scope(None)) == [

@@ -8,17 +8,14 @@ from pathlib import Path
 from embr.core.firmware.model import Firmware, Source
 from embr.core.firmware.store import FirmwareStore, ReadOnlyError, now
 from embr.core.storage.documents import (
-    DamagedDocument,
-    DamagedDocumentError,
     Document,
+    DocumentStore,
+    LoadedDocument,
     Migration,
-    damage_reason,
     doc_bool,
     doc_str,
     doc_strs,
     doc_table,
-    load_document,
-    save_document,
     upgrade_document,
 )
 from embr.core.storage.ids import new_id, unique_name
@@ -60,39 +57,19 @@ _MIGRATIONS: dict[int, Migration] = {}
 """migrations[n] upgrades a project document from version n to n + 1."""
 
 
-class ProjectStore:
-    """data/projects/<id>.toml, one file per project. Firmware lists are not stored here;
-    membership is the firmware's project_id."""
+class ProjectStore(DocumentStore[Project]):
+    """data/projects/<id>.toml, one file per project (see DocumentStore for caching).
+    Firmware lists are not stored here; membership is the firmware's project_id."""
 
     def __init__(self, directory: Path, backup_root: Path) -> None:
-        self.directory = directory
-        self.backup_root = backup_root
-        self._damaged: list[DamagedDocument] = []
+        super().__init__(
+            directory, backup_root, current=PROJECT_SCHEMA_VERSION, migrations=_MIGRATIONS
+        )
 
     def all(self) -> list[Project]:
         """Every readable project, sorted by name; newer schema versions read-only. Files
         that cannot be read are skipped and listed by damaged()."""
-        found: list[Project] = []
-        damaged: list[DamagedDocument] = []
-        if self.directory.is_dir():
-            for path in sorted(self.directory.glob("*.toml")):
-                try:
-                    found.append(self._load(path))
-                except DamagedDocumentError as exc:
-                    damaged.append(exc.damaged)
-        self._damaged = damaged
-        return sorted(found, key=lambda p: p.name)
-
-    def damaged(self) -> list[DamagedDocument]:
-        """Files the last all() could not read."""
-        return list(self._damaged)
-
-    def get(self, project_id: str) -> Project:
-        """Raises KeyError if missing (DamagedDocumentError, a KeyError, if unreadable)."""
-        path = self._path(project_id)
-        if not path.is_file():
-            raise KeyError(project_id)
-        return self._load(path)
+        return sorted(self._all(), key=lambda p: p.name)
 
     def create(
         self, name: str, notes: str = "", defaults: ProjectDefaults | None = None
@@ -118,9 +95,7 @@ class ProjectStore:
         project.updated_at = now()
         if not project.created_at:
             project.created_at = project.updated_at
-        save_document(
-            self._path(project.id), project_to_doc(project), current=PROJECT_SCHEMA_VERSION
-        )
+        self._write(project.id, project_to_doc(project))
 
     def rename(self, project_id: str, name: str) -> Project:
         """Rename, made globally unique. Firmware keep their project_id."""
@@ -134,8 +109,7 @@ class ProjectStore:
     ) -> None:
         """Delete the project. Its firmware become standalone (names made unique among
         standalone firmware), or are deleted with delete_firmware."""
-        path = self._path(project_id)
-        if not path.is_file():
+        if not self._path(project_id).is_file():
             raise KeyError(project_id)
         members = [fw.id for fw in firmware.in_scope(project_id)]
         if delete_firmware:
@@ -143,7 +117,7 @@ class ProjectStore:
                 firmware.delete(firmware_id)
         else:
             firmware.move_many(members, None)
-        path.unlink()
+        self._delete_file(project_id)
 
     def add_group(self, project_id: str, name: str) -> Project:
         """Append a group. DuplicateGroupError if it exists."""
@@ -224,21 +198,8 @@ class ProjectStore:
             self.save(project)
         return project
 
-    def _path(self, project_id: str) -> Path:
-        return self.directory / f"{project_id}.toml"
-
-    def _load(self, path: Path) -> Project:
-        """DamagedDocumentError when the file cannot be read or parsed."""
-        try:
-            loaded = load_document(
-                path,
-                current=PROJECT_SCHEMA_VERSION,
-                migrations=_MIGRATIONS,
-                backup_root=self.backup_root,
-            )
-            project = project_from_doc(loaded.data)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            raise DamagedDocumentError(DamagedDocument(path, damage_reason(exc))) from exc
+    def _build(self, loaded: LoadedDocument) -> Project:
+        project = project_from_doc(loaded.data)
         project.read_only = loaded.read_only
         return project
 
