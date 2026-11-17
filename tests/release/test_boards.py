@@ -256,9 +256,9 @@ def test_p4_firmware_flash_job_on_s3_refused_behind_the_disabled_button(
     # job checks the board against the firmware's chip in its own connection)
     port = window.connection.selected_port()
     fw = bk.firmware_by_name(app, "p4 fw")
-    ops = window._ops
+    ops = window.ops
     try:
-        ops.flash(fw.id, port, None, window._signals)
+        ops.flash(fw.id, port, None, window.jobs.signals)
     except PlanError:
         pass  # refused before any job: no record either
     else:
@@ -452,7 +452,7 @@ def test_read_flash_region_saved_and_imported(
 
 
 def _flash_size(window: Any) -> str:
-    snapshot = window._memory.snapshot
+    snapshot = window.memory.snapshot
     assert snapshot is not None
     return str(snapshot.info.flash_size)
 

@@ -336,9 +336,9 @@ def test_a_click_on_the_selected_firmware_keeps_the_last_job_hint(
     first, _ = _fixed(window, tmp_path)
     other = window.library.create_firmware("other")
     outcome = object()
-    window._last_outcome = outcome  # type: ignore[assignment]
+    window.jobs.last_outcome = outcome  # type: ignore[assignment]
 
     window.sidebar_panel.firmware_selected.emit(first)
-    assert window._last_outcome is outcome
+    assert window.jobs.last_outcome is outcome
     window.sidebar_panel.firmware_selected.emit(other.id)
-    assert window._last_outcome is None
+    assert window.jobs.last_outcome is None

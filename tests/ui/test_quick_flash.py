@@ -205,7 +205,7 @@ def _port(window: EmbrWindow, port: PortInfo | None) -> None:
     picked = [i for i in range(combo.count()) if isinstance(combo.itemData(i), int)]
     if picked:  # past the placeholder of a port chosen before
         combo.setCurrentIndex(picked[0])
-    window._port_changed()
+    window.right_panel.port_changed()
 
 
 def _identify(window: EmbrWindow, port: PortInfo) -> None:
@@ -221,8 +221,8 @@ def _identify(window: EmbrWindow, port: PortInfo) -> None:
         security=security,
         in_download_mode=False,
     )
-    window._memory.record(port, event, datetime.datetime(2026, 1, 1, 12, 0))
-    window._refresh_right()
+    window.memory.record(port, event, datetime.datetime(2026, 1, 1, 12, 0))
+    window.right_panel.refresh()
 
 
 def _quick(window: EmbrWindow, on: bool) -> None:
@@ -447,7 +447,7 @@ def test_the_last_job_hint_comes_first(window: EmbrWindow, tmp_path: Path) -> No
     _single(_quiet(window), tmp_path)
     _port(window, OTG)
     _quick(window, True)
-    window._last_outcome = JobOutcome(
+    window.jobs.last_outcome = JobOutcome(
         kind=JobKind.FLASH,
         result=RecordResult.OK,
         message="",
@@ -456,7 +456,7 @@ def test_the_last_job_hint_comes_first(window: EmbrWindow, tmp_path: Path) -> No
         segment_id="r1",
         native_usb=True,
     )
-    window._refresh_right()
+    window.right_panel.refresh()
     assert _hint(window) == (MANUAL_RESET, "warn")
 
 
@@ -474,8 +474,8 @@ def _identified_in_download_mode(window: EmbrWindow, sdm: bool) -> None:
         security=security,
         in_download_mode=True,
     )
-    window._memory.record(UART, event, datetime.datetime(2026, 1, 1, 12, 0))
-    window._last_outcome = JobOutcome(
+    window.memory.record(UART, event, datetime.datetime(2026, 1, 1, 12, 0))
+    window.jobs.last_outcome = JobOutcome(
         kind=JobKind.IDENTIFY,
         result=RecordResult.OK,
         message="",
@@ -484,7 +484,7 @@ def _identified_in_download_mode(window: EmbrWindow, sdm: bool) -> None:
         segment_id="r1",
         native_usb=False,
     )
-    window._refresh_right()
+    window.right_panel.refresh()
 
 
 @pytest.mark.parametrize("sdm", [False, True], ids=["plain", "secure-download-mode"])
@@ -513,7 +513,7 @@ def test_hint_constants_match_the_requirements() -> None:
 
 def _recorded(window: EmbrWindow, monkeypatch: pytest.MonkeyPatch) -> list[None]:
     calls: list[None] = []
-    monkeypatch.setattr(window, "_flash_or_cancel", lambda: calls.append(None))
+    monkeypatch.setattr(window.jobs, "flash_or_cancel", lambda: calls.append(None))
     return calls
 
 
@@ -523,10 +523,10 @@ def test_shortcut_follows_flash_with_quick_on(
     calls = _recorded(_quiet(window), monkeypatch)
     _single(window, tmp_path)
     _port(window, UART)
-    window._flash_shortcut()
+    window.jobs.flash_shortcut()
     assert calls == []
     _quick(window, True)
-    window._flash_shortcut()
+    window.jobs.flash_shortcut()
     assert calls == [None]
 
 
@@ -538,7 +538,7 @@ def test_shortcut_does_nothing_for_a_chipless_firmware(
     assert _nothing_refuses(window, firmware_id, UART)
     _port(window, UART)
     _quick(window, True)
-    window._flash_shortcut()
+    window.jobs.flash_shortcut()
     assert calls == []
 
 
@@ -552,7 +552,7 @@ def test_disabled_while_a_job_runs(window: EmbrWindow, tmp_path: Path) -> None:
     assert quick.isEnabled()
     window.connection.set_running(True)
     assert not quick.isEnabled()
-    window._refresh_right()
+    window.right_panel.refresh()
     assert not quick.isEnabled()
     window.connection.set_running(False)
     assert quick.isEnabled()
@@ -634,7 +634,7 @@ def _hotplug(
 ) -> None:
     """The port monitor now reports `ports`."""
     monkeypatch.setattr(type(window.ports), "ports", property(lambda _self: ports))
-    window._apply_ports()
+    window.right_panel.apply_ports()
 
 
 def _pick(window: EmbrWindow, device: str) -> None:
@@ -647,7 +647,7 @@ def _pick(window: EmbrWindow, device: str) -> None:
         and window.connection._ports[data].device == device
     ]
     combo.setCurrentIndex(index)
-    window._port_changed()
+    window.right_panel.port_changed()
 
 
 def test_a_port_away_for_a_moment_is_kept_and_selected_again(
@@ -662,7 +662,7 @@ def test_a_port_away_for_a_moment_is_kept_and_selected_again(
     _pick(window, JTAG.device)
     _identify(window, JTAG)
     outcome = JobOutcome(JobKind.FLASH, RecordResult.OK, "", "r1", "", "r1", native_usb=True)
-    window._last_outcome = outcome
+    window.jobs.last_outcome = outcome
     assert window.connection.flash.isEnabled()
 
     _hotplug(window, monkeypatch, (UART,))
@@ -670,11 +670,11 @@ def test_a_port_away_for_a_moment_is_kept_and_selected_again(
     assert window.connection.selected_port() is None
     assert not window.connection.flash.isEnabled()
     assert not window.connection.identify.isEnabled()
-    assert window._last_outcome is outcome and window._memory.snapshot is not None
+    assert window.jobs.last_outcome is outcome and window.memory.snapshot is not None
 
     _hotplug(window, monkeypatch, (UART, JTAG))
     assert window.connection.selected_port() == JTAG
-    assert window._last_outcome is outcome and window._memory.snapshot is not None
+    assert window.jobs.last_outcome is outcome and window.memory.snapshot is not None
     assert window.connection.flash.isEnabled()
 
 

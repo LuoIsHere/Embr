@@ -32,12 +32,12 @@ def _fixed(window: EmbrWindow, tmp_path: Path, name: str = "fw") -> str:
 def test_selecting_the_shown_project_again_keeps_the_last_job_hint(window: EmbrWindow) -> None:
     project = window.library.create_project("p")
     window.select_project(project.id)
-    window._last_outcome = OUTCOME
+    window.jobs.last_outcome = OUTCOME
     window.select_project(project.id)  # a click on its sidebar row
-    assert window._last_outcome is OUTCOME
+    assert window.jobs.last_outcome is OUTCOME
 
     window.select_project(window.library.create_project("q").id)
-    assert window._last_outcome is None
+    assert window.jobs.last_outcome is None
 
 
 def test_a_duplicate_is_selected_like_a_click(
@@ -45,7 +45,7 @@ def test_a_duplicate_is_selected_like_a_click(
 ) -> None:
     firmware_id = _fixed(window, tmp_path)
     window.select_firmware(firmware_id)
-    window._last_outcome = OUTCOME
+    window.jobs.last_outcome = OUTCOME
     seen: list[str] = []
     real = window.library.tracker.mark_seen
 
@@ -59,7 +59,7 @@ def test_a_duplicate_is_selected_like_a_click(
     selected = window.selected_firmware_id()
     assert selected is not None and selected != firmware_id
     assert seen == [firmware_id]  # leaving the original ends its "Build updated" state
-    assert window._last_outcome is None
+    assert window.jobs.last_outcome is None
 
 
 def test_deleting_the_last_firmware_clears_the_selection(
@@ -67,7 +67,7 @@ def test_deleting_the_last_firmware_clears_the_selection(
 ) -> None:
     firmware_id = _fixed(window, tmp_path)
     window.select_firmware(firmware_id)
-    window._last_outcome = OUTCOME
+    window.jobs.last_outcome = OUTCOME
 
     def yes(*_args: object, **_kwargs: object) -> tuple[bool, bool]:
         return True, False
@@ -75,7 +75,7 @@ def test_deleting_the_last_firmware_clears_the_selection(
     monkeypatch.setattr(dialogs, "confirm", yes)
     window.firmware_action("delete")
     assert window._selection is None
-    assert window._last_outcome is None
+    assert window.jobs.last_outcome is None
 
 
 def test_replacing_a_file_names_the_firmware_using_it(
