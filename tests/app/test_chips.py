@@ -165,6 +165,16 @@ def test_image_line_comes_from_the_header_range(context: AppContext, tmp_path: P
     assert {p: image_mcu(context, entry_from_file(p)) for p in images} == images
 
 
+def test_a_legacy_minimum_alone_names_the_line(context: AppContext, tmp_path: Path) -> None:
+    """min_rev_full 0, no maximum and legacy_min_rev 3: esptool lets it run on v3 and later
+    only, so it is a v3 image, not one for every line."""
+    path = spanning_app(tmp_path / "legacy.bin")
+    data = bytearray(path.read_bytes())
+    data[14] = 3  # extended header: legacy min_rev, before min_rev_full
+    write_newer(path, bytes(data))
+    assert image_mcu(context, entry_from_file(path)) == P4_V3
+
+
 def test_two_p4_lines_are_two_mcus(context: AppContext, tmp_path: Path) -> None:
     firmware = p4_lines_firmware(context, tmp_path)
     data = attachment_entry(_data(tmp_path / "data.bin"), address=0x300000)

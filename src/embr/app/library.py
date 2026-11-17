@@ -66,6 +66,7 @@ from embr.core.firmware.import_pio import (
     EnvRef,
     PioBuild,
     PioBuildError,
+    env_key,
     env_ref,
     ini_envs,
     is_built,
@@ -509,12 +510,13 @@ class Library:
 
     def pio_followers(self) -> dict[tuple[str, str], str]:
         """(project root, env) -> id of the PIO firmware following that env, for
-        preview_pio(); roots are keyed as tracking_firmware_for_env() compares them. Reads
+        preview_pio(); keyed as tracking_firmware_for_env() compares roots and envs. Reads
         every firmware file, so take it on the UI thread."""
         found: dict[tuple[str, str], str] = {}
         for f in self._ctx.firmware.all():
             if f.source == Source.PIO_BUILD and f.build_ref is not None and f.build_ref.env:
-                found.setdefault((path_key(Path(f.build_ref.path)), f.build_ref.env), f.id)
+                key = (path_key(Path(f.build_ref.path)), env_key(f.build_ref.env))
+                found.setdefault(key, f.id)
         return found
 
     def preview_pio(
@@ -552,7 +554,7 @@ class Library:
                 PioEnvChoice(
                     name=name,
                     built=built,
-                    tracked_by=followers.get((path_key(root), name)),
+                    tracked_by=followers.get((path_key(root), env_key(name))),
                     board=env_config.board if env_config is not None else None,
                     build=build,
                     problem=problem,
@@ -613,7 +615,8 @@ class Library:
 
     def tracking_firmware_for_env(self, project_root: Path, env: str) -> Firmware | None:
         """The PIO tracking firmware following `env` of `project_root`, or None. Roots are
-        compared as tracking_firmware_for() compares build directories; env names exactly."""
+        compared as tracking_firmware_for() compares build directories, env names by
+        import_pio.env_key() (ignoring case)."""
         key = path_key(project_root)
         return next(
             (
@@ -621,7 +624,8 @@ class Library:
                 for f in self._ctx.firmware.all()
                 if f.source == Source.PIO_BUILD
                 and f.build_ref is not None
-                and f.build_ref.env == env
+                and f.build_ref.env
+                and env_key(f.build_ref.env) == env_key(env)
                 and path_key(Path(f.build_ref.path)) == key
             ),
             None,

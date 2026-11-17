@@ -18,7 +18,12 @@ from dataclasses import dataclass
 from embr.app.context import AppContext
 from embr.core import chipinfo
 from embr.core.firmware.files import entry_file
-from embr.core.firmware.image_header import ImageHeader, read_image_header
+from embr.core.firmware.image_header import (
+    NO_MAX_REVISION,
+    ImageHeader,
+    read_image_header,
+    uses_full_revision,
+)
 from embr.core.firmware.image_sniff import sniff
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware
@@ -59,14 +64,14 @@ def not_for_board(mcus: tuple[Mcu, ...], chip: str, revision: str) -> str:
 
 
 def image_mcu(context: AppContext, entry: Entry) -> Mcu | None:
-    """The MCU named by the entry's image header (line from its revision range)."""
+    """The MCU named by the entry's image header (line from its revision range, read as
+    esptool reads it: image_header.uses_full_revision())."""
     header = image_header(context, entry)
     if header is None or header.chip is None:
         return None
-    if header.max_rev_full == 0:  # made before the *_full fields: legacy minimum, no maximum
-        low, high = header.legacy_min_rev * 100, 0xFFFF
-    else:
-        low, high = header.min_rev_full, header.max_rev_full
+    low, high = header.min_rev_full, header.max_rev_full
+    if not uses_full_revision(low, high, header.legacy_min_rev):  # legacy minimum, no maximum
+        low, high = header.legacy_min_rev * 100, NO_MAX_REVISION
     return Mcu(header.chip, chipinfo.line_for_range(header.chip, low, high))
 
 

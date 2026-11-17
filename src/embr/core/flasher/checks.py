@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from embr.core import chipinfo
-from embr.core.firmware.image_header import NO_MAX_REVISION
+from embr.core.firmware.image_header import NO_MAX_REVISION, uses_full_revision
 from embr.core.flasher.plan import PlanEntry
 from embr.i18n import N_
 
@@ -121,14 +121,8 @@ def revision_incompatibility(state: ChipState, entry: PlanEntry) -> str | None:
         return None
     min_full, max_full = entry.min_rev_full, entry.max_rev_full
     legacy = entry.legacy_min_rev or 0
-    if max_full == 0:
-        use_full = False
-    elif max_full == NO_MAX_REVISION:
-        use_full = not (min_full == 0 and legacy != 0)
-    else:
-        use_full = True
     name = entry.name
-    if use_full:
+    if uses_full_revision(min_full, max_full, legacy):
         if min_full <= state.rev_full <= max_full:
             return None
         low, high, chip = _rev(min_full), _rev(max_full), _rev(state.rev_full)

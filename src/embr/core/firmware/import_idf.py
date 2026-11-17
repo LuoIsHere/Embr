@@ -259,6 +259,17 @@ def _section_kinds(build_dir: Path, args: dict[str, object]) -> dict[Path, Entry
     return kinds
 
 
+def flash_address(text: str) -> int | None:
+    """An address of flasher_args.json "flash_files" as esptool reads it from the command
+    line idf.py gives it (int(text, 0)): "0x1000" is hexadecimal, "4096" decimal. None for
+    anything else, negative numbers included."""
+    try:
+        address = int(text, 0)
+    except ValueError:
+        return None
+    return address if address >= 0 else None
+
+
 def _flash_files(
     build_dir: Path, value: object, kinds: dict[Path, EntryKind]
 ) -> tuple[BuildFile, ...]:
@@ -266,10 +277,9 @@ def _flash_files(
     for offset, name in _table(value).items():
         if not isinstance(name, str):
             raise IdfBuildError(N_(f"flash_files: bad entry for {offset}"))
-        try:
-            address = int(offset, 16)
-        except ValueError:
-            raise IdfBuildError(N_(f"flash_files: {offset!r} is not an address")) from None
+        address = flash_address(offset)
+        if address is None:
+            raise IdfBuildError(N_(f"flash_files: {offset!r} is not an address"))
         path = (build_dir / name).resolve()
         files.append(BuildFile(address, path, kinds.get(path)))
     if not files:

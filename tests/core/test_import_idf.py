@@ -18,6 +18,7 @@ from embr.core.firmware.import_idf import (
     build_dir_below,
     configured_target,
     default_firmware_name,
+    flash_address,
     normalize_arg,
     read_build,
     unbuilt_image,
@@ -78,6 +79,23 @@ def test_unbuilt_image_follows_ninja_order(tmp_path: Path) -> None:
     assert unbuilt_image(found) == "bootloader.bin"
     boot.elf.unlink()  # a file that is gone tells nothing
     assert unbuilt_image(found) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "address"),
+    [
+        ("0x1000", 0x1000),
+        ("0X8000", 0x8000),
+        ("4096", 4096),  # esptool reads an address without 0x as decimal
+        ("0", 0),
+        ("-0x10", None),
+        ("0010", None),  # int(x, 0) refuses a decimal with a leading zero, as esptool does
+        ("x1000", None),
+        ("", None),
+    ],
+)
+def test_flash_address_reads_like_esptool(text: str, address: int | None) -> None:
+    assert flash_address(text) == address
 
 
 def test_normalize_arg() -> None:

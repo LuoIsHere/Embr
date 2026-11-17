@@ -24,6 +24,7 @@ from typing import cast
 from embr.core.firmware.filecache import FileCache, Loaded
 from embr.core.firmware.image_header import ImageHeader
 from embr.core.firmware.image_sniff import SUBTYPE_OTADATA, TYPE_DATA, parse_partition_table
+from embr.core.firmware.import_idf import flash_address
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams
 from embr.i18n import N_
@@ -182,11 +183,18 @@ def env_ref(path: Path) -> EnvRef:
     root = build.parent.parent
     if not (root / PLATFORMIO_INI).is_file():
         raise EnvDirError(N_(f"{root} has no {PLATFORMIO_INI}"))
-    declared = {e.lower(): e for e in ini_envs(root)}
-    env = declared.get(path.name.lower())
+    declared = {env_key(e): e for e in ini_envs(root)}
+    env = declared.get(env_key(path.name))
     if env is None:
         raise EnvDirError(N_(f"{PLATFORMIO_INI} in {root} does not declare [env:{path.name}]"))
     return EnvRef(root, env)
+
+
+def env_key(env: str) -> str:
+    """Key under which two env names are the same env when Embr follows it: case is
+    ignored, as the .pio/build/<env> folders of envs differing only in case are one
+    folder on Windows."""
+    return env.lower()
 
 
 def built_envs_below(path: Path) -> tuple[EnvRef, ...]:
@@ -737,7 +745,7 @@ def _espidf_files(build_dir: Path, app: Path) -> list[tuple[int, Path, EntryKind
             kinds[name.replace("\\", "/")] = kind
     files: list[tuple[int, Path, EntryKind | None, bool]] = []
     for offset, name in _table(args.get("flash_files")).items():
-        address = _int(offset)
+        address = flash_address(offset)
         if address is None or not isinstance(name, str):
             raise PioBuildError(N_(f"{FLASHER_ARGS}: bad flash_files entry {offset!r}"))
         kind = kinds.get(name.replace("\\", "/"))

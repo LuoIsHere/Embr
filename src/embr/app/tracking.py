@@ -41,6 +41,7 @@ from embr.core.firmware.import_pio import (
     PLATFORMIO_INI,
     EnvRef,
     PioBuildError,
+    env_key,
     env_ref,
     ini_envs,
     ini_files,
@@ -235,12 +236,12 @@ class Tracker:
         if ref.env in declared:
             return ()
         taken = {
-            f.build_ref.env.lower()
+            env_key(f.build_ref.env)
             for f in self._following(root)
             if f.id != firmware_id and f.build_ref is not None and f.build_ref.env
         }
         return tuple(
-            env for env in declared if env.lower() not in taken and is_built(EnvRef(root, env))
+            env for env in declared if env_key(env) not in taken and is_built(EnvRef(root, env))
         )
 
     def _following(self, project_root: Path) -> list[Firmware]:

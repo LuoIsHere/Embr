@@ -122,7 +122,12 @@ def test_an_env_is_followed_once(context: AppContext, tmp_path: Path, variant: s
     found = rig.library.tracking_firmware_for_env(root, ESP32)
     assert found is not None and found.id == first.id
     assert rig.library.tracking_firmware_for_env(root, S3) is None
-    assert rig.library.tracking_firmware_for_env(root, ESP32.upper()) is None  # env exactly
+    # an env named in other case builds into the same folder on Windows: the same env
+    found = rig.library.tracking_firmware_for_env(root, ESP32.upper())
+    assert found is not None and found.id == first.id
+    followers = rig.library.pio_followers()
+    preview = rig.library.preview_pio(rig.build(ESP32), followers)
+    assert [(e.name, e.tracked_by) for e in preview.envs] == [(ESP32, first.id), (S3, None)]
 
     with pytest.raises(AlreadyTrackedError) as raised:
         rig.library.import_pio(root, [S3, ESP32])

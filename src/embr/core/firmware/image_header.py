@@ -11,6 +11,19 @@ from embr.core import chipinfo
 NO_MAX_REVISION = 0xFFFF
 """max_rev_full value meaning "no upper limit"."""
 
+
+def uses_full_revision(min_rev_full: int, max_rev_full: int, legacy_min_rev: int) -> bool:
+    """Whether esptool checks an image against min_rev_full..max_rev_full (True) or
+    against legacy_min_rev alone (False): a max_rev_full of 0 predates the *_full fields,
+    and NO_MAX_REVISION with min_rev_full 0 and legacy_min_rev set is an image that only
+    states the legacy minimum."""
+    if max_rev_full == 0:
+        return False
+    if max_rev_full == NO_MAX_REVISION:
+        return not (min_rev_full == 0 and legacy_min_rev != 0)
+    return True
+
+
 _IMAGE_MAGIC = 0xE9
 _CHIP_ID_OFFSET = 12  # u16 in the extended header
 _APP_DESC_MAGIC = 0xABCD5432
