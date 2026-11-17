@@ -32,7 +32,7 @@ class Clock:
 @pytest.fixture
 def clock(window: EmbrWindow) -> Clock:
     fake = Clock()
-    window._clock = fake
+    window.recheck.clock = fake
     return fake
 
 
@@ -61,15 +61,15 @@ def _fixed(window: EmbrWindow, tmp_path: Path) -> tuple[str, Path]:
     firmware = window.library.create_firmware("fw")
     window.library.add_files(firmware.id, [file])
     window.select_firmware(firmware.id)
-    window._recheck_timer.stop()
+    window.recheck._timer.stop()
     return firmware.id, file
 
 
 def _fire(window: EmbrWindow) -> None:
-    timer = window._recheck_timer
+    timer = window.recheck._timer
     assert timer.isActive()
     timer.stop()
-    window._run_recheck()
+    window.recheck._run()
 
 
 def test_fifty_requests_in_a_second_check_once(
@@ -78,13 +78,13 @@ def test_fifty_requests_in_a_second_check_once(
     _fixed(window, tmp_path)
     calls = _counted(window)
     for _ in range(50):
-        window._request_recheck()
+        window.recheck.request()
         clock.now += 0.02
     assert calls == []
 
     _fire(window)
     assert len(calls) == 1
-    assert not window._recheck_timer.isActive()
+    assert not window.recheck._timer.isActive()
 
 
 def test_a_request_inside_the_gap_waits_for_it(
@@ -92,13 +92,13 @@ def test_a_request_inside_the_gap_waits_for_it(
 ) -> None:
     _fixed(window, tmp_path)
     calls = _counted(window)
-    window._request_recheck()
+    window.recheck.request()
     _fire(window)
     clock.now += 0.25
 
-    window._request_recheck()
-    assert window._recheck_timer.interval() == round((RECHECK_GAP_S - 0.25) * 1000)
-    window._request_recheck()  # a second one in the same gap is not another check
+    window.recheck.request()
+    assert window.recheck._timer.interval() == round((RECHECK_GAP_S - 0.25) * 1000)
+    window.recheck.request()  # a second one in the same gap is not another check
     _fire(window)
     assert len(calls) == 2
 
@@ -107,16 +107,16 @@ def test_an_earlier_request_stands_and_a_later_one_moves_up(
     window: EmbrWindow, tmp_path: Path, clock: Clock
 ) -> None:
     _fixed(window, tmp_path)
-    timer = window._recheck_timer
-    window._request_recheck()
-    window._request_recheck(SETTLE_RECHECK_MS, settle=True)
+    timer = window.recheck._timer
+    window.recheck.request()
+    window.recheck.request(SETTLE_RECHECK_MS, settle=True)
     assert timer.interval() == 0
 
     timer.stop()
-    window._request_recheck(SETTLE_RECHECK_MS, settle=True)
-    window._request_recheck()
+    window.recheck.request(SETTLE_RECHECK_MS, settle=True)
+    window.recheck.request()
     assert timer.interval() == 0
-    assert window._recheck_settle  # the settling build is still looked at, sooner
+    assert window.recheck._settle  # the settling build is still looked at, sooner
 
 
 def test_a_settling_build_keeps_one_timer_and_ignores_clicks(
@@ -125,19 +125,19 @@ def test_a_settling_build_keeps_one_timer_and_ignores_clicks(
     firmware_id, _ = _fixed(window, tmp_path)
     calls = _counted(window, ResolveState.BUILDING)
     window.changed()
-    timer = window._recheck_timer
-    due = window._recheck_due
+    timer = window.recheck._timer
+    due = window.recheck._due
     assert timer.isActive() and timer.interval() == SETTLE_RECHECK_MS
 
     clock.now += 0.5
     window.changed()  # refreshing again does not add or move the timer
-    assert window._recheck_due == due
+    assert window.recheck._due == due
     before = len(calls)
     for _ in range(20):
-        window._request_recheck()
+        window.recheck.request()
         clock.now += 0.05
     assert len(calls) == before
-    assert window._recheck_due == due
+    assert window.recheck._due == due
 
     _fire(window)
     assert len(calls) == before + 1
@@ -156,10 +156,10 @@ def test_a_click_while_settling_requeues_a_dropped_look(
     _fixed(window, tmp_path)
     _counted(window, ResolveState.BUILDING)
     window.changed()
-    window._recheck_timer.stop()  # dropped, e.g. a dialog was open when it fired
+    window.recheck._timer.stop()  # dropped, e.g. a dialog was open when it fired
 
-    window._request_recheck()
-    assert window._recheck_timer.interval() == SETTLE_RECHECK_MS
+    window.recheck.request()
+    assert window.recheck._timer.interval() == SETTLE_RECHECK_MS
 
 
 def test_a_click_in_the_window_queues_a_check(
@@ -168,7 +168,7 @@ def test_a_click_in_the_window_queues_a_check(
     _fixed(window, tmp_path)
     window.show()
     QApplication.processEvents()
-    timer = window._recheck_timer
+    timer = window.recheck._timer
     timer.stop()
 
     other = QWidget()
@@ -189,7 +189,7 @@ def test_files_dragged_into_the_window_queue_a_check(
     _, file = _fixed(window, tmp_path)
     window.show()
     QApplication.processEvents()
-    timer = window._recheck_timer
+    timer = window.recheck._timer
     timer.stop()
 
     def drag(mime: QMimeData) -> None:
@@ -218,18 +218,18 @@ def test_nothing_is_queued_during_a_round_or_behind_a_menu(
 ) -> None:
     _fixed(window, tmp_path)
     window.show()
-    timer = window._recheck_timer
-    window._round = ["queued"]
-    window._request_recheck()
+    timer = window.recheck._timer
+    window.recheck._round = ["queued"]
+    window.recheck.request()
     assert not timer.isActive()
-    window._round = []
+    window.recheck._round = []
 
     menu = QMenu(window)
     menu.addAction("x")
     menu.popup(window.mapToGlobal(QPoint(50, 50)))
     QApplication.processEvents()
     assert QApplication.activePopupWidget() is menu
-    window._request_recheck()
+    window.recheck.request()
     assert not timer.isActive()
     menu.close()
 
@@ -255,14 +255,14 @@ def test_no_refresh_under_a_half_typed_parameter(
     name = _typing_a_name(window)
     file.write_bytes(b"\x01" * 96)  # the build changed meanwhile
 
-    window._recheck_selected()
+    window.recheck.check_selected()
     assert window.firmware_view.params.findChild(QLineEdit) is name
     assert name.text() == "half-typ"
     shown = window._shown
 
-    window._round = [firmware_id]
-    window._round_changed = True
-    window._next_in_round()
+    window.recheck._round = [firmware_id]
+    window.recheck._round_changed = True
+    window.recheck._next_in_round()
     assert window.firmware_view.params.findChild(QLineEdit) is name
     assert window._shown == shown  # the next check still finds the difference
 
@@ -285,12 +285,12 @@ def test_an_error_in_one_firmware_does_not_end_the_checks(
         return real(firmware_id, **kwargs)
 
     monkeypatch.setattr(tracker, "check", check)
-    window._round = [first, second]
+    window.recheck._round = [first, second]
     with pytest.raises(RuntimeError):  # reaches the crash log through sys.excepthook
-        window._next_in_round()
+        window.recheck._next_in_round()
     QApplication.processEvents()
     assert checked[:2] == [first, second]
-    assert window._round == []  # later rounds and checks are not held back
+    assert window.recheck._round == []  # later rounds and checks are not held back
 
 
 def test_the_refresh_comes_once_the_field_is_left(
@@ -300,13 +300,13 @@ def test_the_refresh_comes_once_the_field_is_left(
     name = _typing_a_name(window)
     name.setText("fw")  # nothing to rename when it loses focus
     file.write_bytes(b"\x01" * 96)
-    window._recheck_selected()
+    window.recheck.check_selected()
     shown = window._shown
 
     window.log_panel.setFocus()
     QApplication.processEvents()
     assert not window.firmware_view.params.editing()
-    window._recheck_selected()
+    window.recheck.check_selected()
     assert window._shown != shown
     assert window.firmware_view.params.findChild(QLineEdit) is not name
 

@@ -128,7 +128,7 @@ def test_a_new_file_time_with_the_same_content_keeps_the_workspace(
 
     stamp = YESTERDAY_NOON.timestamp()
     os.utime(file, (stamp, stamp))
-    window._recheck_selected()  # pyright: ignore[reportPrivateUsage]
+    window.recheck.check_selected()  # pyright: ignore[reportPrivateUsage]
 
     assert window.header.files_updated.text().endswith(f"{YESTERDAY_NOON:%m-%d %H:%M}")
     assert _label(window, 1) is name  # the header was not rebuilt

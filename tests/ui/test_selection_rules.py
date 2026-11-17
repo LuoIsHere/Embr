@@ -56,7 +56,7 @@ def test_a_duplicate_is_selected_like_a_click(
     monkeypatch.setattr(window.library.tracker, "mark_seen", mark_seen)
     window.firmware_action("duplicate")
 
-    selected = window._selected_firmware_id()
+    selected = window.selected_firmware_id()
     assert selected is not None and selected != firmware_id
     assert seen == [firmware_id]  # leaving the original ends its "Build updated" state
     assert window._last_outcome is None

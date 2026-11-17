@@ -420,7 +420,7 @@ def test_erase_on_warns(window: EmbrWindow, tmp_path: Path) -> None:
     _port(window, UART)
     _quick(window, True)
     window.connection.erase_all.click()
-    assert window.library.firmware(window._selected_firmware_id() or "").erase_all
+    assert window.library.firmware(window.selected_firmware_id() or "").erase_all
     assert _hint(window) == (ERASE.format(UART.device), "warn")
     assert _flash(window)
     window.connection.erase_all.click()
@@ -562,7 +562,7 @@ def test_visible_without_a_firmware(window: EmbrWindow) -> None:
     _quiet(window)
     _settle(window, 330)
     panel = window.connection
-    assert window._selected_firmware_id() is None
+    assert window.selected_firmware_id() is None
     assert not panel.erase_all.isVisible()
     assert panel.quick.isVisible()
     assert panel.quick.isEnabled()

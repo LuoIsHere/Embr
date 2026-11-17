@@ -2,9 +2,7 @@
 
 import contextlib
 import html
-import math
-import time
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from datetime import date, datetime
 from pathlib import Path
 
@@ -53,7 +51,6 @@ from embr.app.operations import (
 )
 from embr.app.packages import Packager, Placement
 from embr.app.pio import PioConfigs
-from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, Tracker, TrackStatus
 from embr.core.firmware.entries import FolderError
 from embr.core.firmware.files import local_file
@@ -103,6 +100,7 @@ from embr.ui.project_view import ProjectView
 from embr.ui.sidebar import PLUS, Node, Sidebar
 from embr.ui.theme import Palette, load_fonts, palette, style_sheet, ui_font
 from embr.ui.widgets import label
+from embr.ui.window.recheck import SETTLE_RECHECK_MS, RecheckController
 from embr.ui.workspace import FirmwareView, Header, kept_notes
 
 LOG_LEVELS = {
@@ -214,28 +212,13 @@ class EmbrWindow(FrameWindow):
         self._archiver = Archiver(context, tracker)
         self._merger = Merger(context, tracker)
         self._packager = Packager(context, tracker)
-        self._schedule = RefreshSchedule()
-        self._schedule.seed(context.history)
+        self.recheck = RecheckController(self)
         self._shown: tuple[str, ResolveState, str] | None = None
         """Firmware id, state and digest the workspace shows (flash compares the digest)."""
         self._built_for: tuple[str, str] | None = None
         """The selection the workspace page was last built for."""
         self._workspace_stale = False
         """A refresh waited for a text field being edited."""
-        self._round: list[str] = []
-        self._round_changed = False
-        self._clock: Callable[[], float] = time.monotonic
-        """Seconds for the re-check rules; tests replace it to count checks without waiting."""
-        self._recheck_timer = QTimer(self)
-        self._recheck_timer.setSingleShot(True)
-        self._recheck_timer.timeout.connect(self._run_recheck)
-        self._recheck_due: float | None = None
-        """When the queued re-check runs (self._clock time); None when nothing is queued."""
-        self._recheck_settle = False
-        """The queued re-check looks at a settling build."""
-        self._last_recheck: float | None = None
-        self._rechecking = False
-        """A check of the selection, or the refresh it caused, is running."""
         self._closed = False
         """Set by closeEvent: queued refresh rounds stop."""
         self._error_shown = False
@@ -358,10 +341,7 @@ class EmbrWindow(FrameWindow):
         self.ports.start()
         if not self.ports.ports:
             self.connection.set_ports(())
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.setInterval(REFRESH_SECONDS * 1000)
-        self._refresh_timer.timeout.connect(self._start_round)
-        self._refresh_timer.start()
+        self.recheck.start()
         self.changed()
 
     # ---- Owner ------------------------------------------------------------------------
@@ -378,9 +358,19 @@ class EmbrWindow(FrameWindow):
     def palette(self) -> Palette:  # type: ignore[override]
         return self._palette
 
+    @property
+    def shown(self) -> tuple[str, ResolveState, str] | None:
+        """Firmware id, state and digest the workspace shows (flash compares the digest)."""
+        return self._shown
+
+    @property
+    def closed(self) -> bool:
+        """closeEvent ran: nothing of this window runs any more."""
+        return self._closed
+
     def changed(self) -> None:
         self._refresh_workspace()
-        self._refresh_tree()
+        self.refresh_tree()
         self._refresh_right()
 
     def note(self, level: str, text: str) -> None:
@@ -390,17 +380,17 @@ class EmbrWindow(FrameWindow):
         """Show `firmware_id`. Leaving another firmware ends its "Build updated" state and
         "content changed" marks and the hint of the last job; selecting the
         shown one again (a click on its sidebar row) keeps them."""
-        if self._selected_firmware_id() != firmware_id:
+        if self.selected_firmware_id() != firmware_id:
             self._leave_selection()
             self._last_outcome = None
-        self._schedule.touch(firmware_id)
+        self.recheck.touch(firmware_id)
         self._selection = ("firmware", firmware_id)
         self.changed()
 
     def _firmware_menu(self, firmware_id: str, at: QPoint) -> None:
         """Right-click on a firmware in the sidebar: select it, then show the same menu as the
         workspace's ⋯ button (its actions work on the selected firmware)."""
-        if self._selected_firmware_id() != firmware_id:
+        if self.selected_firmware_id() != firmware_id:
             self.select_firmware(firmware_id)
         self.header.menu.popup(at)
 
@@ -476,7 +466,7 @@ class EmbrWindow(FrameWindow):
             self.note("error", f"[explorer] {exc}")
 
     def firmware_action(self, name: str) -> None:
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         if firmware_id is None or self.is_locked(firmware_id):
             return
         firmware = self._library.firmware(firmware_id)
@@ -547,7 +537,7 @@ class EmbrWindow(FrameWindow):
 
     # ---- refresh ----------------------------------------------------------------------
 
-    def _selected_firmware_id(self) -> str | None:
+    def selected_firmware_id(self) -> str | None:
         return self._selection[1] if self._selection and self._selection[0] == "firmware" else None
 
     def _first_firmware(self) -> str | None:
@@ -558,7 +548,7 @@ class EmbrWindow(FrameWindow):
                     return group.firmware[0].id
         return tree.standalone[0].id if tree.standalone else None
 
-    def _refresh_tree(self) -> None:
+    def refresh_tree(self) -> None:
         snapshot = self._memory.snapshot
         self.sidebar_panel.show_tree(
             self._library.tree(self._query),
@@ -674,7 +664,7 @@ class EmbrWindow(FrameWindow):
         port = self.connection.selected_port()
         snapshot = self._memory.snapshot
         self.connection.show_identity(snapshot)
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         busy = self._ops.busy
         if firmware_id is None:
             self.connection.show_checks(None)
@@ -728,7 +718,7 @@ class EmbrWindow(FrameWindow):
                 return HINT_DOWNLOAD_MODE, "ok"
         if port is None or (snapshot is not None and snapshot.port.device == port.device):
             return "", "ok"
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         if self._quick and firmware_id is not None:
             return self._quick_hint(port, self._library.firmware(firmware_id))
         if port.connection == ConnectionType.USB_OTG:
@@ -779,7 +769,7 @@ class EmbrWindow(FrameWindow):
         self.connection.set_erase_all(firmware.erase_all, enabled, visible=True)
 
     def _set_erase_all(self, checked: bool) -> None:
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         if firmware_id is None or self._ops.busy:
             return
         try:
@@ -792,7 +782,7 @@ class EmbrWindow(FrameWindow):
 
     def _search(self, text: str) -> None:
         self._query = text
-        self._refresh_tree()
+        self.refresh_tree()
 
     def _move(self, firmware_id: str, project_id: object, device: str) -> None:
         if self.is_locked(firmware_id):
@@ -817,7 +807,7 @@ class EmbrWindow(FrameWindow):
     def _reorder_projects(self, project_ids: list[str]) -> None:
         """Projects dragged into a new order in the sidebar (settings.ini)."""
         self._library.set_project_order(project_ids)
-        self._refresh_tree()
+        self.refresh_tree()
 
     def _reorder_groups(self, project_id: str, names: list[str]) -> None:
         """Groups dragged into a new order within their project (its `devices`)."""
@@ -827,7 +817,7 @@ class EmbrWindow(FrameWindow):
             self._read_only_notice(self._library.project(project_id).name)
         except (KeyError, ValueError):  # the project changed under the drag
             pass
-        self._refresh_tree()
+        self.refresh_tree()
 
     def _read_only_notice(self, name: str) -> None:
         """Firmware or project written by a newer Embr: shown, never changed."""
@@ -901,7 +891,7 @@ class EmbrWindow(FrameWindow):
         now = self.connection.selected_port()
         if now is not None:
             self._memory.select_port(now)  # another device under the same name: forgotten
-        self._refresh_tree()
+        self.refresh_tree()
         self._refresh_right()
 
     def _port_changed(self) -> None:
@@ -912,7 +902,7 @@ class EmbrWindow(FrameWindow):
         self.connection.set_baud(
             port, default_baud(self._context.settings, port) if port else DEFAULT_BAUD
         )
-        self._refresh_tree()
+        self.refresh_tree()
         self._refresh_workspace()  # entries for another chip turn grey, or back
         self._refresh_right()
 
@@ -939,7 +929,7 @@ class EmbrWindow(FrameWindow):
             self._ops.cancel()
             self.note("error", "Cancelled: worker process killed, serial port released.")
             return
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         port = self.connection.selected_port()
         if firmware_id is None or port is None:
             return
@@ -962,17 +952,17 @@ class EmbrWindow(FrameWindow):
             self.note("warning", f"[flash] not started: {exc}")
             self.changed()
             if exc.building:
-                self._request_recheck(SETTLE_RECHECK_MS, settle=True)
+                self.recheck.request(SETTLE_RECHECK_MS, settle=True)
             return
         except (PlanError, BusyError, OSError, ValueError) as exc:
             self.note("error", f"[flash] {exc}")
             self._refresh_right()
             return
         self._job_kind = JobKind.FLASH
-        self._schedule.touch(firmware_id)
+        self.recheck.touch(firmware_id)
         self.connection.set_running(True)
         self.connection.show_progress(0, N_("Connecting…"))
-        self._refresh_tree()
+        self.refresh_tree()
         self._refresh_workspace()
 
     def _flash_shortcut(self) -> None:
@@ -1001,7 +991,7 @@ class EmbrWindow(FrameWindow):
                 f"Chip {event.chip} {event.revision} · MAC {event.mac or '-'} · flash "
                 f"{event.flash_size or '-'}",
             )
-            self._refresh_tree()
+            self.refresh_tree()
             self.connection.show_identity(self._memory.snapshot)
         elif isinstance(event, EntryEvent):
             if event.status == EntryStatus.SKIPPED:
@@ -1087,7 +1077,7 @@ class EmbrWindow(FrameWindow):
         self._shown = (status.firmware_id, status.state, status.digest)
         self._log_renames(status)
         if status.state == ResolveState.BUILDING:
-            self._request_recheck(SETTLE_RECHECK_MS, settle=True)
+            self.recheck.request(SETTLE_RECHECK_MS, settle=True)
 
     def _log_renames(self, status: TrackStatus) -> None:
         """One log line per renamed app file, once per resolution (the
@@ -1105,145 +1095,14 @@ class EmbrWindow(FrameWindow):
             )
 
     def _leave_selection(self) -> None:
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         if firmware_id is not None:
             self._library.tracker.mark_seen(firmware_id)
-
-    def _request_recheck(self, delay_ms: int = 0, *, settle: bool = False) -> None:
-        """The one way to queue a check of the selection: a click, the window activated, a
-        build settling, a flash refused. One single-shot timer: an earlier queued
-        check stands, a later one is moved up to the new time. At most one check per
-        RECHECK_GAP_S; a request inside the gap waits for it, neither dropped nor repeated.
-        `settle` (a build seen settling) looks again after delay_ms whatever the gap. While the
-        shown build settles, other requests only make sure that look is queued. Nothing else
-        is queued during a refresh round (it checks the selection first) or a job, behind a
-        dialog or menu, or while the window is minimized."""
-        if self._closed:
-            return
-        if not settle:
-            if self._round or self._ops.busy or self.isMinimized() or _modal_open():
-                return
-            if self._shown_building():
-                if self._recheck_timer.isActive():
-                    return
-                delay_ms, settle = SETTLE_RECHECK_MS, True
-        now = self._clock()
-        due = now + delay_ms / 1000
-        if not settle and self._last_recheck is not None:
-            due = max(due, self._last_recheck + RECHECK_GAP_S)
-        queued = self._recheck_timer.isActive() and self._recheck_due is not None
-        if queued and self._recheck_due is not None and self._recheck_due <= due:
-            return
-        self._recheck_settle = settle or (queued and self._recheck_settle)
-        self._recheck_due = due
-        self._recheck_timer.start(max(0, math.ceil((due - now) * 1000)))
-
-    def _run_recheck(self) -> None:
-        """The re-check timer fired: check the selection unless that is not the time now."""
-        settle = self._recheck_settle
-        self._recheck_due = None
-        self._recheck_settle = False
-        if self._closed or self._ops.busy or self.isMinimized() or _modal_open():
-            return  # a job's end, closing the dialog or restoring the window asks again
-        if self._round and not settle:
-            return
-        if self._rechecking:
-            self._request_recheck(SETTLE_RECHECK_MS if settle else 0, settle=settle)
-            return
-        self._recheck_selected()
-
-    def _shown_building(self) -> bool:
-        shown = self._shown
-        return (
-            shown is not None
-            and shown[1] == ResolveState.BUILDING
-            and shown[0] == self._selected_firmware_id()
-        )
-
-    def _recheck_selected(self) -> None:
-        """Check the selection and refresh when it differs from what is shown (from
-        _run_recheck, and when a PIO query finished). No refresh while a parameter field is
-        being edited: what is shown stays, so the next check finds the difference again. A
-        build still settling queues the next look."""
-        firmware_id = self._selected_firmware_id()
-        if firmware_id is None or self.is_locked(firmware_id):
-            return
-        if self._rechecking:
-            self._request_recheck()
-            return
-        self._rechecking = True
-        try:
-            self._last_recheck = self._clock()
-            try:
-                status = self._library.tracker.check(firmware_id)
-            except KeyError:
-                return
-            if self._shown == (firmware_id, status.state, status.digest):
-                self.header.show_files_updated(status)
-            elif not self.firmware_view.params.editing():
-                self.changed()
-            if status.state == ResolveState.BUILDING:
-                self._request_recheck(SETTLE_RECHECK_MS, settle=True)
-        finally:
-            self._rechecking = False
-
-    def _start_round(self) -> None:
-        if self._closed or self._ops.busy or self.isMinimized() or self._round:
-            return
-        existing = [f.id for f in self._context.firmware.all()]
-        self._round = self._schedule.round(self._selected_firmware_id(), existing)
-        self._round_changed = False
-        QTimer.singleShot(0, self._next_in_round)
-
-    def _next_in_round(self) -> None:
-        """One firmware per event loop pass, so a round never blocks the window."""
-        if self._closed or not self._round or self._ops.busy:
-            self._round = []
-            return
-        try:
-            self._check_in_round(self._round.pop(0))
-        finally:
-            # an unexpected error goes on to the crash log; the round still goes on and
-            # ends, or every later check would wait for it until a restart
-            self._continue_round()
-
-    def _check_in_round(self, firmware_id: str) -> None:
-        tracker = self._library.tracker
-        before = tracker.cached(firmware_id)
-        try:
-            status = tracker.check(firmware_id)
-        except KeyError:
-            self._schedule.forget(firmware_id)
-            return
-        selected = firmware_id == self._selected_firmware_id()
-        if selected:
-            self._last_recheck = self._clock()
-        if before is None or (before.state, before.digest) != (status.state, status.digest):
-            self._round_changed = True
-        elif selected:
-            self.header.show_files_updated(status)
-        if selected and status.state == ResolveState.BUILDING:
-            self._request_recheck(SETTLE_RECHECK_MS, settle=True)
-
-    def _continue_round(self) -> None:
-        """The next firmware of the round, or its end: refresh what changed."""
-        if self._round:
-            QTimer.singleShot(0, self._next_in_round)
-        elif self._round_changed:
-            selected = self._selected_firmware_id()
-            if (
-                selected is not None
-                and not self.is_locked(selected)
-                and not self.firmware_view.params.editing()
-            ):
-                self.changed()
-            else:
-                self._refresh_tree()
 
     def changeEvent(self, event: QEvent) -> None:
         super().changeEvent(event)
         if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
-            self._request_recheck()
+            self.recheck.request()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """FrameWindow's filter on the application, plus: a mouse button released anywhere
@@ -1261,7 +1120,7 @@ class EmbrWindow(FrameWindow):
             and isinstance(event, QDragEnterEvent)
             and event.mimeData().hasUrls()
         ):
-            self._request_recheck()
+            self.recheck.request()
         if event.type() == QEvent.Type.MouseButtonRelease and self._workspace_stale:
             QTimer.singleShot(0, self._refresh_if_stale)  # after the click is handled
         return False
@@ -1423,7 +1282,7 @@ class EmbrWindow(FrameWindow):
             self.changed()
 
     def _archive_entry(self, entry_id: str) -> None:
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         if firmware_id is None:
             return
         try:
@@ -1473,8 +1332,8 @@ class EmbrWindow(FrameWindow):
         """A `pio project config` result arrived: re-check the PIO firmware of that project
         (the board may have changed) and refresh what is shown."""
         changed = self._library.tracker.invalidate_project(project_root)
-        if self._selected_firmware_id() in changed:
-            self._recheck_selected()
+        if self.selected_firmware_id() in changed:
+            self.recheck.check_selected()
 
     def _change_build_dir(self, firmware_id: str) -> None:
         firmware = self._library.firmware(firmware_id)
@@ -1527,7 +1386,7 @@ class EmbrWindow(FrameWindow):
                 )
 
     def _merge(self) -> None:
-        firmware_id = self._selected_firmware_id()
+        firmware_id = self.selected_firmware_id()
         if firmware_id is None:
             return
         status = self._library.tracker.check(firmware_id)
@@ -1815,9 +1674,7 @@ class EmbrWindow(FrameWindow):
         self.ports.blockSignals(True)
         # nothing of this window runs after it closed (its data may be closed next)
         self._closed = True
-        self._refresh_timer.stop()
-        self._recheck_timer.stop()
-        self._round = []
+        self.recheck.stop()
         event.accept()
 
 
@@ -1834,18 +1691,6 @@ LANGUAGE_LABELS = (
     (Language.ZH_CN, "简体中文"),
 )
 """Language menu; each language is named in itself."""
-
-SETTLE_RECHECK_MS = 2500
-"""Look again after a build was seen settling (app.tracking.SETTLE_SECONDS plus margin)."""
-RECHECK_GAP_S = 1.0
-"""At most one check of the selection per this many seconds (clicks, activation)."""
-
-
-def _modal_open() -> bool:
-    """A dialog or a menu is open: a click there is not a click in the window."""
-    return (
-        QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None
-    )
 
 
 def _port_unavailable(message: str) -> bool:
