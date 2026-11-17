@@ -2,6 +2,7 @@
 the real one, so tr() checks are written against whatever it holds; an empty table makes
 those loops pass vacuously until the translation lands."""
 
+import ast
 import re
 import subprocess
 import sys
@@ -212,6 +213,57 @@ def test_every_interface_text_has_a_translation() -> None:
 
 def test_every_translation_is_used() -> None:
     assert sorted(set(table(Language.ZH_CN)) - _source_keys()) == []
+
+
+_WORD = re.compile(r"[^\W\d_]{2}")
+
+
+def _text_literals(node: ast.AST) -> Iterator[tuple[int, str]]:
+    """(line, value) of the string constants in an expression that end up in its value:
+    call arguments and subscript indexes are skipped, since there a literal is a key, a
+    name or a format (doc_str(doc, "name"), d["id"], strftime("%H:%M")), not text shown
+    to the user."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        yield node.lineno, node.value
+    elif isinstance(node, ast.Call):
+        yield from _text_literals(node.func)
+    elif isinstance(node, ast.Subscript):
+        yield from _text_literals(node.value)
+    else:
+        for child in ast.iter_child_nodes(node):
+            yield from _text_literals(child)
+
+
+def test_translated_f_strings_embed_no_untranslated_text() -> None:
+    """A tr() or N_() f-string must not carry text inside a {…} expression, as in
+    tr(f"last resolved {resolved or 'never'}"): the key turns that part into a
+    placeholder, so the literal is shown but never translated. A string constant in a
+    placeholder expression counts as text when it holds two letters in a row; single
+    characters, punctuation, separators and format specs pass, and so do constants
+    passed as call arguments or used as subscript indexes. Such text is translated on
+    its own (tr("never")) or the sentence is split into complete keys."""
+    package = Path(embr.__file__).parent
+    found: list[str] = []
+    for path in sorted(package.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = getattr(func, "id", None) or getattr(func, "attr", None)
+            if name not in ("tr", "N_"):
+                continue
+            for arg in node.args:
+                if not isinstance(arg, ast.JoinedStr):
+                    continue
+                for part in arg.values:
+                    if not isinstance(part, ast.FormattedValue):
+                        continue
+                    for line, text in _text_literals(part.value):
+                        if _WORD.search(text):
+                            relative = path.relative_to(package).as_posix()
+                            found.append(f"{relative}:{line}: {text!r}")
+    assert not found, "untranslated text inside a translated f-string:\n" + "\n".join(found)
 
 
 # --- template_key ----------------------------------------------------------------------
