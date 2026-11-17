@@ -1,7 +1,9 @@
 """identify and flash jobs. Runs inside the worker process only."""
 
+import contextlib
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from typing import NamedTuple
 
 from esptool.cmds import (  # pyright: ignore[reportUnknownVariableType]  # untyped **kwargs
     attach_flash,
@@ -55,20 +57,48 @@ def _refuse_secured(esp: ESPLoader, after: str, send: Send, outcome: str) -> Non
     send(ResultEvent(ResultStatus.REFUSED, f"security features enabled; {outcome}"))
 
 
+class _Chip(NamedTuple):
+    esp: ESPLoader
+    info: InfoEvent
+    state: ChipState
+
+
+@contextlib.contextmanager
+def _session(
+    plan: IdentifyPlan | FlashPlan | ErasePlan | ReadPlan, send: Send, refused: str | None
+) -> Generator[_Chip | None]:
+    """Connect -> read the chip -> InfoEvent -> security checks; the port is closed when the
+    block is left, however it is left. A REFUSED result is sent inside the block, an OK
+    result after it.
+
+    With `refused` (the outcome named in the refusal, e.g. "nothing written"), a chip with
+    security features yields None: it has been reset as plan.after and ResultEvent(REFUSED)
+    sent, so the job only returns. Without it (identify) no security check runs, and a chip
+    in secure download mode is reported as staying in download mode, as it is not reset."""
+    esp = _connect(plan.port, plan.before)
+    try:
+        esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
+        if refused is None and info.security.secure_download_mode:
+            info = dataclasses.replace(info, in_download_mode=True)
+        send(info)
+        if refused is not None and _send_checks(send, checks.check_security(state.security)):
+            _refuse_secured(esp, plan.after, send, refused)
+            yield None
+        else:
+            yield _Chip(esp, info, state)
+    finally:
+        _close(esp)
+
+
 def identify(plan: IdentifyPlan, send: Send) -> None:
     """Connect -> InfoEvent -> reset as plan.after -> ResultEvent(OK). A chip in secure
     download mode is not reset (most ROM commands are unavailable), so it stays in download
     mode and the InfoEvent says so."""
-    esp = _connect(plan.port, plan.before)
-    try:
-        esp, info, _ = _read_chip(esp, plan.stub, plan.after == "no-reset")
-        if info.security.secure_download_mode:
-            info = dataclasses.replace(info, in_download_mode=True)
-        send(info)
+    with _session(plan, send, None) as chip:
+        assert chip is not None  # no security refusal without `refused`
+        info = chip.info
         if not info.security.secure_download_mode:
-            reset_chip(esp, plan.after)
-    finally:
-        _close(esp)
+            reset_chip(chip.esp, plan.after)
     send(ResultEvent(ResultStatus.OK, f"{info.chip} {info.revision} identified"))
 
 
@@ -82,13 +112,10 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
         send(ResultEvent(ResultStatus.REFUSED, "entry files do not match the plan"))
         return
 
-    esp = _connect(plan.port, plan.before)
-    try:
-        esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
-        send(info)
-        if _send_checks(send, checks.check_security(state.security)):
-            _refuse_secured(esp, plan.after, send, "nothing written")
+    with _session(plan, send, "nothing written") as chip:
+        if chip is None:
             return
+        esp, state = chip.esp, chip.state
         found = [
             checks.check_chip(state.chip, plan.chip, plan.entries),
             checks.check_revisions(state, plan.entries),
@@ -117,8 +144,6 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
             written += status == EntryStatus.WRITTEN
             send(EntryEvent(index, entry.address, status))
         reset_chip(esp, plan.after)
-    finally:
-        _close(esp)
     skipped = len(plan.entries) - written
     send(ResultEvent(ResultStatus.OK, f"{written} written, {skipped} already in flash"))
 
@@ -126,18 +151,13 @@ def flash(plan: FlashPlan, send: Send, cursor: EntryCursor) -> None:
 def erase(plan: ErasePlan, send: Send) -> None:
     """Connect -> InfoEvent -> security checks (any REFUSE: ResultEvent(REFUSED), nothing
     erased) -> erase the whole flash -> reset as plan.after -> ResultEvent(OK)."""
-    esp = _connect(plan.port, plan.before)
-    try:
-        esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
-        send(info)
-        if _send_checks(send, checks.check_security(state.security)):
-            _refuse_secured(esp, plan.after, send, "nothing erased")
+    with _session(plan, send, "nothing erased") as chip:
+        if chip is None:
             return
-        erase_flash(esp)
-        reset_chip(esp, plan.after)
-    finally:
-        _close(esp)
-    send(ResultEvent(ResultStatus.OK, f"flash erased ({info.flash_size or 'size unknown'})"))
+        erase_flash(chip.esp)
+        reset_chip(chip.esp, plan.after)
+    size = chip.info.flash_size or "size unknown"
+    send(ResultEvent(ResultStatus.OK, f"flash erased ({size})"))
 
 
 def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
@@ -145,13 +165,10 @@ def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
     read) -> range check against the detected flash size (beyond it: CheckEvent REFUSE,
     ResultEvent(REFUSED)) -> ProgressEvents (entry_index 0, address = plan.address) while
     reading to plan.output -> reset -> ResultEvent(OK) whose message gives the size read."""
-    esp = _connect(plan.port, plan.before)
-    try:
-        esp, info, state = _read_chip(esp, plan.stub, plan.after == "no-reset")
-        send(info)
-        if _send_checks(send, checks.check_security(state.security)):
-            _refuse_secured(esp, plan.after, send, "nothing read")
+    with _session(plan, send, "nothing read") as chip:
+        if chip is None:
             return
+        esp, info = chip.esp, chip.info
         total = checks.flash_size_bytes(info.flash_size) if info.flash_size else None
         size = plan.size if plan.size is not None else total
         if size is None or (total is not None and plan.address + size > total):
@@ -172,8 +189,6 @@ def read_flash(plan: ReadPlan, send: Send, cursor: EntryCursor) -> None:
         cursor.index, cursor.address, cursor.progressed = 0, plan.address, False
         esptool_read_flash(esp, plan.address, size, plan.output)
         reset_chip(esp, plan.after)
-    finally:
-        _close(esp)
     send(ResultEvent(ResultStatus.OK, f"{size} bytes read from {plan.address:#x}"))
 
 
