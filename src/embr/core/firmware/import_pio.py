@@ -27,6 +27,7 @@ from embr.core.firmware.image_sniff import SUBTYPE_OTADATA, TYPE_DATA, parse_par
 from embr.core.firmware.import_idf import flash_address
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams
+from embr.core.firmware.tracking import DerivedFile
 from embr.i18n import N_
 
 PLATFORMIO_INI = "platformio.ini"
@@ -125,30 +126,11 @@ class PackageChoice:
 
 
 @dataclass(frozen=True)
-class PioFile:
-    address: int
-    path: Path | None
-    """Absolute; None for a blank otadata entry of `blank_size` bytes."""
-    kind: EntryKind | None
-    """What the build says the file is (bootloader, app, partition table, otadata); None
-    for other files."""
-    note: str = ""
-    """Shown with the entry, e.g. that boot_app0.bin was moved to the otadata partition, or
-    that the listed address and the image disagree (the listed address is used)."""
-    blank_size: int = 0
-
-    @property
-    def name(self) -> str:
-        """File name; "otadata (blank)" for a blank entry."""
-        return self.path.name if self.path is not None else "otadata (blank)"
-
-
-@dataclass(frozen=True)
 class PioBuild:
     ref: EnvRef
     framework: Framework
     source: ImageSource
-    files: tuple[PioFile, ...]
+    files: tuple[DerivedFile, ...]
     """Sorted by address."""
     flash: FlashParams
     """From the bootloader image header ("keep" for an unreadable value)."""
@@ -547,11 +529,11 @@ def read_env(
         ),
         None,
     )
-    files: list[PioFile] = []
+    files: list[DerivedFile] = []
     for address, path, kind, listed in raw:
         data = contents.get(path)
         if data is None:  # listed but unreadable: the resolver reports it missing
-            files.append(PioFile(max(address, 0), path, kind))
+            files.append(DerivedFile(max(address, 0), path, kind))
             continue
         found = cache.sniff(data, table).value
         if not listed:
@@ -561,7 +543,7 @@ def read_env(
             if found.kind == EntryKind.UNKNOWN or found.address is None:
                 notes.append(N_(f"{path.name}: not recognized; left out"))
                 continue
-            files.append(PioFile(found.address, path, found.kind))
+            files.append(DerivedFile(found.address, path, found.kind))
             continue
         note = ""
         if (
@@ -574,7 +556,7 @@ def read_env(
                 f"listed at 0x{address:X}; the {found.kind.value} image belongs at "
                 f"0x{found.address:X} (the listed address is used)"
             )
-        files.append(PioFile(address, path, kind, note))
+        files.append(DerivedFile(address, path, kind, note))
     package: PackageChoice | None = None
     if framework == Framework.ARDUINO:
         package = locate_package(
@@ -598,13 +580,15 @@ def read_env(
                     f"PlatformIO writes {BOOT_APP0} at 0x{BOOT_APP0_PIO_ADDRESS:X}; placed at "
                     f"the otadata partition (0x{otadata.offset:X})"
                 )
-            files.append(PioFile(otadata.offset, boot, EntryKind.OTADATA, note))
+            files.append(DerivedFile(otadata.offset, boot, EntryKind.OTADATA, note))
         elif package.problem is None:
-            files.append(PioFile(otadata.offset, None, EntryKind.OTADATA, blank_size=otadata.size))
+            files.append(
+                DerivedFile(otadata.offset, None, EntryKind.OTADATA, blank_size=otadata.size)
+            )
             notes.append(
                 N_(f"{BOOT_APP0} was not found in any framework package; a blank otadata is used")
             )
-    unique: dict[object, PioFile] = {}
+    unique: dict[object, DerivedFile] = {}
     for f in files:
         unique.setdefault(f.path if f.path is not None else ("blank", f.address), f)
     ordered = sorted(unique.values(), key=lambda f: f.address)

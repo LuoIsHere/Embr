@@ -114,17 +114,26 @@ class EntryMark(StrEnum):
 
 @dataclass(frozen=True)
 class DerivedFile:
+    """A file an importer (import_idf, import_pio) found in the build output."""
+
     address: int
     path: Path | None
     """Absolute; None for a blank (0xFF) entry of `blank_size` bytes."""
-    expected: EntryKind | None = None
-    """Kind the build output says the file is; a file that does not parse as that kind
-    (e.g. half written) makes the build INCOMPLETE."""
+    kind: EntryKind | None = None
+    """What the build output says the file is (bootloader, app, partition table,
+    otadata); None for other files. A file that does not parse as that kind (e.g. half
+    written) makes the build INCOMPLETE."""
     note: str = ""
-    """Importer remark shown with the entry (Resolution.entry_notes)."""
+    """Importer remark shown with the entry (Resolution.entry_notes), e.g. that the listed
+    address and the image disagree."""
     blank_size: int = 0
-    """With path None: an OTADATA entry named "otadata (blank)", file "blank:", content
+    """With path None: an OTADATA entry named BLANK_NAME, file "blank:", content
     blank_size bytes of 0xFF (PIO Arduino without boot_app0.bin)."""
+
+    @property
+    def name(self) -> str:
+        """File name; BLANK_NAME for a blank entry."""
+        return self.path.name if self.path is not None else BLANK_NAME
 
 
 @dataclass(frozen=True)
@@ -219,7 +228,7 @@ def resolve(firmware: Firmware, build: DerivedBuild, cache: FileCache, *, now: s
     marks: dict[str, EntryMark] = {}
 
     # the partition table first: SPIFFS images are only recognised through it
-    table_file = next((f for f in build.files if f.expected == EntryKind.PARTITION_TABLE), None)
+    table_file = next((f for f in build.files if f.kind == EntryKind.PARTITION_TABLE), None)
     table = None
     if table_file is not None and table_file.path is not None:
         with contextlib.suppress(OSError):
@@ -232,8 +241,8 @@ def resolve(firmware: Firmware, build: DerivedBuild, cache: FileCache, *, now: s
         if d.data_missing:
             incomplete.append(N_(f"{d.name}: file missing"))
             marks[d.key] = EntryMark.MISSING
-        elif d.file.expected is not None and d.kind != d.file.expected:
-            incomplete.append(N_(f"{d.name}: cannot be read as {d.file.expected.value}"))
+        elif d.file.kind is not None and d.kind != d.file.kind:
+            incomplete.append(N_(f"{d.name}: cannot be read as {d.file.kind.value}"))
     if not incomplete and not any(d.kind == EntryKind.APP for d in derived):
         incomplete.append(N_("the build output has no app image"))
 
@@ -429,7 +438,7 @@ def _classify(
         found = cache.sniff(file.path, table)  # hash, size and kind from the same content
     except OSError:
         known = last_kinds.get(name)
-        kind = EntryKind(known) if known else (file.expected or EntryKind.UNKNOWN)
+        kind = EntryKind(known) if known else (file.kind or EntryKind.UNKNOWN)
         return _Derived(file, name, kind, entry_key(kind, name), "", 0, None, True)
     kind, header = found.value.kind, found.value.header
     return _Derived(

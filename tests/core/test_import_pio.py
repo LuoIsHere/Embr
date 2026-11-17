@@ -36,7 +36,6 @@ from embr.core.firmware.import_pio import (
     ImageSource,
     PackageChoice,
     PioBuild,
-    PioFile,
     PioUnavailableError,
     board_mcu,
     built_envs_below,
@@ -113,7 +112,7 @@ def _placed(build: PioBuild) -> list[tuple[int, Path | None, EntryKind | None, i
     return [(f.address, f.path, f.kind, f.blank_size) for f in build.files]
 
 
-def _named(build: PioBuild, name: str) -> PioFile:
+def _named(build: PioBuild, name: str) -> DerivedFile:
     return next(f for f in build.files if f.name == name)
 
 

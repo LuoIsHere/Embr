@@ -39,7 +39,7 @@ def test_read_build(sample: str) -> None:
     assert [(f.address, f.path) for f in build.files] == sorted(
         (int(address, 16), (build_dir / rel).resolve()) for address, rel in files.items()
     )
-    assert all(f.path.is_absolute() for f in build.files)
+    assert all(f.path is not None and f.path.is_absolute() for f in build.files)
     assert (build.flash_mode, build.flash_freq, build.flash_size) == (
         settings["flash_mode"],
         settings["flash_freq"],

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from embr.core.firmware.kinds import EntryKind
+from embr.core.firmware.tracking import DerivedFile
 from embr.i18n import N_
 
 FLASHER_ARGS = "flasher_args.json"
@@ -31,21 +32,6 @@ class EncryptedBuildError(IdfBuildError):
 
 
 @dataclass(frozen=True)
-class BuildFile:
-    address: int
-    path: Path
-    """Absolute: flash_files paths are relative to the build directory."""
-    kind: EntryKind | None = None
-    """What flasher_args.json says the file is (its "bootloader", "app", "partition-table"
-    or "otadata" section); None for other flash files."""
-
-    @property
-    def name(self) -> str:
-        """File name, e.g. "bootloader.bin"."""
-        return self.path.name
-
-
-@dataclass(frozen=True)
 class ImageLink:
     """How the build made an image (the app, or the bootloader of its subproject), from
     project_description.json."""
@@ -59,8 +45,10 @@ class ImageLink:
 @dataclass(frozen=True)
 class IdfBuild:
     build_dir: Path
-    files: tuple[BuildFile, ...]
-    """flash_files, sorted by address."""
+    files: tuple[DerivedFile, ...]
+    """flash_files, sorted by address; paths absolute (flash_files are relative to the
+    build directory), kind from the flasher_args.json section that names the file
+    ("bootloader", "app", "partition-table", "otadata")."""
     flash_mode: str
     flash_freq: str
     flash_size: str
@@ -96,7 +84,8 @@ class IdfBuild:
         if self.config_file is not None:
             paths.append(self.config_file)
         linked = [p for link in self.links for p in (link.elf, *link.libraries)]
-        return (*paths, *(f.path for f in self.files), *linked)
+        flashed = [f.path for f in self.files if f.path is not None]
+        return (*paths, *flashed, *linked)
 
 
 def normalize_arg(value: str) -> str:
@@ -272,8 +261,8 @@ def flash_address(text: str) -> int | None:
 
 def _flash_files(
     build_dir: Path, value: object, kinds: dict[Path, EntryKind]
-) -> tuple[BuildFile, ...]:
-    files: list[BuildFile] = []
+) -> tuple[DerivedFile, ...]:
+    files: list[DerivedFile] = []
     for offset, name in _table(value).items():
         if not isinstance(name, str):
             raise IdfBuildError(N_(f"flash_files: bad entry for {offset}"))
@@ -281,7 +270,7 @@ def _flash_files(
         if address is None:
             raise IdfBuildError(N_(f"flash_files: {offset!r} is not an address"))
         path = (build_dir / name).resolve()
-        files.append(BuildFile(address, path, kinds.get(path)))
+        files.append(DerivedFile(address, path, kinds.get(path)))
     if not files:
         raise IdfBuildError(N_(f"{FLASHER_ARGS} lists no flash files"))
     return tuple(sorted(files, key=lambda f: f.address))

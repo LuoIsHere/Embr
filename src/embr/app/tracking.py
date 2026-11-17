@@ -54,7 +54,6 @@ from embr.core.firmware.model import Entry, Firmware, FlashParams, Source
 from embr.core.firmware.tracking import (
     Change,
     DerivedBuild,
-    DerivedFile,
     EntryMark,
     Resolution,
     ResolveState,
@@ -392,7 +391,7 @@ class Tracker:
             found = missing(firmware, str(exc))
             return dataclasses.replace(found, state=ResolveState.INCOMPLETE), fallback
         derived = DerivedBuild(
-            files=tuple(DerivedFile(f.address, f.path, f.kind) for f in build.files),
+            files=build.files,
             declared_chips=tuple(c for c in (build.chip, build.target) if c),
             configured_target=configured_target(build.config_file),
             idf_version=build.idf_version,
@@ -455,9 +454,7 @@ class Tracker:
             found = missing(firmware, str(exc))
             return dataclasses.replace(found, state=ResolveState.INCOMPLETE), fallback
         derived = DerivedBuild(
-            files=tuple(
-                DerivedFile(f.address, f.path, f.kind, f.note, f.blank_size) for f in build.files
-            ),
+            files=build.files,
             declared_chips=(),
             configured_target=self._pio.target(ref),
             idf_version=None,
