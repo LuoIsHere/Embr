@@ -12,6 +12,7 @@ from embr.app.operations import JobKind, JobOutcome
 from embr.core.history import RecordResult
 from embr.i18n import Language, set_language, tr
 from embr.ui import dialogs
+from embr.ui.dialogs import base
 from embr.ui.window import EmbrWindow
 from embr.ui.workspace import MCU_WIDEST
 
@@ -86,15 +87,15 @@ def test_replacing_a_file_names_the_firmware_using_it(
         asked.append(lines)
         return False, False
 
-    monkeypatch.setattr(dialogs, "confirm", answer)
+    monkeypatch.setattr(base, "confirm", answer)  # replace_ok asks through it
     output = tmp_path / "fw_merged.bin"
-    assert dialogs._replace_ok(window, output, ["fw (merged)"])  # nothing to replace yet
+    assert dialogs.replace_ok(window, output, ["fw (merged)"])  # nothing to replace yet
     output.write_bytes(b"first merge")
-    assert not dialogs._replace_ok(window, output, ["fw (merged)", "<b>x</b>"])
+    assert not dialogs.replace_ok(window, output, ["fw (merged)", "<b>x</b>"])
     (question, users) = asked[0]
     assert "<b>fw_merged.bin</b> already exists" in question
     assert "<b>fw (merged)</b>, <b>&lt;b&gt;x&lt;/b&gt;</b>" in users  # names as typed
-    assert not dialogs._replace_ok(window, output)
+    assert not dialogs.replace_ok(window, output)
     assert len(asked[1]) == 1  # no firmware uses it: the question alone
 
 

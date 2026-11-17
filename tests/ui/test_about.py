@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 from embr import __version__
 from embr.i18n import Language, current, set_language
 from embr.ui import dialogs
+from embr.ui.dialogs import info
 
 COPYRIGHT = "Copyright © 2026 @LuoIsHere"
 BUILT = "2026-11-01 08:12 UTC"
@@ -61,7 +62,7 @@ DEVELOPMENT = {Language.ENGLISH: "development build", Language.ZH_CN: "开发构
 def test_about_shows_the_copyright_untranslated(
     shown: list[str], language: Language, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(dialogs, "build_time", lambda: BUILT)
+    monkeypatch.setattr(info, "build_time", lambda: BUILT)
     texts = _about(shown)
     assert COPYRIGHT in texts
     assert any(__version__ in t and "5.3.1" in t for t in texts)
@@ -70,7 +71,7 @@ def test_about_shows_the_copyright_untranslated(
 def test_about_shows_the_packaged_build_time(
     shown: list[str], language: Language, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(dialogs, "build_time", lambda: BUILT)
+    monkeypatch.setattr(info, "build_time", lambda: BUILT)
     texts = _about(shown)
     assert BUILD_LINE[language].format(BUILT) in texts
     assert not any(DEVELOPMENT[language] in t for t in texts)
