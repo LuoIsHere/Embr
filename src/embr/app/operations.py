@@ -356,6 +356,7 @@ class Operations:
         record_id: str | None = None
         dump_id: str | None = None
         saved = ""
+        baud: int | None = None  # remembered for the port if the job ends OK; None: nothing
         problems: list[str] = []
 
         def attempt[T](step: str, run: Callable[[], T]) -> T | None:
@@ -372,8 +373,6 @@ class Operations:
             if job.kind == JobKind.FLASH and job.plan is not None and job.firmware is not None:
                 record_id = attempt("record", lambda: self._save_record(job, result, message))
                 baud = job.plan.baud or 0
-                if result == RecordResult.OK:
-                    attempt("settings", lambda: self._remember_baud(job.port, baud))
             elif job.other is not None:
                 plan = job.other
                 kept = _Kept()
@@ -388,9 +387,9 @@ class Operations:
                 record = attempt("record", lambda: self._save_other(job, *outcome, kept))
                 record_id = record.id if record is not None else None
                 dump_id = kept.dump.id if kept.dump is not None else None
-                baud = plan.baud if isinstance(plan, ReadPlan) else None
-                if result == RecordResult.OK and baud:
-                    attempt("settings", lambda: self._remember_baud(job.port, baud))
+                baud = (plan.baud or None) if isinstance(plan, ReadPlan) else None
+            if result == RecordResult.OK and baud is not None:
+                attempt("settings", lambda: self._remember_baud(job.port, baud))
             attempt("log", job.segment.close)
             if job.kind != JobKind.IDENTIFY and job.info is not None and job.info.mac:
                 mac = job.info.mac
@@ -488,36 +487,17 @@ class Operations:
         self, job: _Job, result: RecordResult, message: str, kept: "_Kept"
     ) -> FlashRecord:
         """Record of an erase or read_flash job (what a read kept: see _keep_read())."""
-        plan, info = job.other, job.info
+        plan = job.other
         assert plan is not None
-        dump = kept.dump
-        entries = (kept.entry,) if kept.entry is not None else ()
-        refused = result == RecordResult.REFUSED
-        return FlashRecord(
-            id=job.segment_id,
+        return self._new_record(
+            job,
+            plan,
+            result,
+            message,
             operation=Operation.ERASE if job.kind == JobKind.ERASE else Operation.READ_FLASH,
-            timestamp=job.start.isoformat(timespec="seconds"),
-            result=result,
-            project_id=dump.project_id if dump else None,
-            project_name=self._project_name(dump.project_id) if dump else "",
-            firmware_id=dump.id if dump else None,
-            firmware_name=dump.name if dump else "",
-            device=dump.device if dump else "",
-            port=plan.port,
+            firmware=kept.dump,
             baud=plan.baud if isinstance(plan, ReadPlan) else None,
-            connection_type=plan.connection.value,
-            reset_before=plan.before,
-            reset_after=plan.after,
-            chip_detected=info.chip if info else None,
-            chip_revision=info.revision if info else None,
-            mac=info.mac if info and info.mac else None,
-            flash_size_detected=info.flash_size if info else None,
-            entries=entries,
-            refuse_reason=("; ".join(job.refusals) or message) if refused else None,
-            duration_ms=int((self._clock() - job.start).total_seconds() * 1000),
-            esptool_version=esptool.__version__,
-            command=command_line(plan),
-            log_file=job.segment.file_name,
+            entries=(kept.entry,) if kept.entry is not None else (),
         )
 
     def _dump_firmware(self, job: _Job, plan: ReadPlan, info: InfoEvent, data: bytes) -> Firmware:
@@ -558,28 +538,16 @@ class Operations:
         return dump
 
     def _record(self, job: _Job, result: RecordResult, message: str) -> FlashRecord:
-        plan, firmware, info = job.plan, job.firmware, job.info
+        plan, firmware = job.plan, job.firmware
         assert plan is not None and firmware is not None
-        refused = result == RecordResult.REFUSED
-        return FlashRecord(
-            id=job.segment_id,
+        return self._new_record(
+            job,
+            plan,
+            result,
+            message,
             operation=Operation.FLASH,
-            timestamp=job.start.isoformat(timespec="seconds"),
-            result=result,
-            project_id=firmware.project_id,
-            project_name=self._project_name(firmware.project_id),
-            firmware_id=firmware.id,
-            firmware_name=firmware.name,
-            device=firmware.device,
-            port=plan.port,
+            firmware=firmware,
             baud=plan.baud,
-            connection_type=plan.connection.value,
-            reset_before=plan.before,
-            reset_after=plan.after,
-            chip_detected=info.chip if info else None,
-            chip_revision=info.revision if info else None,
-            mac=info.mac if info and info.mac else None,
-            flash_size_detected=info.flash_size if info else None,
             entries=tuple(
                 RecordEntry(
                     e.name,
@@ -591,6 +559,44 @@ class Operations:
                 )
                 for i, e in enumerate(plan.entries)
             ),
+        )
+
+    def _new_record(
+        self,
+        job: _Job,
+        plan: FlashPlan | ErasePlan | ReadPlan,
+        result: RecordResult,
+        message: str,
+        *,
+        operation: Operation,
+        firmware: Firmware | None,
+        baud: int | None,
+        entries: tuple[RecordEntry, ...],
+    ) -> FlashRecord:
+        """The record of a finished job; without `firmware` its project and firmware fields
+        are empty. The chip fields come from the job's InfoEvent, if one arrived."""
+        info = job.info
+        refused = result == RecordResult.REFUSED
+        return FlashRecord(
+            id=job.segment_id,
+            operation=operation,
+            timestamp=job.start.isoformat(timespec="seconds"),
+            result=result,
+            project_id=firmware.project_id if firmware else None,
+            project_name=self._project_name(firmware.project_id) if firmware else "",
+            firmware_id=firmware.id if firmware else None,
+            firmware_name=firmware.name if firmware else "",
+            device=firmware.device if firmware else "",
+            port=plan.port,
+            baud=baud,
+            connection_type=plan.connection.value,
+            reset_before=plan.before,
+            reset_after=plan.after,
+            chip_detected=info.chip if info else None,
+            chip_revision=info.revision if info else None,
+            mac=info.mac if info and info.mac else None,
+            flash_size_detected=info.flash_size if info else None,
+            entries=entries,
             refuse_reason=("; ".join(job.refusals) or message) if refused else None,
             duration_ms=int((self._clock() - job.start).total_seconds() * 1000),
             esptool_version=esptool.__version__,
