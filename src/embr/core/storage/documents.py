@@ -1,7 +1,6 @@
 """TOML documents with a schema_version: projects and firmware."""
 
 import datetime
-import os
 import shutil
 import tomllib
 from collections.abc import Callable, Mapping
@@ -11,6 +10,7 @@ from typing import cast
 
 import tomli_w
 
+from embr.core.storage.atomic import write_whole
 from embr.i18n import N_
 
 Document = dict[str, object]
@@ -122,10 +122,7 @@ def save_document(path: Path, data: Document, *, current: int) -> None:
     file in the same folder, then replace), so a crash never leaves a half-written file."""
     doc: Document = {"schema_version": current}
     doc.update((k, v) for k, v in data.items() if k != "schema_version")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(tomli_w.dumps(doc), encoding="utf-8", newline="\n")
-    os.replace(tmp, path)
+    write_whole(path, tomli_w.dumps(doc).encode("utf-8"))
 
 
 def backup_folder(backup_root: Path) -> Path:

@@ -19,6 +19,7 @@ from pathlib import Path
 from embr.core import chipinfo
 from embr.core.firmware.entries import resolve_partitions
 from embr.core.firmware.filecache import FileCache
+from embr.core.firmware.files import BLANK, path_ref
 from embr.core.firmware.image_header import ImageHeader, format_revision
 from embr.core.firmware.image_sniff import (
     PARTITION_TABLE_MAX_SIZE,
@@ -515,7 +516,7 @@ def _resolved_firmware(
 
 
 def _file_ref(file: DerivedFile) -> str:
-    return "blank:" if file.path is None else f"path:{file.path}"
+    return BLANK if file.path is None else path_ref(file.path)
 
 
 def _apply_override(entry: Entry, override: EntryOverride | None) -> None:

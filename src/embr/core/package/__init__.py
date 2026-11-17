@@ -28,6 +28,7 @@ from typing import cast
 
 import tomli_w
 
+from embr.core.firmware.files import ARCHIVE, BLANK
 from embr.core.firmware.model import FIRMWARE_SCHEMA_VERSION, Firmware
 from embr.core.firmware.serialize import firmware_from_doc, firmware_to_doc
 from embr.core.firmware.store import upgrade_firmware_doc
@@ -63,8 +64,6 @@ _PROJECT = re.compile(r"projects/([^/]+)\.toml")
 _FIRMWARE = re.compile(r"firmwares/([^/]+)\.toml")
 _FILE = re.compile(r"files/([0-9a-f]{64})\.bin")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-_ARCHIVE = "archive:"
-_BLANK = "blank:"
 _CHUNK = 1 << 20
 
 
@@ -178,11 +177,11 @@ def write_package(
         if firmware.source.tracking:
             raise ValueError(f"{firmware.name}: a tracking firmware cannot go into a package")
         for entry in firmware.entries:
-            if entry.file == _BLANK:
+            if entry.file == BLANK:
                 continue
-            if not entry.file.startswith(_ARCHIVE):
+            if not entry.file.startswith(ARCHIVE):
                 raise ValueError(f"{entry.name}: only archive: and blank: entries can be packed")
-            if entry.file.removeprefix(_ARCHIVE) not in listed:
+            if entry.file.removeprefix(ARCHIVE) not in listed:
                 raise ValueError(f"{entry.name}: its file is not in the package")
     for listed_file, path in files:
         if _hash_file(path) != (listed_file.sha256, listed_file.size):
@@ -440,10 +439,10 @@ def _check_firmwares(manifest: Manifest, firmwares: list[Firmware]) -> None:
         if firmware.source.tracking:
             raise PackageError(N_(f"{item.name}: a tracking firmware cannot come from a package"))
         for entry in firmware.entries:
-            if entry.file == _BLANK:
+            if entry.file == BLANK:
                 continue
-            listed = files.get(entry.file.removeprefix(_ARCHIVE))
-            if not entry.file.startswith(_ARCHIVE) or listed is None:
+            listed = files.get(entry.file.removeprefix(ARCHIVE))
+            if not entry.file.startswith(ARCHIVE) or listed is None:
                 raise PackageError(
                     N_(f"{item.name}: {entry.name} refers to a file not in the package")
                 )

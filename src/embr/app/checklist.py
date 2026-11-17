@@ -4,7 +4,6 @@ checks in its own connection; this list is for the user, before pressing Flash.
 """
 
 import copy
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -36,6 +35,7 @@ from embr.core.flasher.checks import (
     check_chip,
     check_revisions,
     check_security,
+    flash_size_bytes,
 )
 from embr.core.flasher.plan import adjust_reset
 from embr.core.serial import ConnectionType, PortInfo
@@ -191,7 +191,7 @@ def _layout(
         table, found = _table(context, probe)
         if table is not None:
             found += resolve_partitions(probe, table)
-        found += check_layout(probe, _size_bytes(size) if size else None)
+        found += check_layout(probe, flash_size_bytes(size) if size else None)
         problems += [p for p in found if p not in problems]
     if not problems:
         return [CheckItem(CheckState.PASS, N_("No address overlap"))]
@@ -268,10 +268,3 @@ def _reset(firmware: Firmware, port: PortInfo | None) -> CheckItem:
         detail = f"{used} ({'; '.join(reasons)})"
         return CheckItem(CheckState.WARN, N_("Reset policy adjusted to connection"), detail)
     return CheckItem(CheckState.PASS, N_("Reset policy"), used)
-
-
-def _size_bytes(size: str) -> int | None:
-    match = re.fullmatch(r"(\d+)(KB|MB)", size)
-    if match is None:
-        return None
-    return int(match[1]) * (1024 if match[2] == "KB" else 1024 * 1024)

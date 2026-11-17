@@ -13,7 +13,6 @@ happens there, so the sqlite connection is only used from one thread.
 import contextlib
 import datetime
 import hashlib
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -27,7 +26,7 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, assemble_plan, plan_chip
 from embr.app.identify import IdentifyMemory
 from embr.app.tracking import Tracker
-from embr.core.firmware.files import FileState, entry_state
+from embr.core.firmware.files import FileState, archive_ref, entry_state
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, Firmware
 from embr.core.flasher import runner
@@ -58,6 +57,7 @@ from embr.core.flasher.runner import JobHandle
 from embr.core.history import FlashRecord, Operation, RecordEntry, RecordResult, result_from_event
 from embr.core.logs import LogSegment
 from embr.core.serial import PortInfo, baud_adjustable, remember_baud
+from embr.core.storage.atomic import write_whole
 from embr.core.storage.ids import new_id
 
 SAVE_FAILED = "could not save to"
@@ -468,7 +468,7 @@ class Operations:
             name = job.output.name if job.output else ""
             if job.output is not None:
                 try:
-                    _write_whole(job.output, data)
+                    write_whole(job.output, data)
                 except OSError as exc:
                     reason = f"{SAVE_FAILED} {job.output}: {exc.strerror or exc}"
                     job.segment.write(f"[error] {reason}")
@@ -543,7 +543,7 @@ class Operations:
             Entry(
                 id=new_id(),
                 name=f"{dump.name}.bin",
-                file=f"archive:{archived.sha256}",
+                file=archive_ref(archived.sha256),
                 sha256=archived.sha256,
                 size=len(data),
                 kind=EntryKind.MERGED,
@@ -641,18 +641,6 @@ class _Kept:
     saved_to: str = ""
     dump: Firmware | None = None
     entry: RecordEntry | None = None
-
-
-def _write_whole(path: Path, data: bytes) -> None:
-    """Write `data` to `path` through a temporary file in the same folder, replaced in one
-    step; on failure the temporary file is removed and `path` is untouched."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(f"{path.name}.{new_id()}.part")
-    try:
-        partial.write_bytes(data)
-        os.replace(partial, path)
-    finally:
-        partial.unlink(missing_ok=True)
 
 
 def _progress(plan: FlashPlan, event: ProgressEvent) -> JobProgress:

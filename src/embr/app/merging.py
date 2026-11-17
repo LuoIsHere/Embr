@@ -3,9 +3,7 @@ entries (attachments included) and flash parameters of any firmware; tracking fi
 their current resolution.
 """
 
-import contextlib
 import hashlib
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,10 +13,12 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, declared_flash_size, entry_path
 from embr.app.tracking import Tracker
 from embr.core.firmware.entries import sorted_entries
+from embr.core.firmware.files import is_blank, local_file, path_key, path_ref
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, Firmware, FlashParams, Source
 from embr.core.flasher.merge import MergeInput, merge_args, merge_image
 from embr.core.flasher.plan import FlashSettings
+from embr.core.storage.atomic import write_whole
 from embr.core.storage.ids import new_id
 from embr.i18n import N_
 
@@ -74,7 +74,7 @@ class Merger:
             target_offset=options.target_offset,
             pad_to_size=pad,
         )
-        _write_whole(output, data)
+        write_whole(output, data)
         if not options.add_to_list:
             return None
         created = self._ctx.firmware.create(
@@ -95,7 +95,7 @@ class Merger:
             Entry(
                 id=new_id(),
                 name=output.name,
-                file=f"path:{output.resolve()}",
+                file=path_ref(output.resolve()),
                 sha256=hashlib.sha256(data).hexdigest(),
                 size=len(data),
                 kind=EntryKind.MERGED,
@@ -122,13 +122,11 @@ class Merger:
     def users(self, output: Path) -> list[str]:
         """Names of the firmware with an entry referring to the file `output` (paths
         compared as Windows does), in name order: replacing it changes their content."""
-        key = _path_key(output)
+        key = path_key(output)
         return sorted(
             f.name
             for f in self._ctx.firmware.all()
-            if any(
-                e.file.startswith("path:") and _path_key(Path(e.file[5:])) == key for e in f.entries
-            )
+            if any((file := local_file(e)) is not None and path_key(file) == key for e in f.entries)
         )
 
     def _source_path(self, firmware: Firmware) -> str:
@@ -163,7 +161,7 @@ class Merger:
             if entry.address is None:
                 raise PlanError(N_(f"{entry.name} has no address"))
             path = entry_path(self._ctx, entry)
-            if write_files and entry.file.startswith("blank:"):
+            if write_files and is_blank(entry):
                 path.write_bytes(b"\xff" * entry.size)
             inputs.append(MergeInput(entry.address, path))
         pad = None
@@ -177,21 +175,3 @@ class Merger:
 def _settings(firmware: Firmware) -> FlashSettings:
     flash = firmware.flash
     return FlashSettings(flash.mode, flash.freq, flash.size)
-
-
-def _write_whole(output: Path, data: bytes) -> None:
-    """`data` to a temporary file in output's folder, then renamed over `output` (one
-    step on the same volume): `output` is either untouched or complete."""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    partial = output.with_name(f"{output.name}.{new_id()}.part")
-    try:
-        partial.write_bytes(data)
-        os.replace(partial, output)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            partial.unlink(missing_ok=True)
-        raise
-
-
-def _path_key(path: Path) -> str:
-    return os.path.normcase(str(path.resolve()))

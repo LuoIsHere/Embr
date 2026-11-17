@@ -19,6 +19,7 @@ from embr_testkit import FIXTURES, REPO
 
 from embr.core.history import History, Operation, RecordEntry
 from embr.core.storage import database
+from embr.core.storage.atomic import write_whole
 from embr.core.storage.database import (
     DB_SCHEMA_VERSION,
     NewerSchemaError,
@@ -283,6 +284,24 @@ def test_document_round_trip(tmp_path: Path) -> None:
     assert _without_version(loaded.data) == SAMPLE
     assert not loaded.read_only
     assert loaded.migrated_from is None
+
+
+def test_a_failed_write_leaves_the_old_file_and_no_partial_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Documents, settings, the archive and saved images all write through write_whole()."""
+    path = tmp_path / "folder" / "doc.toml"
+    write_whole(path, b"old")
+    assert list(path.parent.iterdir()) == [path]
+
+    def refused(src: object, dst: object) -> None:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(os, "replace", refused)
+    with pytest.raises(PermissionError):
+        write_whole(path, b"new")
+    assert path.read_bytes() == b"old"
+    assert list(path.parent.iterdir()) == [path]
 
 
 def test_document_migrates_step_by_step_with_backup(tmp_path: Path) -> None:

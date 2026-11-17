@@ -12,13 +12,10 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.tracking import Tracker
 from embr.core.archive import ArchiveFile
-from embr.core.firmware.files import FileState, entry_state
+from embr.core.firmware.files import FileState, archive_ref, archived_sha, entry_state, local_file
 from embr.core.firmware.model import Entry, Firmware, Source
 from embr.core.firmware.store import default_name_archived
 from embr.core.storage.ids import new_id
-
-_ARCHIVE = "archive:"
-_PATH = "path:"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -104,20 +101,21 @@ class Archiver:
         entry = next((e for e in stored if e.id == entry_id), None)
         if entry is None:
             raise ValueError(f"{firmware.name}: this entry comes from the build output")
-        if not entry.file.startswith(_PATH):
+        source = local_file(entry)
+        if source is None:
             raise ValueError(f"{entry.name} is not a file on disk")
         if entry_state(entry, self._ctx.paths.archive, self._ctx.files) != FileState.OK:
             raise PlanError(f"{entry.name}: file missing or changed since it was recorded")
         record = self._ctx.archive.add(
-            Path(entry.file.removeprefix(_PATH)),
+            source,
             original_name=entry.name,
-            original_path=entry.file.removeprefix(_PATH),
+            original_path=str(source),
             note=entry.note,
             source_firmware=firmware.name,
         )
         if record.sha256 != entry.sha256:  # changed between the check and the copy
             raise PlanError(f"{entry.name} changed while it was being archived")
-        entry.file = _ARCHIVE + record.sha256
+        entry.file = archive_ref(record.sha256)
         self._ctx.firmware.save(firmware)
         self._tracker.invalidate(firmware_id)
         return entry
@@ -127,11 +125,7 @@ class Archiver:
         index order (what the Clean archive dialog shows before deleting anything)."""
         users: dict[str, list[Firmware]] = {}
         for firmware in self._ctx.firmware.all():
-            shas = {
-                e.file.removeprefix(_ARCHIVE)
-                for e in firmware.entries
-                if e.file.startswith(_ARCHIVE)
-            }
+            shas = {sha for e in firmware.entries if (sha := archived_sha(e)) is not None}
             for sha in shas:
                 users.setdefault(sha, []).append(firmware)
         return [
@@ -156,16 +150,16 @@ class Archiver:
 
     def _referenced(self) -> set[str]:
         return {
-            e.file.removeprefix(_ARCHIVE)
+            sha
             for f in self._ctx.firmware.all()
             for e in f.entries
-            if e.file.startswith(_ARCHIVE)
+            if (sha := archived_sha(e)) is not None
         }
 
     def _archived_copy(self, entry: Entry, source_name: str) -> Entry:
         copy = dataclasses.replace(entry, id=new_id())
-        if entry.file.startswith(_PATH):
-            path = entry.file.removeprefix(_PATH)
+        if (source := local_file(entry)) is not None:
+            path = str(source)
             record = self._ctx.archive.add(
                 Path(path),
                 original_name=entry.name,
@@ -175,5 +169,5 @@ class Archiver:
             )
             if record.sha256 != entry.sha256:
                 raise PlanError(f"{entry.name} changed while it was being archived")
-            copy.file = _ARCHIVE + record.sha256
+            copy.file = archive_ref(record.sha256)
         return copy

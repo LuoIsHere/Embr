@@ -8,7 +8,7 @@ from embr.app.chips import Mcu, entry_mcus, firmware_mcus, fits, for_chip, image
 from embr.app.context import AppContext
 from embr.core import chipinfo
 from embr.core.firmware.entries import enabled_partition_table, sorted_entries
-from embr.core.firmware.files import read_entry
+from embr.core.firmware.files import archived_sha, is_blank, read_entry
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import Entry, Firmware
 from embr.core.flasher.plan import (
@@ -53,7 +53,7 @@ def plan_entries(
         if entry.address is None:
             raise PlanError(f"{entry.name} has no address")
         path = entry_path(context, entry)
-        if write_files and entry.file.startswith("blank:"):
+        if write_files and is_blank(entry):
             path.write_bytes(b"\xff" * entry.size)
         header = image_header(context, entry)
         planned.append(
@@ -164,12 +164,11 @@ def line_low(mcu: Mcu) -> int | None:
 
 def entry_path(context: AppContext, entry: Entry) -> Path:
     """The file the worker reads for an entry (see plan_entries())."""
-    scheme, _, rest = entry.file.partition(":")
-    if scheme == "archive":
-        return context.paths.archive / f"{rest}.bin"
-    if scheme == "blank":
+    if (sha := archived_sha(entry)) is not None:
+        return context.paths.archive / f"{sha}.bin"
+    if is_blank(entry):
         return context.paths.temp / f"blank-{entry.size}.bin"
-    return Path(rest)
+    return Path(entry.file.partition(":")[2])  # "path:", or a scheme nothing knows
 
 
 def declared_flash_size(context: AppContext, firmware: Firmware) -> str | None:

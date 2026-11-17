@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from embr.core.firmware.files import BLANK, path_key, path_ref
 from embr.core.firmware.image_sniff import PartitionTable, parse_partition_table, sniff
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, Firmware
@@ -55,7 +56,7 @@ def entry_from_file(path: Path, table: PartitionTable | None = None) -> Entry:
     return Entry(
         id=new_id(),
         name=path.name,
-        file=f"path:{path.resolve()}",
+        file=path_ref(path.resolve()),
         sha256=hashlib.sha256(data).hexdigest(),
         size=len(data),
         kind=result.kind,
@@ -76,7 +77,7 @@ def attachment_entry(
     return Entry(
         id=new_id(),
         name=path.name,
-        file=f"path:{path.resolve()}",
+        file=path_ref(path.resolve()),
         sha256=hashlib.sha256(data).hexdigest(),
         size=len(data),
         kind=EntryKind.ATTACHMENT,
@@ -92,7 +93,7 @@ def blank_otadata_entry(offset: int, size: int) -> Entry:
     return Entry(
         id=new_id(),
         name="otadata (blank)",
-        file="blank:",
+        file=BLANK,
         sha256=hashlib.sha256(b"\xff" * size).hexdigest(),
         size=size,
         kind=EntryKind.OTADATA,
@@ -136,15 +137,11 @@ def copy_entry(entry: Entry) -> Entry:
 def in_folder(folder: str, path: Path) -> bool:
     """`path` lies in `folder` or in one of its subfolders. Both are resolved (absolute,
     `..` removed) and compared ignoring case, as Windows does."""
-    root, target = _path_key(Path(folder)), _path_key(path)
+    root, target = path_key(Path(folder)), path_key(path)
     try:
         return os.path.commonpath([root, target]) == root
     except ValueError:  # different drives
         return False
-
-
-def _path_key(path: Path) -> str:
-    return os.path.normcase(str(path.resolve()))
 
 
 def sorted_entries(entries: list[Entry]) -> list[Entry]:

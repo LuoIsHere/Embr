@@ -110,10 +110,10 @@ class PortWatcher:
         """Enumerate once and report what changed since the previous poll. Added and removed
         ports are sorted like list_ports()."""
         current = tuple(sorted(self._enumerate(), key=lambda p: _natural_key(p.device)))
-        before = {_identity(p) for p in self._ports}
-        after = {_identity(p) for p in current}
-        added = tuple(p for p in current if _identity(p) not in before)
-        removed = tuple(p for p in self._ports if _identity(p) not in after)
+        before = {port_identity(p) for p in self._ports}
+        after = {port_identity(p) for p in current}
+        added = tuple(p for p in current if port_identity(p) not in before)
+        removed = tuple(p for p in self._ports if port_identity(p) not in after)
         self._ports = current
         return PortChange(added, removed)
 
@@ -145,7 +145,9 @@ def remember_baud(settings: Settings, port: PortInfo, baud: int) -> bool:
     return True
 
 
-def _identity(port: PortInfo) -> tuple[str, int | None, int | None, str | None]:
+def port_identity(port: PortInfo) -> tuple[str, int | None, int | None, str | None]:
+    """What tells two ports apart: the same name with other USB ids or serial number is
+    another device."""
     return port.device, port.vid, port.pid, port.serial_number
 
 

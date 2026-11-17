@@ -32,6 +32,7 @@ from embr.app.packages import ExportCheck, default_group, default_package_name
 from embr.build import build_time
 from embr.core import chipinfo
 from embr.core.firmware.entries import AddressError, parse_address
+from embr.core.firmware.files import local_file
 from embr.core.firmware.import_idf import (
     IdfBuild,
     IdfBuildError,
@@ -751,7 +752,7 @@ def archive_version(
     notes = QLineEdit()
     notes.setPlaceholderText(tr("why this version is kept"))
     dialog.field(tr("Notes"), notes)
-    copied = [e for e in entries if e.file.startswith("path:")]
+    copied = [e for e in entries if local_file(e) is not None]
     lines = "".join("<br>•&nbsp;" + tr(f"{html.escape(e.name)} ({e.size:,} bytes)") for e in copied)
     dialog.text(
         tr(

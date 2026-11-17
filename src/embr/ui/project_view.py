@@ -1,5 +1,7 @@
 """Project overview."""
 
+import html
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -320,10 +322,14 @@ class ProjectView(QScrollArea):
             if count
             else tr("The group is empty.")
         )
+        shown, owner = html.escape(group), html.escape(project.name)
         accepted, _ = dialogs.confirm(
             self,
             tr("Remove group"),
-            [tr(f"Remove the group <b>{_esc(group)}</b> from {_esc(project.name)}?"), effect],
+            [
+                tr(f"Remove the group <b>{shown}</b> from {owner}?"),
+                effect,
+            ],
             tr("Remove group"),
         )
         if accepted:
@@ -338,14 +344,12 @@ class ProjectView(QScrollArea):
         if project is None or self._job_running():
             return
         count = len(self._owner.library.project_firmware(project.id))
+        shown = html.escape(project.name)
         accepted, delete_all = dialogs.confirm(
             self,
             tr("Delete project"),
             [
-                tr(
-                    f"Delete <b>{_esc(project.name)}</b>? By default its {count} firmware become "
-                    "standalone."
-                ),
+                tr(f"Delete <b>{shown}</b>? By default its {count} firmware become standalone."),
                 tr(dialogs.ARCHIVE_KEPT),
             ],
             tr("Delete project"),
@@ -358,7 +362,3 @@ class ProjectView(QScrollArea):
         self._owner.note("warning", f"[project] '{project.name}' deleted {kept}")
         self._project = None
         self._owner.changed()
-
-
-def _esc(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

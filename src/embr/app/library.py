@@ -10,7 +10,6 @@ ValueError. Every change to a tracking firmware invalidates its tracker status.
 
 import dataclasses
 import hashlib
-import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -49,8 +48,12 @@ from embr.core.firmware.entries import (
 )
 from embr.core.firmware.files import (
     FileState,
+    archived_sha,
     confirm_entry,
     entry_state,
+    local_file,
+    path_key,
+    path_ref,
     read_entry,
     relocate,
 )
@@ -492,14 +495,14 @@ class Library:
         """The IDF tracking firmware that follows `build_dir`, or None. Paths are compared
         after resolving them (absolute, `..` removed) and ignoring case and a trailing
         separator, as Windows does."""
-        key = _path_key(build_dir)
+        key = path_key(build_dir)
         return next(
             (
                 f
                 for f in self._ctx.firmware.all()
                 if f.source == Source.IDF_BUILD
                 and f.build_ref is not None
-                and _path_key(Path(f.build_ref.path)) == key
+                and path_key(Path(f.build_ref.path)) == key
             ),
             None,
         )
@@ -511,7 +514,7 @@ class Library:
         found: dict[tuple[str, str], str] = {}
         for f in self._ctx.firmware.all():
             if f.source == Source.PIO_BUILD and f.build_ref is not None and f.build_ref.env:
-                found.setdefault((_path_key(Path(f.build_ref.path)), f.build_ref.env), f.id)
+                found.setdefault((path_key(Path(f.build_ref.path)), f.build_ref.env), f.id)
         return found
 
     def preview_pio(
@@ -549,7 +552,7 @@ class Library:
                 PioEnvChoice(
                     name=name,
                     built=built,
-                    tracked_by=followers.get((_path_key(root), name)),
+                    tracked_by=followers.get((path_key(root), name)),
                     board=env_config.board if env_config is not None else None,
                     build=build,
                     problem=problem,
@@ -611,7 +614,7 @@ class Library:
     def tracking_firmware_for_env(self, project_root: Path, env: str) -> Firmware | None:
         """The PIO tracking firmware following `env` of `project_root`, or None. Roots are
         compared as tracking_firmware_for() compares build directories; env names exactly."""
-        key = _path_key(project_root)
+        key = path_key(project_root)
         return next(
             (
                 f
@@ -619,7 +622,7 @@ class Library:
                 if f.source == Source.PIO_BUILD
                 and f.build_ref is not None
                 and f.build_ref.env == env
-                and _path_key(Path(f.build_ref.path)) == key
+                and path_key(Path(f.build_ref.path)) == key
             ),
             None,
         )
@@ -729,17 +732,13 @@ class Library:
         if paths:
             firmware.folder = _check_folder(_root(firmware, Path(paths[0])), paths)
         was_empty = not firmware.entries
-        known = {
-            _path_key(Path(e.file[len("path:") :])): e
-            for e in firmware.entries
-            if e.file.startswith("path:")
-        }
+        known = {path_key(file): e for e in firmware.entries if (file := local_file(e)) is not None}
         fresh: list[Path] = []
         updated: list[Entry] = []
         unchanged: list[Entry] = []
         seen: set[str] = set()
         for path in paths:
-            key = _path_key(path)
+            key = path_key(path)
             if key in seen:
                 continue
             seen.add(key)
@@ -902,13 +901,12 @@ class Library:
         entry = _own_entry(source, entry_id) or self._derived_entry(firmware_id, entry_id)
         target = self._ctx.firmware.get(target_id)
         _refuse_tracking(target)
-        if entry.file.startswith("path:"):
-            file = Path(entry.file.removeprefix("path:"))
-            key = _path_key(file)
+        if (file := local_file(entry)) is not None:
+            key = path_key(file)
             if any(
-                _path_key(Path(e.file.removeprefix("path:"))) == key
+                path_key(other) == key
                 for e in target.entries
-                if e.file.startswith("path:")
+                if (other := local_file(e)) is not None
             ):
                 raise AlreadyInFirmwareError(f"{entry.name} is already in '{target.name}'")
             target.folder = _check_folder(_root(target, file), [file])
@@ -946,12 +944,12 @@ class Library:
         old, new = Path(firmware.folder), folder.resolve()
         left: list[str] = []
         for entry in firmware.entries:
-            current = Path(entry.file.removeprefix("path:"))
-            if not entry.file.startswith("path:") or not in_folder(str(old), current):
+            current = local_file(entry)
+            if current is None or not in_folder(str(old), current):
                 continue
             moved = new / current.resolve().relative_to(old.resolve())
             if moved.is_file():
-                entry.file = f"path:{moved}"
+                entry.file = path_ref(moved)
             else:
                 left.append(entry.name)
         firmware.folder = str(new)
@@ -1071,10 +1069,11 @@ class Library:
         if firmware.build_ref is not None and not Path(firmware.build_ref.path).exists():
             return FirmwareFlag.MISSING
         for entry in firmware.entries:
-            scheme, _, rest = entry.file.partition(":")
-            if scheme == "path" and not Path(rest).is_file():
+            file = local_file(entry)
+            if file is not None and not file.is_file():
                 return FirmwareFlag.MISSING
-            if scheme == "archive" and not (self._ctx.paths.archive / f"{rest}.bin").is_file():
+            sha = archived_sha(entry)
+            if sha is not None and not (self._ctx.paths.archive / f"{sha}.bin").is_file():
                 return FirmwareFlag.MISSING
         return FirmwareFlag.NONE
 
@@ -1127,10 +1126,6 @@ def _refuse_tracking(firmware: Firmware) -> None:
                 "version or create a fixed firmware to add files"
             )
         )
-
-
-def _path_key(path: Path) -> str:
-    return os.path.normcase(str(path.resolve()))
 
 
 def _own_entry(firmware: Firmware, entry_id: str) -> Entry | None:

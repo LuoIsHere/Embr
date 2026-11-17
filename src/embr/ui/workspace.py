@@ -43,7 +43,7 @@ from embr.app.locations import entry_location, firmware_location
 from embr.app.tracking import TrackStatus
 from embr.core import chipinfo
 from embr.core.firmware.entries import AddressError, FolderError, parse_address
-from embr.core.firmware.files import read_entry
+from embr.core.firmware.files import local_file, read_entry
 from embr.core.firmware.image_header import format_revision
 from embr.core.firmware.image_sniff import parse_partition_table
 from embr.core.firmware.import_pio import BOOT_APP0
@@ -55,6 +55,7 @@ from embr.core.history import FlashRecord, RecordResult
 from embr.i18n import N_, tr
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
+from embr.ui.connection import CONNECTION_LABELS
 from embr.ui.owner import Owner
 from embr.ui.sidebar import PLUS
 from embr.ui.widgets import (
@@ -79,12 +80,6 @@ SOURCE_LABELS = {
     Source.ARCHIVED: (N_("archived"), "gray"),
     Source.IDF_BUILD: (N_("tracks IDF build"), "info"),
     Source.PIO_BUILD: (N_("tracks PIO build"), "info"),
-}
-CONNECTION_LABELS = {
-    "uart_bridge": N_("UART bridge"),
-    "usb_serial_jtag": "USB-Serial/JTAG",
-    "usb_otg": "USB-OTG",
-    "unknown": N_("serial port"),
 }
 STATE_TAGS = {
     ResolveState.TARGET_SWITCHED: N_("target switched"),
@@ -217,7 +212,7 @@ class Header(QWidget):
         self._notes_tip = firmware.notes
         self.show_files_updated(status)
         self.archive_action.setEnabled(
-            status.state.flashable and any(e.file.startswith("path:") for e in firmware.entries)
+            status.state.flashable and any(local_file(e) for e in firmware.entries)
         )
 
     def show_files_updated(self, status: TrackStatus) -> None:
@@ -906,9 +901,9 @@ class EntriesTab(QWidget):
         menu = QMenu(self)
         menu.setToolTipsVisible(True)  # explains a disabled Remove entry
         relocate = menu.addAction(tr("Re-locate…"))
-        relocate.setEnabled(entry.file.startswith("path:") and not derived)
+        relocate.setEnabled(local_file(entry) is not None and not derived)
         archive = menu.addAction(tr("Archive this file"))
-        archive.setEnabled(entry.file.startswith("path:") and not derived)
+        archive.setEnabled(local_file(entry) is not None and not derived)
         copy_to = menu.addAction(tr("Copy to firmware…"))
         location = entry_location(entry)
         reveal = menu.addAction(tr("Show in Explorer"))
@@ -1204,7 +1199,7 @@ class ParamsTab(QWidget):
         status = self._owner.library.tracker.cached(firmware.id)
         entries = status.firmware.entries if status else []
         boot = next(
-            (e.file[5:] for e in entries if e.name == BOOT_APP0 and e.file.startswith("path:")),
+            (str(f) for e in entries if e.name == BOOT_APP0 and (f := local_file(e))),
             None,
         )
         auto = str(Path(boot).parents[2]) if boot else ""

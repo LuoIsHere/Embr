@@ -4,6 +4,7 @@ opened here."""
 from dataclasses import dataclass
 from pathlib import Path
 
+from embr.core.firmware.files import local_file
 from embr.core.firmware.import_pio import EnvRef
 from embr.core.firmware.model import Entry, Firmware
 
@@ -18,9 +19,9 @@ class Location:
 def entry_location(entry: Entry) -> Location | None:
     """A "path:" entry's file, or its folder when the file is gone; None when the folder is
     gone too. Archived copies (named by their hash) and blank entries have no place to show."""
-    if not entry.file.startswith("path:"):
+    path = local_file(entry)
+    if path is None:
         return None
-    path = Path(entry.file[len("path:") :])
     if path.is_file():
         return Location(path, selects_file=True)
     return Location(path.parent, selects_file=False) if path.parent.is_dir() else None

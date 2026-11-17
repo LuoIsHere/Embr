@@ -1,6 +1,7 @@
 """core/firmware/files: file consistency of path, archive and blank entries."""
 
 import hashlib
+import os
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from embr.core.firmware.files import (
     FileState,
     confirm_entry,
     entry_state,
+    path_key,
     read_entry,
     relocate,
 )
@@ -69,6 +71,20 @@ def test_path_entry_ok_changed_missing(tmp_path: Path, archive: Path) -> None:
     renamed = entry_from_file(_copy(APP, tmp_path / "other"))
     renamed.name = "other.bin"
     assert entry_state(renamed, archive) != FileState.OK
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows folds case and separators")
+def test_path_key_names_one_file_one_way(tmp_path: Path) -> None:
+    """Two spellings of the same file (case, `..`, separators) give one key: entries,
+    merged outputs and followed builds are matched by it."""
+    file = tmp_path / "Build" / "App.bin"
+    file.parent.mkdir()
+    file.write_bytes(b"x")
+    other = Path(str(tmp_path / "build" / ".." / "BUILD" / "app.BIN").replace("\\", "/"))
+    assert path_key(other) == path_key(file)
+    # a file that is gone keeps the spelling it was given: only the key folds its case
+    assert path_key(tmp_path / "Build" / "Gone.bin") == path_key(tmp_path / "build" / "GONE.BIN")
+    assert path_key(tmp_path / "Build" / "Other.bin") != path_key(file)
 
 
 @pytest.mark.parametrize("cached", [False, True], ids=["read", "cache"])

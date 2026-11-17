@@ -31,14 +31,13 @@ from embr.app.chips import image_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.tracking import STATE_TEXT, Tracker
+from embr.core.firmware.files import ARCHIVE, archive_ref, archived_sha, local_file
 from embr.core.firmware.model import Entry, Firmware, FlashParams, Source
 from embr.core.package import PACKAGE_SUFFIX, Package, PackageFile, read_package, write_package
 from embr.core.project import Project
 from embr.core.storage.ids import new_id
 from embr.i18n import N_
 
-_ARCHIVE = "archive:"
-_PATH = "path:"
 _NOT_IN_FILE_NAMES = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -224,13 +223,13 @@ class Packager:
         copy = dataclasses.replace(entry)
         if firmware.source.tracking and copy.chip is None and image_chip(self._ctx, entry) is None:
             copy.chip = firmware.chip
-        if entry.file.startswith(_PATH):
-            source = Path(entry.file.removeprefix(_PATH))
-        elif entry.file.startswith(_ARCHIVE):
-            source = self._ctx.archive.path(entry.file.removeprefix(_ARCHIVE))
+        if (file := local_file(entry)) is not None:
+            source = file
+        elif (sha := archived_sha(entry)) is not None:
+            source = self._ctx.archive.path(sha)
         else:
             return copy
-        copy.file = _ARCHIVE + entry.sha256
+        copy.file = archive_ref(entry.sha256)
         files.setdefault(
             entry.sha256, (PackageFile(entry.sha256, entry.size, entry.name, entry.note), source)
         )
@@ -240,7 +239,7 @@ class Packager:
         users: dict[str, str] = {}
         for firmware in package.firmwares:
             for entry in firmware.entries:
-                users.setdefault(entry.file.removeprefix(_ARCHIVE), firmware.name)
+                users.setdefault(entry.file.removeprefix(ARCHIVE), firmware.name)
         for listed in package.manifest.files:
             self._ctx.archive.add(
                 package.files[listed.sha256],

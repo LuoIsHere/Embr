@@ -9,7 +9,6 @@ from embr_testkit import idf_entries
 from esptool import cli as esptool_cli
 
 from embr.core.flasher.plan import (
-    DEFAULT_UART_BAUD,
     ErasePlan,
     FlashPlan,
     FlashSettings,
@@ -24,7 +23,7 @@ from embr.core.flasher.plan import (
     read_cli_args,
     write_flash_kwargs,
 )
-from embr.core.serial import ConnectionType
+from embr.core.serial import DEFAULT_BAUD, ConnectionType
 
 UART = ConnectionType.UART_BRIDGE
 JTAG = ConnectionType.USB_SERIAL_JTAG
@@ -73,7 +72,7 @@ def test_usb_otg_before_is_no_reset() -> None:
 def test_plan_defaults() -> None:
     plan = _plan()
     assert [e.address for e in plan.entries] == [0x0, 0x8000, 0x10000]
-    assert plan.baud == DEFAULT_UART_BAUD == 460800
+    assert plan.baud == DEFAULT_BAUD == 460800
     assert plan.flash == FlashSettings()
     assert (plan.erase_all, plan.skip_flashed) == (False, True)
     assert _plan(erase_all=True).skip_flashed is False
@@ -164,7 +163,7 @@ def test_erase_and_read_plans_adjust_reset_and_baud() -> None:
         assert (erase.before, erase.after) == (read.before, read.after) == (before, after)
         assert (read.address, read.size) == (0, None)
         uart = connection is UART
-        assert read.baud == (DEFAULT_UART_BAUD if uart else None)
+        assert read.baud == (DEFAULT_BAUD if uart else None)
         assert build_read_plan("COM3", connection, "d", baud=921600).baud == (
             921600 if uart else None
         )

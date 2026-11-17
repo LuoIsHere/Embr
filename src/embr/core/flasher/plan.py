@@ -8,11 +8,9 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from embr.core.serial import ConnectionType
+from embr.core.serial import DEFAULT_BAUD, ConnectionType
 from embr.i18n import N_
 
-DEFAULT_UART_BAUD = 460800
-"""Default baud rate for UART bridges, same as `idf.py flash`."""
 ROM_BAUD = 115200
 """Baud rate of the ROM handshake."""
 
@@ -168,13 +166,13 @@ def build_flash_plan(
     partitions_end: int | None = None,
 ) -> FlashPlan:
     """Build a plan: sorts entries by address, adjusts reset modes, sets baud to None on
-    native USB and to DEFAULT_UART_BAUD when not given otherwise, enables skip_flashed
+    native USB and to DEFAULT_BAUD when not given otherwise, enables skip_flashed
     unless erase_all, and uses FlashSettings() (all "keep") when `flash` is None."""
     new_before, new_after, reasons = adjust_reset(connection, before, after)
     if connection in _NATIVE_USB:
         baud = None
     elif baud is None:
-        baud = DEFAULT_UART_BAUD
+        baud = DEFAULT_BAUD
     return FlashPlan(
         port=port,
         connection=connection,
@@ -227,7 +225,7 @@ def build_read_plan(
     if connection in _NATIVE_USB:
         baud = None
     elif baud is None:
-        baud = DEFAULT_UART_BAUD
+        baud = DEFAULT_BAUD
     return ReadPlan(
         port=port,
         connection=connection,

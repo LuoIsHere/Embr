@@ -6,12 +6,12 @@ never modified. Nothing is deleted except by delete() ("Clean archive").
 
 import datetime
 import hashlib
-import os
 import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from embr.core.storage.atomic import write_whole
 from embr.core.storage.ids import new_id
 
 
@@ -69,10 +69,7 @@ class Archive:
         stamp = self._clock().isoformat(timespec="seconds")
         target = self.path(sha)
         if not _holds(target, sha):  # missing, or damaged since: written again
-            self.directory.mkdir(parents=True, exist_ok=True)
-            partial = target.with_suffix(f".{os.getpid()}.part")
-            partial.write_bytes(data)
-            os.replace(partial, target)
+            write_whole(target, data)
         name = ArchiveName(
             id=new_id(),
             sha256=sha,

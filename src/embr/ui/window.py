@@ -56,6 +56,7 @@ from embr.app.pio import PioConfigs
 from embr.app.refresh import REFRESH_SECONDS, RefreshSchedule
 from embr.app.tracking import BuildChangedError, Tracker, TrackStatus
 from embr.core.firmware.entries import FolderError
+from embr.core.firmware.files import local_file
 from embr.core.firmware.import_idf import IdfBuildError, build_dir_below
 from embr.core.firmware.import_pio import (
     PLATFORMIO_INI,
@@ -84,7 +85,7 @@ from embr.core.flasher.protocol import (
 from embr.core.history import RecordResult
 from embr.core.logs import HEADER_PREFIX
 from embr.core.package import PACKAGE_SUFFIX, PackageError
-from embr.core.serial import ConnectionType, PortChange, PortInfo, default_baud
+from embr.core.serial import DEFAULT_BAUD, ConnectionType, PortChange, PortInfo, default_baud
 from embr.core.storage.documents import DamagedDocument
 from embr.i18n import N_, SETTINGS_KEY, Language, current, effective, tr
 from embr.ui import dialogs
@@ -909,7 +910,7 @@ class EmbrWindow(FrameWindow):
         self._memory.select_port(port)
         self._last_outcome = None
         self.connection.set_baud(
-            port, default_baud(self._context.settings, port) if port else 460800
+            port, default_baud(self._context.settings, port) if port else DEFAULT_BAUD
         )
         self._refresh_tree()
         self._refresh_workspace()  # entries for another chip turn grey, or back
@@ -1531,7 +1532,7 @@ class EmbrWindow(FrameWindow):
             return
         status = self._library.tracker.check(firmware_id)
         firmware = status.firmware
-        paths = [Path(e.file[5:]) for e in firmware.entries if e.file.startswith("path:")]
+        paths = [p for e in firmware.entries if (p := local_file(e)) is not None]
         folder = paths[0].parent if paths else self._context.paths.root
         request = dialogs.merge(
             self, self._merger, firmware, self._merger.default_output(firmware, folder)

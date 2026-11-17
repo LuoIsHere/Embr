@@ -28,7 +28,7 @@ from embr.ui.theme import Palette
 from embr.ui.widgets import Switch, button, clear_layout, label, restyle, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
-CONNECTION_LABELS = {
+CONNECTION_LABELS: dict[str, str] = {
     ConnectionType.UART_BRIDGE: N_("UART bridge"),
     ConnectionType.USB_SERIAL_JTAG: "USB-Serial/JTAG",
     ConnectionType.USB_OTG: "USB-OTG",

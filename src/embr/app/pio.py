@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from embr.core.firmware import import_pio
+from embr.core.firmware.files import path_key
 from embr.core.firmware.import_pio import (
     PLATFORMIO_INI,
     EnvConfig,
@@ -75,7 +76,7 @@ class PioConfigs:
         stamp = _stamp(project_root)
         if stamp is None:
             return ProjectConfig({}, N_(f"{project_root / PLATFORMIO_INI} not found"))
-        key = _key(project_root)
+        key = path_key(project_root)
         with self._lock:
             hit = self._cache.get(key)
             if hit is not None and hit[0] == stamp:
@@ -106,7 +107,7 @@ class PioConfigs:
             return ProjectConfig({}, N_(f"{project_root / PLATFORMIO_INI} not found"))
         result = self._query(project_root)
         with self._lock:
-            self._cache[_key(project_root)] = (stamp, result)
+            self._cache[path_key(project_root)] = (stamp, result)
         return result
 
     def target(self, ref: EnvRef) -> str | None:
@@ -141,7 +142,3 @@ def _stamp(project_root: Path) -> _Stamp | None:
     except OSError:
         return None
     return (st.st_size, st.st_mtime_ns)
-
-
-def _key(project_root: Path) -> str:
-    return os.path.normcase(str(project_root.resolve()))

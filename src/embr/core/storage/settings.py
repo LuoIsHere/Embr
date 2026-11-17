@@ -6,10 +6,10 @@ UI adapters before they reach this module.
 
 import configparser
 import io
-import os
 import shutil
 from pathlib import Path
 
+from embr.core.storage.atomic import write_whole
 from embr.core.storage.documents import backup_folder
 
 
@@ -57,10 +57,7 @@ class Settings:
         """Write the file atomically (temporary file in the same folder, then replace)."""
         text = io.StringIO()
         self._parser.write(text)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(text.getvalue(), encoding="utf-8", newline="\n")
-        os.replace(tmp, self.path)
+        write_whole(self.path, text.getvalue().encode("utf-8"))
 
 
 def read_value(path: Path, section: str, key: str) -> str | None:

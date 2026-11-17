@@ -9,7 +9,7 @@ import datetime
 from dataclasses import dataclass
 
 from embr.core.flasher.protocol import InfoEvent
-from embr.core.serial import PortChange, PortInfo
+from embr.core.serial import PortChange, PortInfo, port_identity
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class IdentifyMemory:
         """The user picked a port (None: no port). Clears the snapshot unless it is for the
         same device."""
         if self._snapshot is not None and (
-            port is None or _identity(port) != _identity(self._snapshot.port)
+            port is None or port_identity(port) != port_identity(self._snapshot.port)
         ):
             self._snapshot = None
 
@@ -51,10 +51,6 @@ class IdentifyMemory:
             return
         held = self._snapshot.port
         for port in change.added:
-            if port.device == held.device and _identity(port) != _identity(held):
+            if port.device == held.device and port_identity(port) != port_identity(held):
                 self._snapshot = None
                 return
-
-
-def _identity(port: PortInfo) -> tuple[str, int | None, int | None, str | None]:
-    return port.device, port.vid, port.pid, port.serial_number

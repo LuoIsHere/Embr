@@ -11,7 +11,6 @@ once); fixed firmware check their "path:" and "archive:" entries by name, path a
 import copy
 import dataclasses
 import datetime
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +19,14 @@ from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.pio import FRAMEWORK_PKG_KEY, PIO_SECTION, PioConfigs
 from embr.core.firmware.filecache import FileCache, Fingerprint, fingerprint
-from embr.core.firmware.files import FileState, confirm_entry, entry_file, entry_state
+from embr.core.firmware.files import (
+    FileState,
+    confirm_entry,
+    entry_file,
+    entry_state,
+    local_file,
+    path_key,
+)
 from embr.core.firmware.import_idf import (
     FLASHER_ARGS,
     PROJECT_DESCRIPTION,
@@ -98,7 +104,7 @@ class TrackStatus:
 def _files_updated(firmware: Firmware) -> datetime.datetime | None:
     """TrackStatus.files_updated: stats only. Build inputs that are no entries (sdkconfig,
     platformio.ini) and archived copies do not count."""
-    paths = [Path(e.file[len("path:") :]) for e in firmware.entries if e.file.startswith("path:")]
+    paths = [p for e in firmware.entries if (p := local_file(e)) is not None]
     newest = fingerprint(paths).newest_mtime_ns
     return None if newest is None else datetime.datetime.fromtimestamp(newest / 1e9)
 
@@ -239,13 +245,13 @@ class Tracker:
 
     def _following(self, project_root: Path) -> list[Firmware]:
         """PIO firmware following an env of `project_root`."""
-        key = os.path.normcase(str(project_root.resolve()))
+        key = path_key(project_root)
         return [
             f
             for f in self._ctx.firmware.all()
             if f.source == Source.PIO_BUILD
             and f.build_ref is not None
-            and os.path.normcase(str(Path(f.build_ref.path).resolve())) == key
+            and path_key(Path(f.build_ref.path)) == key
         ]
 
     def mark_seen(self, firmware_id: str) -> None:
