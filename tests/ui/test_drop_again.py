@@ -45,7 +45,7 @@ def test_a_sidebar_drop_of_the_same_files_adds_nothing(
     window: EmbrWindow, tmp_path: Path, notices: list[list[str]]
 ) -> None:
     firmware_id, files = _fixed(window, tmp_path)
-    window._drop_on_firmware(firmware_id, files, None, [])
+    window.library_actions._drop_on_firmware(firmware_id, files, None, [])
     assert sorted(_names(window, firmware_id)) == ["a.bin", "b.bin"]
     assert notices == [["Already in this firmware, content unchanged: a.bin, b.bin"]]
 
@@ -56,7 +56,7 @@ def test_a_dropped_changed_file_is_confirmed_not_added(
     firmware_id, files = _fixed(window, tmp_path)
     files[0].write_bytes(b"\x07" * 80)  # overwritten on disk
 
-    window._drop_on_firmware(firmware_id, files, None, [])
+    window.library_actions._drop_on_firmware(firmware_id, files, None, [])
     assert notices == []  # something was done: the log says what
     log = window.log_panel.log.toPlainText()
     assert "a.bin: changed content accepted" in log

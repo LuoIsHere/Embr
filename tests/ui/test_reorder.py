@@ -363,5 +363,5 @@ def test_a_selected_row_off_screen_keeps_its_colour(window: EmbrWindow) -> None:
     above = sum(tree.indexRowSizeHint(tree.indexFromItem(r)) for r in rows if r is not None)
     picture = sort.overlay._pictures[block.key].toImage()
     colour = picture.pixelColor(8, above + 4).name()
-    assert colour == window._palette.sel.lower()
+    assert colour == window.palette.sel.lower()
     _mouse(tree, QEvent.Type.MouseButtonRelease, QPoint(-5, -5), held=False)

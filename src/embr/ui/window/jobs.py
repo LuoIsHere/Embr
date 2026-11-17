@@ -207,7 +207,7 @@ class JobController:
         self.last_outcome = outcome
         self._kind = None
         self._window.connection.set_running(False)
-        self._window.allow_restart()  # the language dialog's Restart waited for the job
+        self._window.appearance.allow_restart()  # the language dialog's Restart waited for the job
         if self._window.right_panel.ports_pending:
             self._window.right_panel.apply_ports()
         if outcome.result == RecordResult.FAILED and _port_unavailable(outcome.message):
