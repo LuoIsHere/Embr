@@ -638,6 +638,10 @@ class Sidebar(QWidget):
         self._selected: tuple[str, str] | None = None
         self._dimmed: Mapping[str, str] = {}
         self._busy_id: str | None = None
+        self._built: tuple[object, ...] | None = None
+        """What the rows were last built from; None when they must be built again."""
+        self._built_current: Node | None = None
+        """The node of the current row right after that build."""
 
     def _typed(self, _text: str) -> None:
         self._search_timer.start()  # restarted by every key
@@ -677,8 +681,13 @@ class Sidebar(QWidget):
             busy_id,
         )
         if self.tree.sorting():  # the rows being dragged stay; shown when the drag ends
+            self._built = None
             return
-        self.tree.sortable = not self.search.text().strip()
+        query = self.search.text().strip()
+        built = (data, selected, dict(dimmed), busy_id, frozenset(self._folded), query)
+        if built == self._built and self.tree.node(self.tree.currentItem()) == self._built_current:
+            return  # the same rows (an edit that changes nothing here): rebuilding takes long
+        self.tree.sortable = not query
         self.tree.read_only = frozenset(p.id for p in data.projects if p.read_only)
         scroll = self.tree.verticalScrollBar().value()
         self.tree.clear()
@@ -729,6 +738,8 @@ class Sidebar(QWidget):
         self.tree.fit_spare()
         self.tree.verticalScrollBar().setValue(scroll)
         self.tree.rows_rebuilt()
+        self._built = built
+        self._built_current = self.tree.node(self.tree.currentItem())
 
     def _header(self, text: str, node: Node | None = None) -> None:
         widget = QWidget()
@@ -826,6 +837,7 @@ class Sidebar(QWidget):
     def _sort_finished(self) -> None:
         """Shown again after a reorder: what came meanwhile, and the press on a project row
         no longer shows it selected (a drag is not a click)."""
+        self._built = None  # the drag moved rows
         if self._data is not None:
             self.show_tree(self._data, self._selected, self._dimmed, self._busy_id)
 

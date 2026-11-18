@@ -519,6 +519,8 @@ class EmbrWindow(FrameWindow):
         never refresh the sidebar under them)."""
         if super().eventFilter(watched, event):
             return True
+        if event.type() not in (QEvent.Type.MouseButtonRelease, QEvent.Type.DragEnter):
+            return False  # the type first: every event of the application passes here
         if not isinstance(watched, QWidget) or watched.window() is not self:
             return False
         if event.type() == QEvent.Type.MouseButtonRelease or (

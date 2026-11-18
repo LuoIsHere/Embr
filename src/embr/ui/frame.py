@@ -307,6 +307,9 @@ class FrameWindow(QMainWindow):
     # ---- resizing a frameless window from its border ----------------------------------
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        # every event of the application passes here: the type first, it is the cheapest
+        if event.type() not in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress):
+            return False
         if not isinstance(watched, QWidget) or watched.window() is not self or self.isMaximized():
             return False
         if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
