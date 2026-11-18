@@ -605,7 +605,7 @@ class Sidebar(QWidget):
             tr("fixed, add entries by hand")
         )
         self.new_menu.addAction(tr("Import ESP-IDF build…"), self.import_idf.emit).setToolTip(
-            tr("follows a build directory")
+            tr("follows a build folder")
         )
         self.new_menu.addAction(tr("Import PlatformIO build…"), self.import_pio.emit).setToolTip(
             tr("follows the build folders of PlatformIO envs")

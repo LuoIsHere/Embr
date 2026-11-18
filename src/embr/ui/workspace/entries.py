@@ -178,7 +178,7 @@ class EntriesTab(QWidget):
         row_layout = QHBoxLayout(add_row)
         row_layout.setContentsMargins(6, 0, 6, 0)
         row_layout.addWidget(self.add_button, 1)
-        self.from_build = label(tr("Entries come from the build directory"), tone="3")
+        self.from_build = label(tr("Entries come from the build folder"), tone="3")
         self.from_build.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.from_build.setToolTip(
             tr("To add files, archive this version (⋯ menu) or create a fixed firmware")
@@ -681,7 +681,9 @@ class EntriesTab(QWidget):
         remove = menu.addAction(tr("Remove entry"))
         remove.setEnabled(not derived)
         if derived:
-            remove.setToolTip(tr("Comes from the build output; untick it to leave it out"))
+            remove.setToolTip(
+                tr("Comes from the build output; clear its check box to leave it out")
+            )
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is relocate:
             name, _ = QFileDialog.getOpenFileName(

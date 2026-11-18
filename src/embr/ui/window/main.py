@@ -490,7 +490,7 @@ class EmbrWindow(FrameWindow):
         unticked = self._library.fit_entries(firmware_id, chip, self.identified_revision())
         if unticked:
             names = ", ".join(e.name for e in unticked)
-            self.note("note", f"[entries] unticked, not for this {chip}: {names}")
+            self.note("note", f"[entries] not for this {chip}, no longer enabled: {names}")
 
     # ---- search and placement --------------------------------------------------------
 

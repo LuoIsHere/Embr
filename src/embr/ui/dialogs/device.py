@@ -118,7 +118,7 @@ def erase_flash(parent: QWidget, port: str, info: InfoEvent) -> bool:
             ),
             tr(
                 "Everything is cleared, including NVS (Wi-Fi credentials and other stored data); "
-                "the firmware on the device will no longer start. A record is kept."
+                "the firmware on the board will no longer start. A record is kept."
             ),
         ],
         tr("Erase flash"),

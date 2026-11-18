@@ -193,7 +193,7 @@ def _warning(dialog: Dialog, text: str) -> QLabel:
 def _dump_warning(names: list[str]) -> str:
     listed = ", ".join(html.escape(n) for n in names)
     return tr(
-        f"<b>{listed}</b>: data read from a device. The package may hold Wi-Fi credentials "
+        f"<b>{listed}</b>: data read from a board. The package may hold Wi-Fi credentials "
         "and other secrets stored in NVS."
     )
 

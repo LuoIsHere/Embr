@@ -522,7 +522,7 @@ class LibraryActions:
         title = (
             tr("Env build folder (.pio\\build\\<env>)")
             if firmware.build_ref and firmware.build_ref.env
-            else tr("Build directory")
+            else tr("Build folder")
         )
         chosen = QFileDialog.getExistingDirectory(self._window, title, start)
         if not chosen:

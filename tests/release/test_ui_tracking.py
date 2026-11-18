@@ -132,7 +132,7 @@ def test_import_idf_build(
     doc = _doc(root, default_name)
     assert doc["source"] == "idf_build" and doc["build_ref"] == {"path": str(build)}
     ui.open_tab(window, "Parameters")
-    facts = ui.param_texts(window, "Build directory")
+    facts = ui.param_texts(window, "Build folder")
     assert any(str(build) in t for t in facts) and any(tr("exists") in t for t in facts), facts
     flash = ui.param_texts(window, "Flash mode / freq / size")
     assert tr("derived") in flash and not ui.param_combos(window, "Flash mode / freq / size")
@@ -147,7 +147,7 @@ def test_import_idf_build(
     )
     ui.drop_files_on_entries(window, [loose])  # refused: entries come from the build
     kit.wait_log(
-        window, "come from its build directory; archive this version or create a fixed firmware"
+        window, "come from its build folder; archive this version or create a fixed firmware"
     )
     assert len(ui.entries(window)) == len(expected)
 
@@ -289,7 +289,7 @@ def test_drop_build_folders_on_the_sidebar(
 
     def idf_dialog(driver: kit.DialogDriver) -> None:
         driver.wait_text("ESP-IDF")
-        assert driver.line_edit("Build directory (contains flasher_args.json)").text() == str(build)
+        assert driver.line_edit("Build folder (contains flasher_args.json)").text() == str(build)
         assert driver.combo("Place in").currentText() == "Drops"
         assert driver.combo("Group").currentText() == "G"
         driver.ok()

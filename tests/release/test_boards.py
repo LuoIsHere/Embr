@@ -156,7 +156,7 @@ def test_s3_usb_serial_jtag_auto_reset_and_watchdog_boot(
 
 
 HINT_MANUAL = (
-    "Flashed and verified. If the device did not restart on its own (usually when download "
+    "Flashed and verified. If the board did not restart on its own (usually when download "
     "mode was entered by hand), reset it manually."
 )
 

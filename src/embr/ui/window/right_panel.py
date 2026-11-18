@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 COMMAND_UNKNOWN = N_("(identify the board, or add entries with addresses, to see the command)")
 HINT_MANUAL_RESET = N_(
-    "Flashed and verified. If the device did not restart on its own (usually when download "
+    "Flashed and verified. If the board did not restart on its own (usually when download "
     "mode was entered by hand), reset it manually."
 )
 HINT_DOWNLOAD_MODE = N_(

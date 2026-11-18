@@ -224,7 +224,7 @@ class Operations:
             raise PlanError(f"{firmware.name}: identify the board to choose which entries to flash")
         enabled = [e for e in for_chip(self._ctx, firmware, chip, revision).entries if e.enabled]
         if not enabled:  # e.g. firmware for another chip: no job, no "ok" record of nothing
-            raise PlanError(f"{firmware.name}: no ticked entries for this {chip} board")
+            raise PlanError(f"{firmware.name}: no enabled entries for this {chip} board")
         archive, files = self._ctx.paths.archive, self._ctx.files
         bad = [e.name for e in enabled if entry_state(e, archive, files) != FileState.OK]
         if bad:

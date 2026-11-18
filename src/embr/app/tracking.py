@@ -380,7 +380,7 @@ class Tracker:
         self, firmware: Firmware, now: datetime.datetime
     ) -> tuple[Resolution, tuple[Path, ...]]:
         if firmware.build_ref is None:
-            return missing(firmware, N_("No build directory")), ()
+            return missing(firmware, N_("No build folder")), ()
         build_dir = Path(firmware.build_ref.path)
         fallback = (build_dir / FLASHER_ARGS, build_dir / PROJECT_DESCRIPTION)
         try:

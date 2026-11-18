@@ -161,7 +161,7 @@ class ParamsTab(QWidget):
         if firmware.source == Source.ARCHIVED:
             return tr("Archived from"), label(firmware.archived_from or "—", tone="2")
         if firmware.build_ref is not None:
-            return tr("Build directory"), self._build_dir(firmware)
+            return tr("Build folder"), self._build_dir(firmware)
         text = firmware.folder or "—"
         box = QWidget()
         column = QVBoxLayout(box)

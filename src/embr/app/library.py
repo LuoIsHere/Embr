@@ -1126,7 +1126,7 @@ def _refuse_tracking(firmware: Firmware) -> None:
     if firmware.source.tracking:
         raise TrackingEntriesError(
             N_(
-                f"Entries of {firmware.name} come from its build directory; archive this "
+                f"Entries of {firmware.name} come from its build folder; archive this "
                 "version or create a fixed firmware to add files"
             )
         )

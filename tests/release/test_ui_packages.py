@@ -111,7 +111,7 @@ def test_export_dialog_and_import_loose_firmware(
         if (
             ui.plain(
                 tr(
-                    "<b>C</b>: data read from a device. The package may hold Wi-Fi credentials and other secrets stored in NVS."  # noqa: E501
+                    "<b>C</b>: data read from a board. The package may hold Wi-Fi credentials and other secrets stored in NVS."  # noqa: E501
                 )
             )
             not in warning

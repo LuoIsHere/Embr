@@ -179,7 +179,7 @@ def for_chip(
 
 def merge_problem(context: AppContext, firmware: Firmware) -> str | None:
     """Why the enabled entries cannot be merged into one image, or None: they are for more
-    than one MCU ("Checked entries are for different MCUs: ESP32-P4 v3, ESP32-S3", by
+    than one MCU ("Enabled entries are for different MCUs: ESP32-P4 v3, ESP32-S3", by
     Mcu.label), or an enabled entry has no MCU ("No MCU set for storage.bin")."""
     mcus = firmware_mcus(context, firmware)
     found: set[Mcu] = set()
@@ -193,7 +193,7 @@ def merge_problem(context: AppContext, firmware: Firmware) -> str | None:
     found = _without_covered(found)
     if len(found) > 1:
         labels = ", ".join(sorted(m.label for m in found))
-        return N_(f"Checked entries are for different MCUs: {labels}")
+        return N_(f"Enabled entries are for different MCUs: {labels}")
     return None
 
 

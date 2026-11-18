@@ -114,7 +114,7 @@ OLD_JTAG = (
     "the board into download mode as described by its vendor."
 )
 MANUAL_RESET = (
-    "Flashed and verified. If the device did not restart on its own (usually when download "
+    "Flashed and verified. If the board did not restart on its own (usually when download "
     "mode was entered by hand), reset it manually."
 )
 ZH_QUICK = "快速烧录"

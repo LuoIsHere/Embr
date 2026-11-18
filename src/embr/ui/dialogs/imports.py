@@ -57,7 +57,7 @@ def import_idf(
     folder = QLineEdit()
     folder.setPlaceholderText(tr(r"e.g. D:\work\my_project\build"))
     row, browse = browse_row(folder)
-    dialog.body.addWidget(label(tr("Build directory (contains flasher_args.json)"), tone="3"))
+    dialog.body.addWidget(label(tr("Build folder (contains flasher_args.json)"), tone="3"))
     dialog.body.addLayout(row)
     preview = label("", tone="2", wrap=True)
     preview.setTextFormat(Qt.TextFormat.RichText)
@@ -152,7 +152,7 @@ def import_idf(
     show_existing.hide()
 
     def pick() -> None:
-        chosen = QFileDialog.getExistingDirectory(dialog, tr("Build directory"), folder.text())
+        chosen = QFileDialog.getExistingDirectory(dialog, tr("Build folder"), folder.text())
         if chosen:
             folder.setText(chosen)
             refresh()

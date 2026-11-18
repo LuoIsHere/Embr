@@ -32,10 +32,10 @@ TEXT: dict[str, str] = {
     "Reset policy": "复位策略",
     "{0} has no enabled entries": "{0} 没有勾选的条目",
     "No MCU set for {0}": "未为 {0} 设置 MCU",
-    "Checked entries are for different MCUs: {0}": "勾选的条目适用于不同的 MCU：{0}",
+    "Enabled entries are for different MCUs: {0}": "勾选的条目适用于不同的 MCU：{0}",
     "{0} cannot be merged now: {1}": "{0} 暂时不能合成：{1}",
     "{0}: not in the firmware's folder {1}": "{0}：不在固件文件夹 {1} 中",
-    "Entries of {0} come from its build directory; archive this version or create a fixed firmware to add files": (
+    "Entries of {0} come from its build folder; archive this version or create a fixed firmware to add files": (
         "{0} 的条目来自其构建目录；如需添加文件，请归档此版本或新建固定型固件"
     ),
     "{0} has no address": "{0} 没有地址",
@@ -68,7 +68,7 @@ TEXT: dict[str, str] = {
         "{0} 在显示（{1}）之后已变化；请核对后再按 Flash。"
     ),
     "This firmware type cannot be resolved here": "此类型的固件无法在此解析",
-    "No build directory": "没有构建目录",
+    "No build folder": "没有构建目录",
     "{0}: build output not found": "{0}：找不到构建产物",
     "No PlatformIO project and env": "没有 PlatformIO 工程与 env",
     "more than one partition table is enabled": "勾选了多个分区表",
@@ -300,7 +300,7 @@ TEXT: dict[str, str] = {
     "Import ESP-IDF build": "导入 ESP-IDF 构建",
     "Import": "导入",
     "e.g. D:\\work\\my_project\\build": "例如 D:\\work\\my_project\\build",
-    "Build directory (contains flasher_args.json)": "构建目录（含 flasher_args.json）",
+    "Build folder (contains flasher_args.json)": "构建目录（含 flasher_args.json）",
     "Use the build folder": "改用构建目录",
     "Show that firmware": "转到该固件",
     "The firmware follows the build: entries, chip, flash settings and reset modes are read from it each time. Rebuilds that only change file contents are followed automatically; other changes need confirming.": (
@@ -314,7 +314,7 @@ TEXT: dict[str, str] = {
         "<b>“{0}”已在跟随此构建目录。</b>一个构建目录只能被一个固件跟随。"
     ),
     "{0} · {1} · ESP-IDF {2} · {3} {4} {5}<br>{6}": "{0} · {1} · ESP-IDF {2} · {3} {4} {5}<br>{6}",
-    "Build directory": "构建目录",
+    "Build folder": "构建目录",
     "Import PlatformIO build": "导入 PlatformIO 构建",
     "e.g. D:\\work\\my_project\\.pio\\build\\esp32dev": "例如 D:\\work\\my_project\\.pio\\build\\esp32dev",
     "Env build folder (.pio\\build\\<env>)": "env 构建目录（.pio\\build\\<env>）",
@@ -385,7 +385,7 @@ TEXT: dict[str, str] = {
     "Erase the whole flash of the {0} on <b>{1}</b> (MAC {2})?": (
         "擦除 <b>{1}</b> 上 {0} 的整片 flash（MAC {2}）？"
     ),
-    "Everything is cleared, including NVS (Wi-Fi credentials and other stored data); the firmware on the device will no longer start. A record is kept.": (
+    "Everything is cleared, including NVS (Wi-Fi credentials and other stored data); the firmware on the board will no longer start. A record is kept.": (
         "所有内容都会被清除，包括 NVS（Wi-Fi 凭据和其他已保存的数据）；设备上的固件将无法启动。会保留一条记录。"
     ),
     "Read flash": "读取 flash",
@@ -458,7 +458,7 @@ TEXT: dict[str, str] = {
     "{0} New": "{0} 新建",
     "fixed, add entries by hand": "固定型，手动添加条目",
     "Import ESP-IDF build…": "导入 ESP-IDF 构建…",
-    "follows a build directory": "跟随一个构建目录",
+    "follows a build folder": "跟随一个构建目录",
     "Import PlatformIO build…": "导入 PlatformIO 构建…",
     "follows the build folders of PlatformIO envs": "跟随 PlatformIO env 的构建目录",
     "PROJECTS": "项目",
@@ -478,7 +478,7 @@ TEXT: dict[str, str] = {
     "(identify the board, or add entries with addresses, to see the command)": (
         "（识别设备，或添加带地址的条目后，即可显示命令）"
     ),
-    "Flashed and verified. If the device did not restart on its own (usually when download mode was entered by hand), reset it manually.": (
+    "Flashed and verified. If the board did not restart on its own (usually when download mode was entered by hand), reset it manually.": (
         "已烧录并校验。如果设备没有自行重启（通常是手动进入下载模式的情况），请手动复位。"
     ),
     "Identified. The chip stays in download mode so the next flash can start right away; reset the board to return to its application.": (
@@ -588,7 +588,7 @@ TEXT: dict[str, str] = {
     "{0} Add entry (or drop bin files here)": "{0} 添加条目（或将 bin 文件拖到此处）",
     "Files…": "文件…",
     "Attachment…": "附件…",
-    "Entries come from the build directory": "条目来自构建目录",
+    "Entries come from the build folder": "条目来自构建目录",
     "To add files, archive this version (⋯ menu) or create a fixed firmware": (
         "要添加文件，请归档此版本（⋯ 菜单）或新建固定型固件"
     ),
@@ -626,7 +626,7 @@ TEXT: dict[str, str] = {
     "Copy to firmware…": "复制到固件…",
     "Show in Explorer": "在资源管理器中显示",
     "Remove entry": "移除条目",
-    "Comes from the build output; untick it to leave it out": "来自构建产物；取消勾选即可不烧录",
+    "Comes from the build output; clear its check box to leave it out": "来自构建产物；取消勾选即可不烧录",
     "Re-locate {0}": "重新定位 {0}",
     "Copy entry": "复制条目",
     "Copy {0} to": "将 {0} 复制到",
@@ -742,7 +742,7 @@ TEXT: dict[str, str] = {
     "1 file ({0} bytes); it matches the package's list.": "1 个文件（{0} 字节），与包内清单一致。",
     "{0} files ({1} bytes); every file matches the package's list.": "{0} 个文件（{1} 字节），均与包内清单一致。",
     "Everything is created anew as archived firmware; the files go into the archive. Names that already exist get a numeric suffix.": "所有内容均新建为归档型固件，文件放入归档区。名称已存在时自动添加数字后缀。",
-    "<b>{0}</b>: data read from a device. The package may hold Wi-Fi credentials and other secrets stored in NVS.": "<b>{0}</b>：含有从设备读出的数据，包中可能含有 NVS 中保存的 Wi-Fi 凭据等敏感信息。",
+    "<b>{0}</b>: data read from a board. The package may hold Wi-Fi credentials and other secrets stored in NVS.": "<b>{0}</b>：含有从设备读出的数据，包中可能含有 NVS 中保存的 Wi-Fi 凭据等敏感信息。",
     "Save package": "保存包",
     "Not imported": "未导入",
     "<b>{0}</b> cannot be imported.": "<b>{0}</b> 无法导入。",
