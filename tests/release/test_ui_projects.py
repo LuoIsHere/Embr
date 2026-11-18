@@ -180,7 +180,7 @@ def test_groups_add_rename_remove(embr: Start, language: Language) -> None:
     kit.wait_log(window, "[group] added 'Main board'")
     group = ui.group_row(window, "Board kit", "Main board")
     assert tr("empty") in kit.all_texts(ui.row_widget(window, group))
-    assert tr("1 groups") in ui.header_texts(window)
+    assert tr("1 group") in ui.header_texts(window)
 
     ui.add_group(window, "Main board")  # duplicate: refused
     kit.wait_log(window, "[group] 'Main board' already exists")

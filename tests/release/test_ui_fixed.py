@@ -57,9 +57,9 @@ def test_new_fixed_firmware_and_add_files(
     assert kit.sidebar_names(window) == ["bootloader"]
     rows = ui.entries(window)
     assert [(e.address, e.name, e.kind, e.source) for e in rows] == [
-        ("0x0", BOOT, "bootloader", "auto"),
-        ("0x8000", TABLE, "partition_table", "auto"),
-        ("0x10000", APP, "app", "auto"),
+        ("0x0", BOOT, "bootloader", ui.t("auto")),
+        ("0x8000", TABLE, "partition_table", ui.t("auto")),
+        ("0x10000", APP, "app", ui.t("auto")),
     ]
     assert all(e.enabled and e.checkable for e in rows)
     assert [e.mcu for e in rows if not e.mcu_choosable] == ["ESP32-S3", "ESP32-S3"]
@@ -170,7 +170,8 @@ def test_drop_files_on_the_sidebar(embr: Start, language: Language, tmp_path: Pa
     outside_reason: list[str] = []
     with kit.expect_dialog(ui.record_and_ok(outside_reason), title="Nothing added"):
         ui.drop_files_on_row(window, kit.sidebar_row(window, "Dropped"), [outside])
-    assert f"assets.bin: not in the firmware's folder {folder}" in outside_reason[0]
+    expected = ui.plain(tr(f"assets.bin: not in the firmware's folder {folder}"))
+    assert expected in outside_reason[0], outside_reason[0]
     assert "assets.bin" not in ui.entry_names(window)
 
     sub = folder / "sub"
@@ -319,7 +320,7 @@ def test_entry_address_editing(
 
     ui.set_address(window, APP, "0x20000")
     row = ui.entry(window, APP)
-    assert (row.address, row.source) == ("0x20000", "manual")
+    assert (row.address, row.source) == ("0x20000", ui.t("manual"))
     doc = _entry_doc(root, "Addr", APP)
     assert (doc["placement"], doc["address_source"], doc["auto_address"]) == (
         "address:0x20000",
@@ -339,12 +340,12 @@ def test_entry_address_editing(
     assert _entry_doc(root, "Addr", APP)["placement"] == "address:0x10000"
     problems: list[str] = []
     shown = (ui.entry(window, APP).address, ui.entry(window, APP).source)
-    if shown != ("0x10000", "auto"):
+    if shown != ("0x10000", ui.t("auto")):
         problems.append(f"after clearing, the row shows {shown} (restored 0x10000 / auto is saved)")
 
     ui.set_address(window, APP, "0x30000")
     ui.set_address(window, APP, "10000")  # the detected value again: auto
-    assert ui.entry(window, APP).source == "auto"
+    assert ui.entry(window, APP).source == ui.t("auto")
     assert _entry_doc(root, "Addr", APP)["address_source"] == "auto"
 
     ui.set_address(window, TABLE, "0x0")  # overlaps the bootloader
@@ -428,7 +429,7 @@ def test_mcu_column_and_multi_chip_firmware(
 
     with kit.expect_dialog(merge, title="Merge to .bin"):
         kit.click(window.firmware_view.entries.merge_button)
-    if not ("esp32s3" in merge_seen[0] and "esp32p4" in merge_seen[0]):
+    if not ("ESP32-S3" in merge_seen[0] and "ESP32-P4" in merge_seen[0]):
         problems.append(f"the merge dialog does not name both chips: {merge_seen[0]}")
     ui.no_problems(problems)
 

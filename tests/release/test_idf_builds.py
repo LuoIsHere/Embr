@@ -19,6 +19,7 @@ import builds_kit as bk
 import pytest
 import release_kit as kit
 
+from embr.core.chipinfo import display_name
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.tracking import ChangeKind, entry_key
 from embr.core.history import RecordResult
@@ -166,7 +167,8 @@ def test_set_target_s3_to_p4_blocks_then_confirms_then_flashes_tab5_only(
     time.sleep(bk.SETTLE_S)
     switched = bk.wait_state(app, name, "target_switched")
     assert switched.configured_target == "esp32p4"
-    assert "esp32p4" in bk.banner_text(window) and "esp32s3" in bk.banner_text(window)
+    banner = bk.banner_text(window)
+    assert display_name("esp32p4") in banner and display_name("esp32s3") in banner, banner
     bk.identify(window, uart)
     kit.click_sidebar(window, name)
     assert not window.connection.flash.isEnabled()
@@ -184,7 +186,8 @@ def test_set_target_s3_to_p4_blocks_then_confirms_then_flashes_tab5_only(
     _build(idf_project)
     changed = bk.wait_state(app, name, "needs_confirmation", timeout=60)
     assert changed.changes[0].kind == ChangeKind.CHIP, [c.message for c in changed.changes]
-    assert "esp32s3" in changed.changes[0].message and "esp32p4" in changed.changes[0].message
+    message = changed.changes[0].message
+    assert display_name("esp32s3") in message and display_name("esp32p4") in message, message
     bk.identify(window, tab5)
     kit.click_sidebar(window, name)
     assert not window.connection.flash.isEnabled()

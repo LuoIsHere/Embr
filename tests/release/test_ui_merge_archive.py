@@ -140,10 +140,10 @@ def test_merge_to_bin(
 def test_merge_target_exists_or_is_not_writable(
     embr: Start, file_dialogs: kit.FileDialogs, language: Language, tmp_path: Path
 ) -> None:
-    """Abnormal operations: an existing target
-    file of Merge to .bin… is overwritten directly, without a Replace file question, and
-    nothing else changes; a folder that cannot be written gives an error, no firmware and
-    no crash."""
+    """Abnormal operations: an existing target file of Merge to .bin… is replaced only
+    after the Replace file question is answered (declined: the file stays and the merge
+    dialog stays open), and nothing else changes; a folder that cannot be written gives an
+    error, no firmware and no crash."""
     app = embr(language=language)
     window, root = app.window, app.paths.root
     bins = tmp_path / "bins"
@@ -157,22 +157,32 @@ def test_merge_target_exists_or_is_not_writable(
     problems: list[str] = []
     asked: list[str] = []
 
-    def replace(driver: kit.DialogDriver) -> None:
+    def decline(driver: kit.DialogDriver) -> None:
         asked.append(driver.text())
         driver.cancel()
+
+    def ok_then_close(merge: kit.DialogDriver) -> None:
+        merge.ok()  # the Replace file question opens and is declined
+        if not merge.dialog.isVisible():
+            problems.append("declining the Replace file question closed the merge dialog")
+        else:
+            merge.cancel()
 
     names = kit.sidebar_names(window)
     docs = ui.firmware_docs(root)
     sources = kit.snapshot(bins)
     neighbours = {k: v for k, v in kit.snapshot(out).items() if k != existing.name}
-    try:
-        with kit.expect_dialog(replace, title="Replace file", timeout=3):
-            _merge(window, file_dialogs, existing, add=False)
-    except AssertionError as exc:
-        if "did not appear" not in str(exc):
-            raise
-    if asked:
-        problems.append(f"a Replace file question for an existing target: {asked[0]}")
+    with kit.expect_dialog(decline, title="Replace file"):
+        _merge(window, file_dialogs, existing, add=False, then=ok_then_close)
+    if existing.name not in (asked or [""])[0]:
+        problems.append(f"the Replace file question does not name the file: {asked}")
+    if existing.read_bytes() != b"old target":
+        problems.append("the existing target changed although replacing it was declined")
+    if "[merge] written" in kit.log_text(window):
+        problems.append("a merge was reported after the Replace file question was declined")
+
+    with kit.expect_dialog(ui.press("Replace"), title="Replace file"):
+        _merge(window, file_dialogs, existing, add=False)
     kit.wait_log(window, f"[merge] written to {existing}")
     kit.assert_no_dialog("Replace file", seconds=1.0)
     if existing.read_bytes() != REFERENCE.read_bytes():

@@ -621,7 +621,9 @@ def _cell_edit(window: Any, name: str, column: int) -> QLineEdit:
 
 
 def set_address(window: Any, name: str, text: str) -> None:
-    """Type into the entry's address cell and press Enter (editingFinished)."""
+    """Type into the entry's address cell, press Enter (editingFinished) and move the
+    focus away, as a user does next: the table is rebuilt only once none of its fields has
+    the focus, so the source column shows "manual" after that."""
     kit.click(_cell_edit(window, name, 1))
     kit.pump(30)  # focus leaving another cell may refresh the table: find the cell again
     edit = _cell_edit(window, name, 1)
@@ -631,6 +633,7 @@ def set_address(window: Any, name: str, text: str) -> None:
     if text:
         QTest.keyClicks(edit, text)
     QTest.keyClick(edit, Qt.Key.Key_Return)
+    edit.clearFocus()
     kit.pump(50)
 
 
@@ -800,7 +803,7 @@ def clipped(
     elide or wrap, buttons). Scroll area contents are measured against their viewport."""
     from PySide6.QtWidgets import QAbstractScrollArea
 
-    from embr.ui.widgets import ElidedLabel
+    from embr.ui.widgets import ElidedLabel, Switch
 
     problems: list[str] = []
     for widget in visible_widgets(root):
@@ -822,6 +825,8 @@ def clipped(
                 break
             parent = parent.parentWidget()
         if isinstance(widget, ElidedLabel) or (isinstance(widget, QLabel) and widget.wordWrap()):
+            continue
+        if isinstance(widget, Switch):  # draws no text; its label beside it is measured
             continue
         if isinstance(widget, QLabel) and not widget.pixmap().isNull() and not widget.text():
             continue
@@ -908,8 +913,6 @@ KEEP_ENGLISH = {
     "uart",
     "nvs",
     "wi-fi",
-    "auto",
-    "manual",
     "partition",
     "erase_all",
     "sha256",

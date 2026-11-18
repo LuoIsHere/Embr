@@ -420,7 +420,7 @@ def test_build_changes_that_need_confirmation(
     assert ui.entry(window, "hello_renamed.bin").address == "0x20000"
 
     ui.set_address(window, "hello_renamed.bin", "0x30000")  # manual, then the build moves it
-    assert ui.entry(window, "hello_renamed.bin").source == "manual"
+    assert ui.entry(window, "hello_renamed.bin").source == ui.t("manual")
     _move_app(build, "hello_renamed.bin", "hello_renamed.bin", "0x40000")
     expect_confirmation("0x30000", "0x40000")  # the build's new address and the kept manual one
     assert ui.entry(window, "hello_renamed.bin").address == "0x30000"

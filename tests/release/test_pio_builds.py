@@ -28,6 +28,7 @@ import pytest
 import release_kit as kit
 from PySide6.QtWidgets import QCheckBox, QLineEdit
 
+from embr.core.chipinfo import display_name
 from embr.core.firmware.tracking import ChangeKind, ResolveState
 from embr.core.history import RecordResult
 
@@ -212,7 +213,7 @@ def test_board_change_switches_target_until_rebuilt_then_confirms(
     switched = bk.wait_state(app, "esp32dev", "target_switched", timeout=60)
     assert switched.configured_target == "esp32s3"
     banner = bk.banner_text(window)
-    assert "esp32s3" in banner and "esp32" in banner, banner
+    assert display_name("esp32s3") in banner and display_name("esp32") in banner, banner
     assert not window.connection.flash.isEnabled()
 
     _build(pio_project, "esp32dev")

@@ -573,8 +573,14 @@ def fixture_pairs(sample: str) -> list[tuple[int, Path]]:
 
 
 def combo_devices(window: Any) -> list[str]:
+    """Ports the port list offers. The grey "<device> · unavailable" item of a chosen port
+    that is away, and "No serial port found", carry no port and are left out."""
     combo = cast(QComboBox, window.connection.port)
-    return [combo.itemText(i).split(" ", 1)[0] for i in range(combo.count())]
+    return [
+        combo.itemText(i).split(" ", 1)[0]
+        for i in range(combo.count())
+        if combo.itemData(i) is not None
+    ]
 
 
 def wait_combo_port(window: Any, device: str, present: bool = True, timeout: float = 20) -> None:
