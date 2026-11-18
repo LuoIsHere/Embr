@@ -1,5 +1,6 @@
 """The sidebar builds its rows again only when what they show changed: an edit of the
-firmware page that leaves the sidebar as it is (an entry unticked) keeps its rows."""
+firmware page that leaves the sidebar as it is (an entry no longer enabled) keeps its rows,
+and selecting another row only moves the current row."""
 
 from pathlib import Path
 
@@ -47,6 +48,18 @@ def test_unticking_an_entry_keeps_the_sidebar_rows(window: EmbrWindow, tmp_path:
 
     assert not window.library.firmware(firmware_id).entries[0].enabled
     assert _row(window, firmware_id)[1] is before
+
+
+def test_selecting_another_firmware_keeps_the_rows(window: EmbrWindow, tmp_path: Path) -> None:
+    firmware_id = _firmware(window, tmp_path)
+    other = window.library.create_firmware("other").id
+    window.select_firmware(firmware_id)
+    item, before = _row(window, other)
+
+    window.select_firmware(other)
+
+    assert _row(window, other)[1] is before
+    assert window.sidebar_panel.tree.currentItem() is item
 
 
 def test_a_rename_builds_the_rows_again(window: EmbrWindow, tmp_path: Path) -> None:

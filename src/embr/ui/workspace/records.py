@@ -1,8 +1,9 @@
 """The Records tab: the flash records of a firmware."""
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -14,6 +15,7 @@ from embr.ui.connection import CONNECTION_LABELS
 from embr.ui.owner import Owner
 from embr.ui.widgets import (
     ClickRow,
+    button,
     clear_layout,
     label,
     small,
@@ -26,6 +28,8 @@ RESULT_TAGS = {
     RecordResult.FAILED: "bad",
     RecordResult.CANCELLED: "bad",
 }
+PAGE = 50
+"""Records shown at first, and added by each click on the button below them."""
 
 
 class RecordsTab(QWidget):
@@ -47,22 +51,64 @@ class RecordsTab(QWidget):
         layout.addStretch(1)
         self._shown: tuple[str, int] | None = None
         """(firmware id, history version) of the rows shown."""
+        self._rows = 0
+        """Records shown, newest first."""
+        self._more: QPushButton | None = None
+        """Shows earlier records; None when all are shown."""
 
     def show_firmware(self, firmware: Firmware) -> None:
-        """Rows for the firmware's records; kept as they are while neither the firmware nor
+        """Rows for the firmware's newest records (PAGE, or as many as were shown of the same
+        firmware before a record was added); kept as they are while neither the firmware nor
         the records changed (records are snapshots: nothing else alters a row)."""
         history = self._owner.context.history
         shown = (firmware.id, history.version)
         if shown == self._shown:
             return
-        self._shown = shown
+        same = self._shown is not None and self._shown[0] == firmware.id
+        self._build(firmware.id, max(self._rows, PAGE) if same else PAGE)
+
+    def _build(self, firmware_id: str, rows: int) -> None:
+        history = self._owner.context.history
+        self._shown = (firmware_id, history.version)
         clear_layout(self.list)
-        records = history.query(firmware_id=firmware.id)
+        self._more = None
+        records = history.query(firmware_id=firmware_id, limit=rows)
+        self._rows = len(records)
         if not records:
             self.list.addWidget(label(tr("No flash records yet."), tone="3"))
             return
         for record in records:
             self.list.addWidget(self._row(record))
+        self._offer_more(firmware_id)
+
+    def _offer_more(self, firmware_id: str) -> None:
+        left = self._owner.context.history.count(firmware_id=firmware_id) - self._rows
+        if left <= 0:
+            return
+        count = min(PAGE, left)
+        text = tr("Show 1 earlier record") if count == 1 else tr(f"Show {count} earlier records")
+        self._more = button(text)
+        self._more.clicked.connect(self._show_more)
+        self.list.addWidget(self._more, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def _show_more(self) -> None:
+        """The next PAGE records below the shown ones; the shown rows stay (all rows are
+        built again when a record was added meanwhile, so none is shown twice)."""
+        if self._shown is None or self._more is None:
+            return
+        firmware_id, version = self._shown
+        history = self._owner.context.history
+        if history.version != version:
+            self._build(firmware_id, self._rows + PAGE)
+            return
+        self.list.removeWidget(self._more)
+        self._more.deleteLater()
+        self._more = None
+        records = history.query(firmware_id=firmware_id, limit=PAGE, offset=self._rows)
+        for record in records:
+            self.list.addWidget(self._row(record))
+        self._rows += len(records)
+        self._offer_more(firmware_id)
 
     def _row(self, record: FlashRecord) -> QWidget:
         row = RecordRow(record.log_file, record.id)

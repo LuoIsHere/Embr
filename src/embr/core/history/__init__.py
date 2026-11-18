@@ -143,9 +143,10 @@ class History:
         mac: str | None = None,
         operation: Operation | None = None,
         limit: int | None = None,
+        offset: int = 0,
     ) -> list[FlashRecord]:
-        """Records matching every filter given (None = no filter), newest first. `mac` is
-        normalized first, so any accepted spelling matches."""
+        """Records matching every filter given (None = no filter), newest first, skipping the
+        first `offset`. `mac` is normalized first, so any accepted spelling matches."""
         where: list[str] = []
         params: list[object] = []
         for column, value in (
@@ -160,10 +161,17 @@ class History:
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         # ids are ULIDs, so id order is creation order
         clause += " ORDER BY timestamp DESC, id DESC"
-        if limit is not None:
-            clause += " LIMIT ?"
-            params.append(limit)
+        if limit is not None or offset:
+            clause += " LIMIT ? OFFSET ?"
+            params += [-1 if limit is None else limit, offset]
         return self._select(clause, params)
+
+    def count(self, *, firmware_id: str) -> int:
+        """The number of records of the firmware."""
+        row = self._db.execute(
+            "SELECT COUNT(*) FROM flash_records WHERE firmware_id = ?", (firmware_id,)
+        ).fetchone()
+        return int(row[0])
 
     def _select(self, clause: str, params: list[object]) -> list[FlashRecord]:
         """Two queries whatever the number of records: the records, then the entries of

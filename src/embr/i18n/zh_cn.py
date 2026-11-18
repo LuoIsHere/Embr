@@ -676,6 +676,8 @@ TEXT: dict[str, str] = {
         "点击记录可显示当天日志中的对应段落（logs/YYYY-MM-DD.log）。"
     ),
     "No flash records yet.": "尚无烧录记录。",
+    "Show 1 earlier record": "显示更早的 1 条记录",
+    "Show {0} earlier records": "显示更早的 {0} 条记录",
     "Entries": "条目",
     "Parameters": "参数",
     "Records": "记录",

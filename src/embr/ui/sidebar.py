@@ -639,9 +639,8 @@ class Sidebar(QWidget):
         self._dimmed: Mapping[str, str] = {}
         self._busy_id: str | None = None
         self._built: tuple[object, ...] | None = None
-        """What the rows were last built from; None when they must be built again."""
-        self._built_current: Node | None = None
-        """The node of the current row right after that build."""
+        """What the rows were last built from (the selection aside); None when they must be
+        built again."""
 
     def _typed(self, _text: str) -> None:
         self._search_timer.start()  # restarted by every key
@@ -684,9 +683,10 @@ class Sidebar(QWidget):
             self._built = None
             return
         query = self.search.text().strip()
-        built = (data, selected, dict(dimmed), busy_id, frozenset(self._folded), query)
-        if built == self._built and self.tree.node(self.tree.currentItem()) == self._built_current:
-            return  # the same rows (an edit that changes nothing here): rebuilding takes long
+        built = (data, dict(dimmed), busy_id, frozenset(self._folded), query)
+        if built == self._built:  # the same rows: rebuilding them takes long
+            self._select(selected)
+            return
         self.tree.sortable = not query
         self.tree.read_only = frozenset(p.id for p in data.projects if p.read_only)
         scroll = self.tree.verticalScrollBar().value()
@@ -739,7 +739,26 @@ class Sidebar(QWidget):
         self.tree.verticalScrollBar().setValue(scroll)
         self.tree.rows_rebuilt()
         self._built = built
-        self._built_current = self.tree.node(self.tree.currentItem())
+
+    def _select(self, selected: tuple[str, str] | None) -> None:
+        """Make the row of `selected` the current one, as a build does: no row when it is not
+        shown (folded, or left out by the search). Also puts back a current row moved by keys
+        or by the press that started a drag."""
+        scroll = self.tree.verticalScrollBar().value()
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            node = self.tree.node(item)
+            if item is None or node is None or selected is None or node.kind != selected[0]:
+                continue
+            if (node.firmware_id if node.kind == "firmware" else node.project_id) == selected[1]:
+                if self.tree.currentItem() is not item:
+                    self.tree.setCurrentItem(item)
+                break
+        else:
+            if self.tree.currentItem() is not None or self.tree.selectedItems():
+                self.tree.clearSelection()
+                self.tree.setCurrentIndex(QModelIndex())
+        self.tree.verticalScrollBar().setValue(scroll)
 
     def _header(self, text: str, node: Node | None = None) -> None:
         widget = QWidget()

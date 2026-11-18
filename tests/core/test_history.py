@@ -117,6 +117,19 @@ def test_query_filters_newest_first_with_limit(history: History) -> None:
     assert ids(history.query(limit=2)) == [r4.id, r3.id]
 
 
+def test_a_page_of_records_and_their_count(history: History) -> None:
+    records = [_record(timestamp=f"2026-10-29T1{i}:00:00") for i in range(5)]
+    for record in records:
+        history.add(record)
+    history.add(_record(firmware_id=new_id()))
+    newest = records[::-1]
+
+    assert history.query(firmware_id=FIRMWARE, limit=2, offset=2) == newest[2:4]
+    assert history.query(firmware_id=FIRMWARE, offset=3) == newest[3:]
+    assert history.count(firmware_id=FIRMWARE) == 5
+    assert history.count(firmware_id=new_id()) == 0
+
+
 def test_each_record_reads_back_its_own_entries(history: History) -> None:
     """The entries of all records come from one query; each record still gets its own, in
     their order, also with a filter and a limit."""
