@@ -175,6 +175,50 @@ def test_a_project_dragged_down_lands_below(window: EmbrWindow) -> None:
     assert shown == ["Bravo", "Charlie", "Alpha"]  # the sidebar was rebuilt in that order
 
 
+def _count_builds(tree: FirmwareTree, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    builds = [0]
+    original = tree.rows_rebuilt
+
+    def counted() -> None:
+        builds[0] += 1
+        original()
+
+    monkeypatch.setattr(tree, "rows_rebuilt", counted)
+    return builds
+
+
+def test_a_drop_builds_the_rows_once(window: EmbrWindow, monkeypatch: pytest.MonkeyPatch) -> None:
+    """In the new order: the rows never moved during the drag, only their pictures did."""
+    for name in ("Alpha", "Bravo", "Charlie"):
+        window.library.create_project(name)
+    tree = _shown(window)
+    builds = _count_builds(tree, monkeypatch)
+    start = _at(tree, _row(tree, "project", "Alpha"))
+
+    _drag(tree, start, _at(tree, _row(tree, "project", "Charlie"), 8))
+
+    assert _project_names(window) == ["Bravo", "Charlie", "Alpha"]
+    assert builds == [1]
+
+
+def test_a_cancelled_drag_builds_no_rows(
+    window: EmbrWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("Alpha", "Bravo", "Charlie"):
+        window.library.create_project(name)
+    tree = _shown(window)
+    builds = _count_builds(tree, monkeypatch)
+    end = _at(tree, _row(tree, "project", "Charlie"), 8)
+    _press_and_move(tree, _at(tree, _row(tree, "project", "Alpha")), end)
+
+    QTest.keyClick(tree, Qt.Key.Key_Escape)
+    _mouse(tree, QEvent.Type.MouseButtonRelease, end, held=False)
+    QApplication.processEvents()
+
+    assert _project_names(window) == ["Alpha", "Bravo", "Charlie"]
+    assert builds == [0]
+
+
 def test_a_group_moves_within_its_project(window: EmbrWindow) -> None:
     project_id = _station(window)
     tree = _shown(window)

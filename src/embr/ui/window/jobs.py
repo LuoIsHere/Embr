@@ -204,6 +204,10 @@ class JobController:
     def _finished(self, outcome: object) -> None:
         if not isinstance(outcome, JobOutcome):
             return
+        with self._window.refreshes_held():  # ports that changed meanwhile refresh too
+            self._finish(outcome)
+
+    def _finish(self, outcome: JobOutcome) -> None:
         self.last_outcome = outcome
         self._kind = None
         self._window.connection.set_running(False)

@@ -2,6 +2,7 @@
 
 import contextlib
 import html
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
 
@@ -79,6 +80,10 @@ class EmbrWindow(FrameWindow):
         """The selection the workspace page was last built for."""
         self._workspace_stale = False
         """A refresh waited for a text field being edited."""
+        self._held = 0
+        """Depth of refreshes_held() blocks."""
+        self._held_parts: set[str] = set()
+        """Parts asked to refresh inside them: "workspace", "tree", "panel"."""
         self._closed = False
         """Set by closeEvent: queued refresh rounds stop."""
         self._error_shown = False
@@ -185,11 +190,12 @@ class EmbrWindow(FrameWindow):
         first = self.first_firmware()
         if first is not None:
             self._selection = ("firmware", first)
-        self.ports.start()
-        if not self.ports.ports:
-            self.connection.set_ports(())
-        self.recheck.start()
-        self.changed()
+        with self.refreshes_held():  # the first port list refreshes too
+            self.ports.start()
+            if not self.ports.ports:
+                self.connection.set_ports(())
+            self.recheck.start()
+            self.changed()
 
     # ---- Owner ------------------------------------------------------------------------
 
@@ -238,6 +244,31 @@ class EmbrWindow(FrameWindow):
         self.refresh_workspace()
         self.refresh_tree()
         self.right_panel.refresh()
+
+    @contextlib.contextmanager
+    def refreshes_held(self) -> Generator[None]:
+        """Refreshes asked for inside are done once when the outermost block ends, in the
+        order of changed(): one event handled in several steps (startup, the end of a job)
+        builds each part once. Nothing inside may rely on a refresh having happened."""
+        self._held += 1
+        try:
+            yield
+        finally:
+            self._held -= 1
+            if not self._held:
+                parts, self._held_parts = self._held_parts, set()
+                if "workspace" in parts:
+                    self.refresh_workspace()
+                if "tree" in parts:
+                    self.refresh_tree()
+                if "panel" in parts:
+                    self.right_panel.refresh()
+
+    def refresh_held(self, part: str) -> bool:
+        """Inside refreshes_held(): note `part` for the end of the block and return True."""
+        if self._held:
+            self._held_parts.add(part)
+        return bool(self._held)
 
     def note(self, level: str, text: str) -> None:
         self.log_panel.log_lines([(level, text)])
@@ -345,6 +376,8 @@ class EmbrWindow(FrameWindow):
         return tree.standalone[0].id if tree.standalone else None
 
     def refresh_tree(self) -> None:
+        if self.refresh_held("tree"):
+            return
         snapshot = self.memory.snapshot
         self.sidebar_panel.show_tree(
             self._library.tree(self._query),
@@ -416,6 +449,8 @@ class EmbrWindow(FrameWindow):
         refresh of the same page waits until the field is left (job ended, port changed, a
         check), so nothing typed is lost; showing another page first lets the field save what
         was typed, as leaving it does."""
+        if self.refresh_held("workspace"):
+            return
         field = self._editing_field()
         if field is not None:
             if self._selection == self._built_for:

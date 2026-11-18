@@ -68,6 +68,8 @@ class ConnectionPresenter:
         """Ports changed during a job; the list follows once it ends."""
 
     def refresh(self) -> None:
+        if self._window.refresh_held("panel"):
+            return
         self._window.header.setVisible(self._window.selection is not None)
         port = self._window.connection.selected_port()
         snapshot = self._window.memory.snapshot

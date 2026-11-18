@@ -836,8 +836,9 @@ class Sidebar(QWidget):
 
     def _sort_finished(self) -> None:
         """Shown again after a reorder: what came meanwhile, and the press on a project row
-        no longer shows it selected (a drag is not a click)."""
-        self._built = None  # the drag moved rows
+        no longer shows it selected (a drag is not a click). The rows themselves never moved
+        (the overlay did): with nothing new they stay, and the new order is shown by the
+        refresh that saves it."""
         if self._data is not None:
             self.show_tree(self._data, self._selected, self._dimmed, self._busy_id)
 
