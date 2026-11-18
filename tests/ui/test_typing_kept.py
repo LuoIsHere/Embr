@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QLayout, QLineEdit, QWidget
 
 from embr.ui.window import EmbrWindow
 from embr.ui.workspace import NotesEdit
@@ -122,3 +122,65 @@ def test_a_waiting_refresh_runs_when_an_unchanged_field_is_left(
     QApplication.processEvents()
     assert not window._workspace_stale
     assert _name_field(window, "renamed elsewhere").isVisible()
+
+
+def _check_texts(window: EmbrWindow) -> list[str]:
+    """Texts of the rows in the Checks list now (rows replaced earlier are only deleted
+    later, so they are not looked up among the panel's children)."""
+    texts: list[str] = []
+    pending: list[QLayout] = [window.connection.checks]
+    while pending:
+        layout = pending.pop()
+        for index in range(layout.count()):
+            item = layout.itemAt(index)
+            if item is None:
+                continue
+            widget, nested = item.widget(), item.layout()
+            if isinstance(widget, QLabel):
+                texts.append(widget.text())
+            if nested is not None:
+                pending.append(nested)
+    return texts
+
+
+def _type_address(window: EmbrWindow, row: int, text: str) -> None:
+    """Type into the address cell of `row` and press Enter; the focus stays in the cell."""
+    field = window.firmware_view.entries.table.cellWidget(row, 1).findChild(QLineEdit)
+    assert field is not None
+    _type(field, "")
+    field.selectAll()
+    QTest.keyClicks(field, text)
+    QTest.keyClick(field, Qt.Key.Key_Return)
+    QApplication.processEvents()
+
+
+def test_the_checks_follow_an_address_typed_while_the_table_waits(
+    window: EmbrWindow, tmp_path: Path
+) -> None:
+    """The entries table waits for its field, the checks do not: an overlap typed into it is
+    refused at once and stays refused after the field is left."""
+    folder = tmp_path / "f"
+    folder.mkdir()
+    files = [folder / "boot.bin", folder / "app.bin"]
+    for file in files:
+        file.write_bytes(b"\x00" * 64)
+    firmware = window.library.create_firmware("fw")
+    window.library.add_files(firmware.id, files)
+    entries = window.library.firmware(firmware.id).entries
+    window.library.set_entry_address(firmware.id, entries[0].id, "0x0")
+    window.library.set_entry_address(firmware.id, entries[1].id, "0x10000")
+    _shown(window)
+    window.select_firmware(firmware.id)
+    QApplication.processEvents()
+    assert "No address overlap" in _check_texts(window)
+
+    _type_address(window, 1, "0x0")
+    assert window._workspace_stale  # the table has not been rebuilt yet
+    assert "No address overlap" not in _check_texts(window)
+
+    window.connection.port.setFocus()  # the user leaves the field
+    QApplication.processEvents()
+    QApplication.processEvents()
+    assert not window._workspace_stale
+    assert "No address overlap" not in _check_texts(window)
+    assert not window.connection.flash.isEnabled()

@@ -400,7 +400,8 @@ class EmbrWindow(FrameWindow):
 
     def _refresh_if_stale(self) -> None:
         """Rebuild a page that waited for its field, once no field is edited and no button
-        is held (a rebuild between press and release would take the click away)."""
+        is held (a rebuild between press and release would take the click away), and the
+        right panel with it, which checks the page as it is now."""
         if (
             self._workspace_stale
             and not self._closed
@@ -408,6 +409,7 @@ class EmbrWindow(FrameWindow):
             and QApplication.mouseButtons() == Qt.MouseButton.NoButton
         ):
             self.refresh_workspace()
+            self.right_panel.refresh()
 
     def refresh_workspace(self) -> None:
         """Build the page of the selection. While a text field of it is being edited, a

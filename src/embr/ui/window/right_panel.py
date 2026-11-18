@@ -79,8 +79,9 @@ class ConnectionPresenter:
             self._window.connection.set_flash_enabled(False)
             self._window.cmdbar.set_command(tr("(select a firmware to see its command)"))
         else:
-            tracker = self._window.library.tracker
-            status = tracker.cached(firmware_id) or tracker.check(firmware_id)
+            # the status as the files are now, not the cached one: the page may be waiting
+            # for a field it shows (an address typed with Enter), the checks may not
+            status = self._window.library.tracker.check(firmware_id)
             firmware = status.firmware
             items = preflight(self._window.context, firmware, port, snapshot, status)
             self._window.connection.show_checks(items)
