@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from app_testkit import IDF, Clock, build_files, copy_files, root_first, write_newer
 
-from embr.app.chips import firmware_chips
+from embr.app.chips import Mcu, firmware_chips, firmware_mcus
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
@@ -117,6 +117,28 @@ def test_merge_writes_the_image_and_adds_a_firmware(context: AppContext, tmp_pat
     assert merger.merge(source.id, again, MergeOptions(add_to_list=False)) is None
     assert again.read_bytes() == output.read_bytes()
     assert len(context.firmware.all()) == 2
+
+
+def test_a_merged_p4_image_keeps_the_revision_line(context: AppContext, tmp_path: Path) -> None:
+    """The merged entry is for the chip and line of the source: one MCU, also when an entry
+    stored without a line (older data) comes first."""
+    library, merger = _rig(context)
+    source = library.create_firmware("p4")
+    folder = tmp_path / "p4"
+    library.add_files(source.id, root_first(copy_files(build_files("esp32p4_rev1_hello"), folder)))
+    data = folder / "data.bin"
+    write_newer(data, b"Z" * 0x1000)
+    attached = library.add_attachment(source.id, data, address=0x0)
+    stored = context.firmware.get(source.id)
+    next(e for e in stored.entries if e.id == attached.id).chip = "esp32p4"  # no line
+    context.firmware.save(stored)
+
+    merged = merger.merge(source.id, tmp_path / "p4-merged.bin", MergeOptions())
+
+    assert merged is not None
+    (entry,) = library.firmware(merged.id).entries
+    assert (entry.chip, entry.chip_line) == ("esp32p4", "v0-v1")
+    assert firmware_mcus(context, library.firmware(merged.id)) == (Mcu("esp32p4", "v0-v1"),)
 
 
 def _no_chip(library: Library, firmware_id: str, tmp_path: Path) -> MergeOptions:

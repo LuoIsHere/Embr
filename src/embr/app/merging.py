@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from embr.app.chips import entry_chip, merge_problem
+from embr.app.chips import Mcu, entry_mcus, merge_problem
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError, declared_flash_size, entry_path
 from embr.app.tracking import Tracker
@@ -40,9 +40,9 @@ class Merger:
     def command(self, firmware_id: str, output: Path, options: MergeOptions) -> str:
         """Equivalent `esptool ... merge-bin` command line for the dialog. PlanError when
         the firmware cannot be merged (see merge())."""
-        firmware, chip, inputs, pad = self._inputs(firmware_id, options, write_files=False)
+        firmware, mcu, inputs, pad = self._inputs(firmware_id, options, write_files=False)
         args = merge_args(
-            chip,
+            mcu.chip,
             inputs,
             _settings(firmware),
             output,
@@ -58,17 +58,18 @@ class Merger:
         With add_to_list: a new MANUAL firmware named "<source> (merged)" (made unique) in
         the source's project and group, with the source's flash parameters and reset modes,
         folder = the output's folder, one enabled MERGED entry at target_offset referencing
-        `output` (MCU = the merged entries' chip), whose note lists the merged files, and
-        notes giving the source and options; returned. Without it: None. The source
-        firmware is unchanged. PlanError when no entry is enabled, the firmware is not
-        flashable, the enabled entries are not all for one MCU (app.chips.merge_problem(),
-        whose message the dialog shows while its Merge button is disabled), or padding is
-        asked without a known flash size; core.flasher.merge.MergeError propagates."""
+        `output` (MCU = the merged entries' chip and revision line), whose note lists the
+        merged files, and notes giving the source and options; returned. Without it: None.
+        The source firmware is unchanged. PlanError when no entry is enabled, the firmware
+        is not flashable, the enabled entries are not all for one MCU
+        (app.chips.merge_problem(), whose message the dialog shows while its Merge button is
+        disabled), or padding is asked without a known flash size;
+        core.flasher.merge.MergeError propagates."""
         if output.is_dir():
             raise PlanError(N_(f"{output} is a folder; enter a file name"))
-        firmware, chip, inputs, pad = self._inputs(firmware_id, options, write_files=True)
+        firmware, mcu, inputs, pad = self._inputs(firmware_id, options, write_files=True)
         data = merge_image(
-            chip,
+            mcu.chip,
             inputs,
             _settings(firmware),
             target_offset=options.target_offset,
@@ -103,7 +104,8 @@ class Merger:
                 auto_address=options.target_offset,
                 address_source=AddressSource.AUTO,
                 note=f"Merged: {listed}",
-                chip=chip,
+                chip=mcu.chip,
+                chip_line=mcu.line,
             )
         ]
         self._ctx.firmware.save(created)
@@ -141,7 +143,7 @@ class Merger:
 
     def _inputs(
         self, firmware_id: str, options: MergeOptions, *, write_files: bool
-    ) -> tuple[Firmware, str, list[MergeInput], str | None]:
+    ) -> tuple[Firmware, Mcu, list[MergeInput], str | None]:
         status = self._tracker.check(firmware_id)
         firmware = status.firmware
         if not status.state.flashable:
@@ -154,8 +156,8 @@ class Merger:
         problem = merge_problem(self._ctx, firmware)
         if problem is not None:
             raise PlanError(problem)
-        chip = entry_chip(self._ctx, firmware, enabled[0])
-        assert chip is not None  # merge_problem() found every enabled entry's MCU
+        by_entry = entry_mcus(self._ctx, firmware)
+        mcu = _merged_mcu([m for e in enabled if (m := by_entry[e.id]) is not None])
         inputs: list[MergeInput] = []
         for entry in enabled:
             if entry.address is None:
@@ -169,7 +171,13 @@ class Merger:
             pad = declared_flash_size(self._ctx, firmware)
             if pad is None:
                 raise PlanError(N_(f"{firmware.name}: flash size unknown; set it to pad the image"))
-        return firmware, chip, inputs, pad
+        return firmware, mcu, inputs, pad
+
+
+def _merged_mcu(mcus: list[Mcu]) -> Mcu:
+    """The one MCU of the enabled entries that merge_problem() accepted: the one with a
+    revision line when some entries have none (those fit that line)."""
+    return max(mcus, key=lambda m: bool(m.line))
 
 
 def _settings(firmware: Firmware) -> FlashSettings:
