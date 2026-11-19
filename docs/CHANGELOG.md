@@ -1,3 +1,79 @@
+## v0.1.1
+
+### Flashing
+
+- Added **Quick flash**, a switch next to "Erase the whole flash first". With it on, Flash works without Connect & identify first. The flash job still identifies the chip and runs every check: writing is refused if the chip does not match or a security feature is enabled. It is off by default and kept in `settings.ini`.
+  - A firmware for several chips, or with no chip set, still needs Connect & identify, and the hint above Flash says so.
+  - With erase on, a warning says that the whole flash will be erased without a prior Connect & identify.
+  - For USB-OTG and USB-Serial/JTAG ports, the hint says how the board enters download mode.
+- The selected port no longer moves to another board. When it disappears (a cable unplugged, or a board re-enumerating after a reset), it stays selected as "<port> · unavailable" and the board actions are unavailable. When it comes back, it is selected again with its identification and the hint of the last job.
+- A chip refused for Secure Download Mode, flash encryption or Secure Boot is now reset as the "reset after" setting says, instead of being left in download mode.
+- After Connect & identify, a chip in Secure Download Mode is shown as "in download mode" instead of "reset, running".
+- A job now always ends, even when something fails after the board is done (saving the record or the read data, remembering the baud rate, copying the board log). Before, Embr could stay busy until it was restarted. The log says whether the record was saved.
+
+### Following builds
+
+- A followed build is now also checked on a click anywhere in the Embr window and when files are dragged into it, so a build that finishes while Embr is active shows at once. At most one check is queued at a time, and none runs while a dialog or menu is open, while the window is minimized or while a job runs.
+- A renamed app file is now followed automatically: renaming an ESP-IDF project, or changing the PlatformIO output name (`PROGNAME`). This applies when exactly one app entry disappears and one appears, at the same address and for the same chip. The entry keeps its note, check box and address, and the change is listed as "App file renamed: a -> b". The firmware name in the sidebar does not change.
+- PlatformIO: the app file is taken from `prog_path` in `idedata.json`; otherwise the newest app image in the build folder is used. Before, the file name was always `firmware.bin`, and an old `firmware.bin` left in the build folder could be flashed after the output name changed.
+- PlatformIO: when the followed env is no longer declared in `platformio.ini`, the banner says that it may have been renamed. If exactly one other env has been built and is not followed by another firmware, **Follow env** switches to it; otherwise **Change directory…** is offered.
+- PlatformIO: envs declared in the files listed in `extra_configs` are found, and those files are watched for changes.
+- ESP-IDF: a build in progress can no longer be accepted as a mix of new and old files. Before, a new bootloader with the old app could be shown as updated and flashable for several seconds during a build. An image older than its ELF file, or an ELF file older than the libraries it is linked from, now keeps the firmware in "Build in progress".
+- Following stays correct when a file changes while it is being read. Before, a half-written build could stop all further checks until Embr was restarted.
+- An ESP-IDF build that fails its first check right after import is no longer kept, so it can be imported again.
+- PlatformIO projects using Arduino core 3.x (pioarduino) have been verified with pioarduino 55.03.311 (Arduino core 3.3.11) on an ESP32-S3: import, flashing and start-up. v0.1.0 did not guarantee their support.
+
+### Projects and sidebar
+
+- Projects and groups can be reordered by dragging them in the sidebar. A project moves with its groups and firmware; a group moves with its firmware and stays within its project. Esc cancels the drag. The project order is kept in `settings.ini`; the group order is kept in the project and in `.embr` packages. Firmware within a group is still sorted by name.
+- The whole empty area below the list accepts dropped files and build folders, and is highlighted as one target.
+- Group rows always show their number of firmware.
+- After a rename or move, the header, the project path and the Parameters tab show the new values at once.
+- Clicking the selected firmware again keeps its "Build updated" tag, its "content changed" marks and the hint of the last job.
+- While a job runs, deleting a project and removing a group are unavailable.
+- The project page no longer has "Erase the whole flash first" in its defaults for new firmware. New firmware starts with it off; the check box of each firmware is unchanged.
+- Search waits for a short pause in typing before filtering.
+
+### Entries
+
+- Added **Show in Explorer** to the entry menu and the firmware menu (header and sidebar). It shows the entry's file, the build folder or the firmware's folder.
+- The status tags of an entry ("content changed", "new file", "file missing", "added automatically", "placed by partition table", "address differs") are shown to the right of its address.
+- The header shows when the entry files were last updated ("Files updated 14:32:05").
+- ESP32-P4: a firmware no longer shows both "ESP32-P4" and "ESP32-P4 v0–v1" (or "v3"), is no longer shown as "multi" in the sidebar for that reason, and can be merged. This affected archived versions of followed firmware and merged images added to Embr. Data saved by v0.1.0 is shown correctly.
+- ESP32-P4: an image whose header gives only the legacy minimum chip revision is assigned the revision line that esptool uses.
+- Dropping a file that is already in the firmware no longer adds a second entry. If its content changed, the new content is accepted and the entry keeps its address, check box and note.
+- **Copy to firmware…** no longer copies a file that the target firmware already has. **Re-locate…** and **Copy to firmware…** now say why nothing was done.
+- Attachment addresses and the merge start offset accept hexadecimal values only. Before, values such as negative numbers were accepted.
+
+### Merge
+
+- Merging to an existing file asks before replacing it, and names the firmware that use that file. A failed merge leaves the existing file unchanged. The default file name no longer reuses the name of an earlier output.
+- The note of a merged firmware names the source as project / group / firmware.
+
+### Records
+
+- The Records tab shows the 50 newest records, with a button to show earlier ones.
+
+### Interface and wording
+
+- Text being typed in the workspace is kept when the page refreshes in the background (a job ending, a port change, a build check).
+- Chip names are shown as "ESP32-S3" instead of "esp32s3" in checks, banners and dialogs, and chip mismatch messages are complete sentences.
+- The identification row "Flash" is now "Flash size".
+- English terms are used consistently: "build folder", "board" and "enabled" entries.
+- The remaining English texts of the Chinese interface are translated, and many Chinese texts were revised.
+- The tooltips of the New menu and the entry menu are shown.
+- The border between the sidebar and the workspace is removed, and the firmware name sits next to its tags without a gap.
+- The Copy button of the equivalent command keeps its full width. Before, its text could be cut off, depending on the display scaling.
+- Checking or clearing an entry, switching between firmware and opening a firmware with many records are faster.
+
+### Data and robustness
+
+- Embr now starts from a folder whose path contains `#` or `%`. Before, it could not open its data there.
+- Unexpected errors are written to `logs/crash-<date>.log` and reported in the log panel. The first one of a run also opens a dialog with a button that opens the log folder.
+- A damaged `.embr` package is reported as damaged, and an import that fails partway leaves nothing behind.
+- Clean archive keeps the index entry of a file it could not delete, and tries again next time. An archived file whose content no longer matches its hash is written again.
+- A failed write no longer leaves temporary files next to the data.
+
 ## v0.1.0
 
 Initial release. Embr is a firmware manager and flasher for Espressif chips on Windows. It keeps track of every firmware a developer works with (where its files are, the addresses and parameters they are written with, and notes on what each one is) and flashes them through a built-in copy of esptool.

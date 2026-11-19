@@ -1,21 +1,11 @@
-## v0.1.0
+## v0.1.1
 
-Initial release. Embr is a firmware manager and flasher for Espressif chips on Windows 10 and 11 (x64), using a built-in esptool 5.3.1.
-
-### Highlights
-
-- **Projects, groups and firmware**: firmware is organized into projects and groups or kept standalone, with notes, tags and search. Deleting a project or firmware removes it from Embr only and does not delete any `.bin` file or build output.
-- **Firmware sources**: `.bin` files chosen by hand, ESP-IDF build directories, and PlatformIO environments (Arduino core 2.0.x on the official platform, and the ESP-IDF framework). Followed builds are re-checked automatically; content changes are followed, other changes require confirmation.
-- **Recognition**: each file is classified by its content, with default addresses from esptool, the partition table and the build output. Every address can be changed. Attachments can be placed by partition or by address.
-- **Safety checks**: flashing is refused for chips with flash encryption, Secure Boot or Secure Download Mode; for a chip or chip revision that does not match the images; and for overlapping entries or entries beyond the flash size.
-- **Flashing**: Connect & identify, flash, erase and read flash. Each operation uses its own connection and releases the port when it ends. Cancellation works at any stage.
-- **Merge, archive, export**: merge a firmware into a single `.bin`, archive a fixed copy of a build, and move projects or firmware between computers as `.embr` packages.
-- **Records and logs**: every flash, erase and read operation is recorded, with daily logs and a log per device. The equivalent esptool command is always shown.
-- **Interface**: English and Simplified Chinese, light and dark themes. Portable: all data stays in the program folder.
-
-### Not supported
-
-- PlatformIO projects using Arduino core 1.x. Arduino core 3.x (pioarduino) projects can be imported and flashed, but their support is not guaranteed.
-- Chips with flash encryption, Secure Boot or Secure Download Mode enabled; reading or writing eFuses; the ESP8266.
-
-The full list of changes is in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+- Added **Quick flash**: with it on, Flash works without Connect & identify first. The chip is still identified and checked during the flash, and writing is refused if it does not match. Off by default.
+- Projects and groups can be reordered by dragging them in the sidebar.
+- Followed builds are checked again on a click anywhere in the window. A renamed app file (ESP-IDF project name, PlatformIO `PROGNAME`) is followed without confirmation, and a renamed PlatformIO env can be followed with one click.
+- An ESP-IDF build in progress is no longer accepted as a mix of new and old files.
+- The selected port no longer moves to another board when it disappears; it is selected again when it comes back.
+- Added **Show in Explorer** for entries and firmware. Entry status tags are shown next to the address, and the header shows when the files were last updated.
+- The Records tab shows the 50 newest records first.
+- Unexpected errors are written to a crash log in the `logs` folder and reported in the window.
+- Fixed a number of issues in following builds, ESP32-P4 chip revisions, merging, archives and the interface. See the [full changelog](https://github.com/LuoIsHere/Embr/blob/main/docs/CHANGELOG.md#v011) for details.

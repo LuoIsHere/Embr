@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/embr/resources/logo/embr-icon.svg" alt="Embr logo" width="96">
+  <img src="https://raw.githubusercontent.com/LuoIsHere/Embr/main/src/embr/resources/logo/embr-icon.svg" alt="Embr logo" width="96">
 </p>
 
 <h1 align="center">Embr</h1>
@@ -12,19 +12,19 @@
   <a href="https://github.com/LuoIsHere/Embr/releases"><img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey" alt="Platform: Windows 10 | 11"></a>
 </p>
 
-![Embr main window: an ESP-IDF firmware that follows its build directory, after the device has been identified](docs/images/embr-main.png)
+![Embr main window: an ESP-IDF firmware that follows its build directory, after the device has been identified](https://raw.githubusercontent.com/LuoIsHere/Embr/main/docs/images/embr-main.png)
 
 Embr remembers every firmware you work with: where its files are, which addresses and parameters they are written with, and what each firmware is for. Firmware is organized into projects, firmware that follows an ESP-IDF or PlatformIO build always reflects the latest build, and every flash operation is recorded. Flashing is done by a built-in copy of esptool.
 
 ## Features
 
 **Projects and firmware**
-- Organize firmware into projects and groups (for example, one group per board), or keep it standalone. Notes, tags and search are available for every firmware.
+- Organize firmware into projects and groups (for example, one group per board), or keep it standalone. Notes, tags and search are available for every firmware. Projects and groups can be reordered by dragging.
 - Create firmware from `.bin` files, follow an ESP-IDF `build` directory, or follow one or more PlatformIO environments. Files and build folders can be dragged from File Explorer into the sidebar.
 
 **Builds that stay current**
-- Followed builds are checked again when a firmware is selected, when the window becomes active, before every flash, and periodically.
-- A rebuild that only changes file contents is followed automatically. Any other change (entries, addresses, chip, ESP-IDF version, flash parameters) is listed and must be confirmed before flashing.
+- Followed builds are checked again when a firmware is selected, on a click in the window, when the window becomes active, before every flash, and periodically.
+- A rebuild that only changes file contents, or only renames the app file, is followed automatically. Any other change (entries, addresses, chip, ESP-IDF version, flash parameters) is listed and must be confirmed before flashing.
 - An incomplete build, mixed build output or a target that changed without a rebuild is reported and cannot be flashed.
 
 **Recognition**
@@ -39,9 +39,11 @@ Embr remembers every firmware you work with: where its files are, which addresse
 
 **Flashing and more**
 - Flash, erase the whole flash, and read flash to a file. Cancellation works at any stage and always releases the port.
+- Quick flash (off by default) skips Connect & identify: the chip is still identified and checked during the flash.
 - Merge a firmware into a single `.bin` image.
 - Archive a fixed copy of a build, and move projects or firmware between computers as `.embr` packages.
 - Every flash, erase and read operation is recorded: time, port, chip, MAC address, the files written with their SHA-256, the result and the equivalent esptool command.
+- Show the file of an entry, or the build folder of a firmware, in File Explorer.
 
 **Interface**
 - English and Simplified Chinese; light and dark themes, following the system by default.
@@ -81,7 +83,7 @@ Embr is not code-signed. On first start, Windows SmartScreen may show "Windows p
 
 - **Chips:** the chips supported by the built-in esptool 5.3.1, except the ESP8266.
 - **ESP-IDF:** build directories that contain `flasher_args.json`.
-- **PlatformIO:** the Arduino framework with Arduino core 2.0.x on the official Espressif 32 platform, and the ESP-IDF framework. Projects using Arduino core 3.x (pioarduino) can be imported and flashed, but their support is not guaranteed. Arduino core 1.x is not supported.
+- **PlatformIO:** the Arduino framework with Arduino core 2.0.x on the official Espressif 32 platform, and the ESP-IDF framework. Projects using Arduino core 3.x (pioarduino) can be imported and flashed; this has been verified with pioarduino 55.03.311 (Arduino core 3.3.11) on an ESP32-S3. Arduino core 1.x is not supported.
 - **Not supported:** chips with flash encryption, Secure Boot or Secure Download Mode enabled (these are detected and refused), reading or writing eFuses, and operating systems other than Windows.
 
 ## Building from source
@@ -105,7 +107,7 @@ When run from source, Embr keeps its data in the `.run` folder of the repository
 ## Documentation
 
 - [CHANGELOG.md](CHANGELOG.md): summary of the current version.
-- [docs/CHANGELOG.md](docs/CHANGELOG.md): full list of changes in every version.
+- [docs/CHANGELOG.md](https://github.com/LuoIsHere/Embr/blob/main/docs/CHANGELOG.md): full list of changes in every version.
 - [LICENSE](LICENSE): the GNU General Public License, version 3.
 - [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES): third-party software, fonts and icons included in Embr, with their licenses.
 
