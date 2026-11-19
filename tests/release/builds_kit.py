@@ -8,8 +8,10 @@ Environment (local machine configuration, never in tracked files; see release_ki
                                        change; restored byte for byte afterwards
     EMBR_TEST_IDF_EXPORT               activation script of its ESP-IDF (export.ps1 or an EIM
                                        PowerShell profile), dot-sourced before idf.py
-    EMBR_TEST_IDF_TOOLS                optional IDF_TOOLS_PATH for EMBR_TEST_IDF_EXPORT (an
-                                       export.ps1 whose tools are not in ~/.espressif)
+    EMBR_TEST_IDF_TOOLS                optional IDF_TOOLS_PATH for both activation scripts
+                                       (export.ps1 whose tools are not in ~/.espressif; one
+                                       tools folder holds the Python environment of each
+                                       ESP-IDF version)
     EMBR_TEST_IDF_EXPORT_2             activation script of a second ESP-IDF (v6.x), for the
                                        version switch
     EMBR_TEST_PIO_PROJECT              a PlatformIO project the tests may change; restored
@@ -169,8 +171,10 @@ def idf_main() -> Idf:
 
 
 def idf_second() -> Idf:
-    """The second ESP-IDF of EMBR_TEST_IDF_EXPORT_2 (skip when unset)."""
-    return Idf(kit.env_path(IDF_EXPORT_2_VAR, kind="file"))
+    """The second ESP-IDF of EMBR_TEST_IDF_EXPORT_2 (skip when unset), with the same
+    EMBR_TEST_IDF_TOOLS as the first."""
+    script = kit.env_path(IDF_EXPORT_2_VAR, kind="file")
+    return Idf(script, os.environ.get(IDF_TOOLS_VAR, "").strip())
 
 
 def find_pio() -> Path:
