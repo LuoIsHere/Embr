@@ -19,14 +19,25 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest
 
+  # The same packaging as the release workflow, without publishing: a dependency missing
+  # from THIRD_PARTY_NOTICES or a broken package shows up here, not only when tagging.
   package:
     needs: check
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.13.5"
       - run: uv sync --locked
-      - run: uv run pyinstaller Embr.spec --noconfirm
-      - run: uv run python scripts/check_frozen_worker.py dist/Embr/Embr.exe
+      - name: Build and package
+        run: uv run python scripts/package_release.py
+      - name: Worker check on the build
+        run: uv run python scripts/check_frozen_worker.py dist/Embr/Embr.exe
+      - name: Check the package
+        run: |
+          name="embr_$(uv run python -c 'import embr; print(embr.__version__)')_windows_x64"
+          uv run python scripts/verify_release.py "dist/release/$name.zip"
