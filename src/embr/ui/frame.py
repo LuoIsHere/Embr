@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from embr.i18n import tr
 from embr.ui import icons
-from embr.ui.theme import Palette
+from embr.ui.theme import COPY_BUTTON_WIDTH, Palette
 from embr.ui.widgets import button, label, set_prop, tag
 
 MIN_WIDTH, MIN_HEIGHT = 1100, 700
@@ -141,7 +141,7 @@ class CommandBar(QWidget):
         self.text.setObjectName("cmdtext")
         self.text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.copy_button = button(tr("Copy"), "ibtn")
-        self.copy_button.setFixedWidth(72)
+        self.copy_button.setFixedWidth(COPY_BUTTON_WIDTH)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 5, 12, 5)
         layout.setSpacing(8)

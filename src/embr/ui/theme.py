@@ -16,6 +16,10 @@ software, which About shows)."""
 MONO_FAMILIES = ["Cascadia Mono", "Consolas", "HarmonyOS Sans SC"]
 """The monospace fonts have no CJK glyphs: Chinese in paths, commands and the log falls
 back to HarmonyOS Sans SC, not to whatever system font Windows picks."""
+COPY_BUTTON_WIDTH = 72
+"""Width of the command bar's Copy button. The style sheet gives it as min-width, which is
+the content width: without the 8 px padding and the 1 px border on each side. A min-width
+from the style sheet replaces the widget's own minimum width (setFixedWidth)."""
 UI_PX = 13
 MONO_PX = 12
 
@@ -219,6 +223,7 @@ QPushButton:disabled {{ color: {p.fg_3}; }}
 QPushButton[kind="ibtn"] {{ color: {p.fg_2}; padding: 0px 8px; min-height: 26px; min-width: 12px; }}
 QPushButton[kind="ibtn"]:hover {{ color: {p.fg}; }}
 QPushButton[kind="ibtn"][copied="1"] {{ color: {p.ok}; border-color: {p.ok}; }}
+#cmdbar QPushButton[kind="ibtn"] {{ min-width: {COPY_BUTTON_WIDTH - 2 * 8 - 2 * 1}px; }}
 QPushButton[kind="primary"] {{ background: {p.accent}; border-color: {p.accent};
   color: {p.accent_fg};
   font-weight: 600; font-size: 14px; min-height: 38px; }}
