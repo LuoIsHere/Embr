@@ -417,17 +417,26 @@ class EmbrWindow(FrameWindow):
     def _editing_field(self) -> QWidget | None:
         """The text field of the firmware or project page being edited (it has the focus).
         Such a field saves what was typed only when it loses the focus."""
-        focused = QApplication.focusWidget()
+        return self._page_field(QApplication.focusWidget())
+
+    def _page_field(self, widget: QWidget | None) -> QWidget | None:
+        """`widget` when it is an editable text field of the firmware or project page."""
         pages = (self.firmware_view, self.project_view)
         if (
-            isinstance(focused, (QLineEdit, QPlainTextEdit))
-            and not focused.isReadOnly()
-            and any(page.isAncestorOf(focused) for page in pages)
+            isinstance(widget, (QLineEdit, QPlainTextEdit))
+            and not widget.isReadOnly()
+            and any(page.isAncestorOf(widget) for page in pages)
         ):
-            return focused
+            return widget
         return None
 
-    def _focus_moved(self, _old: QWidget | None, _new: QWidget | None) -> None:
+    def _focus_moved(self, old: QWidget | None, new: QWidget | None) -> None:
+        field = self._page_field(new)
+        if field is not None and _handed_on(old):
+            # Qt passed on the focus of a button disabled or hidden (Flash at the end of a
+            # job): nobody is typing there, so the page must not wait for that field
+            field.clearFocus()  # moves the focus again; that call refreshes a waiting page
+            return
         if self._workspace_stale:
             QTimer.singleShot(0, self._refresh_if_stale)  # after the field's own save
 
@@ -604,3 +613,14 @@ class EmbrWindow(FrameWindow):
         self._closed = True
         self.recheck.stop()
         event.accept()
+
+
+def _handed_on(old: QWidget | None) -> bool:
+    """The focus left `old` because it was disabled, hidden or deleted: Qt moved it to the
+    next widget, the user did not (a click or Tab leaves an enabled, visible widget)."""
+    if old is None:  # the window became active again: back to where the user was
+        return False
+    try:
+        return not old.isEnabled() or not old.isVisible()
+    except RuntimeError:  # its C++ object is already deleted
+        return True
