@@ -524,12 +524,17 @@ def test_pioarduino_core3_imported_and_flashed_correctly_or_refused(
     file_dialogs: kit.FileDialogs,
     tmp_path: Path,
 ) -> None:
-    """pioarduino is installed by the build (platform = its release URL) and stays in the
+    """pioarduino is installed for the env (platform = its release URL) and stays in the
     PIO core; the other envs name the official platform with its version."""
     uart = kit.board_port(bk.UART)
     app = _start(pio_project, embr)
     window = app.window
     _ini(pio_project, bk.ini_env("core3", S3_BOARD, "pio-core3", extra=f"platform = {PIOARDUINO}"))
+    # pioarduino and the official platform use packages of the same name: a build of an
+    # official env can replace pioarduino's framework package, and `pio run` does not
+    # install it again (seen: the build failed with no framework folder), so the env's
+    # packages are installed first
+    pio_project.run("pkg", "install", "-e", "core3")
     _build(pio_project, "core3")
     build = pio_project.build_dir("core3")
     shown: dict[str, str] = {}
