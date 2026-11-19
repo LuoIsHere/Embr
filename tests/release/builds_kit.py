@@ -16,7 +16,8 @@ Environment (local machine configuration, never in tracked files; see release_ki
                                        version switch
     EMBR_TEST_PIO_PROJECT              a PlatformIO project the tests may change; restored
                                        byte for byte afterwards (pio is found the way Embr
-                                       finds it)
+                                       finds it); its platformio.ini names PIO_PLATFORM with
+                                       its version
 
 The original state of each project is captured once per session (ProjectBackup) by the
 session fixtures in conftest.py, which restore it after the last test (also on failure),
@@ -445,9 +446,20 @@ def ini_envs_of(root: Path) -> list[str]:
     return re.findall(r"(?m)^[ \t]*\[env:([^\]]+)\]", text)
 
 
+PIO_PLATFORM = "espressif32@6.12.0"
+"""The official platform the test envs build with. Named with its version: pioarduino stays
+installed in the PIO core after its test and, as the highest "espressif32", would take over
+every `platform = espressif32` without one."""
+
+
 def ini_env(name: str, board: str, mark: str | None = None, extra: str = "") -> str:
-    """One [env:...] section (Arduino on the official platform unless `extra` overrides)."""
-    lines = [f"[env:{name}]", "platform = espressif32", f"board = {board}", "framework = arduino"]
+    """One [env:...] section (Arduino on PIO_PLATFORM unless `extra` overrides)."""
+    lines = [
+        f"[env:{name}]",
+        f"platform = {PIO_PLATFORM}",
+        f"board = {board}",
+        "framework = arduino",
+    ]
     if mark is not None:
         lines.append(f'build_flags = -DEMBR_PIO_MARK=\\"{mark}\\"')
     text = "\n".join(lines) + "\n"

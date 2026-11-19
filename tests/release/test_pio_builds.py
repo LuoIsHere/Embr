@@ -13,13 +13,15 @@ espidf env; Arduino core 3.x (pioarduino) is outside v0.1.0: imported, flashed a
 correctly, or clearly refused, never flashed wrong.
 
 Platforms needed in the PIO core besides espressif32 6.12.0 (installed once, kept):
-espressif32@6.5.0 (official registry) and pioarduino PIOARDUINO (GitHub release).
+espressif32@6.5.0 (official registry) and pioarduino PIOARDUINO (GitHub release). The test
+envs and the test project name the official platform with its version
+(builds_kit.PIO_PLATFORM), so the installed pioarduino does not take them over.
 """
 
 import json
 import shutil
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -496,7 +498,7 @@ def test_espidf_env_imported_and_flashed(
     )
     _ini(
         pio_project,
-        "[env:idf]\nplatform = espressif32\nboard = "
+        f"[env:idf]\nplatform = {bk.PIO_PLATFORM}\nboard = "
         + S3_BOARD
         + "\nframework = espidf\nbuild_src_filter = -<*> +<idf_main.c>\n\n",
     )
@@ -516,34 +518,14 @@ def test_espidf_env_imported_and_flashed(
 # ---- Arduino core 3.x (pioarduino): correct, or refused -------------------------------------
 
 
-@pytest.fixture
-def pioarduino(pio_project: bk.PioProject) -> Iterator[None]:
-    """pioarduino is installed by the build (platform = its release URL). Installed in the
-    PIO core it is the highest "espressif32" and shadows the official platform for every
-    `platform = espressif32` without a version (seen: the original project then failed with
-    "Failed to install Python dependencies into penv"), so its platform folder is removed
-    again afterwards; the packages it downloaded stay in the core."""
-    try:
-        yield
-    finally:
-        _remove_pioarduino_platform(pio_project)
-
-
-def _remove_pioarduino_platform(project: bk.PioProject) -> None:
-    for manifest in (bk.pio_core() / "platforms").glob("espressif32*/platform.json"):
-        version = str(json.loads(manifest.read_text(encoding="utf-8")).get("version", ""))
-        if version and not version.startswith("6."):  # the official ones are 6.x
-            semver = ".".join(str(int(p)) if p.isdigit() else p for p in version.split("."))
-            project.run("pkg", "uninstall", "-g", "-p", f"espressif32@{semver}", check=False)
-
-
 def test_pioarduino_core3_imported_and_flashed_correctly_or_refused(
     pio_project: bk.PioProject,
     embr: Callable[..., kit.EmbrApp],
     file_dialogs: kit.FileDialogs,
     tmp_path: Path,
-    pioarduino: None,
 ) -> None:
+    """pioarduino is installed by the build (platform = its release URL) and stays in the
+    PIO core; the other envs name the official platform with its version."""
     uart = kit.board_port(bk.UART)
     app = _start(pio_project, embr)
     window = app.window

@@ -153,12 +153,20 @@ def env_path(name: str, *, kind: str = "dir") -> Path:
     return path
 
 
+PORT_BACK_S = 10.0
+"""How long board_port() waits for a port that is away: a native USB port re-enumerates
+for a few seconds after its chip was reset (also through the UART of the same board)."""
+
+
 def board_port(name: str) -> str:
     """The COM port from `name` (EMBR_TEST_PORT_UART / _USB / _P4): skip when unset, fail
-    when the port is not present now."""
+    when the port is not present within PORT_BACK_S."""
     device = env_value(name)
-    if not port_present(device):
-        pytest.fail(f"{name}={device} is not connected (ports: {', '.join(port_names())})")
+    deadline = time.monotonic() + PORT_BACK_S
+    while not port_present(device):
+        if time.monotonic() > deadline:
+            pytest.fail(f"{name}={device} is not connected (ports: {', '.join(port_names())})")
+        time.sleep(0.2)
     return device
 
 
