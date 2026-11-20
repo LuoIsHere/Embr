@@ -184,3 +184,35 @@ def test_the_checks_follow_an_address_typed_while_the_table_waits(
     assert not window._workspace_stale
     assert "No address overlap" not in _check_texts(window)
     assert not window.connection.flash.isEnabled()
+
+
+def _header_texts(window: EmbrWindow) -> list[str]:
+    row = window.header.row
+    items = (row.itemAt(i) for i in range(row.count()))
+    widgets = (item.widget() for item in items if item is not None)
+    return [w.text() for w in widgets if isinstance(w, QLabel)]
+
+
+def test_the_header_follows_while_the_page_waits(window: EmbrWindow, tmp_path: Path) -> None:
+    """A name saved with Enter keeps the focus in its field, so the page waits; the header
+    above it has no field and shows the new name, and the new group after a drag in the
+    sidebar (which takes no focus)."""
+    firmware_id = _firmware(window, tmp_path, "board")
+    project = window.library.create_project("Station")
+    window.library.add_group(project.id, "Main")
+    _shown(window)
+    window.select_firmware(firmware_id)
+    _params(window)
+    field = _name_field(window, "board")
+    _type(field, "-main")
+    QTest.keyClick(field, Qt.Key.Key_Return)
+    QApplication.processEvents()
+
+    assert QApplication.focusWidget() is field and window._workspace_stale
+    assert "board-main" in _header_texts(window)
+
+    window.sidebar_panel.tree.move_requested.emit(firmware_id, project.id, "Main")
+    QApplication.processEvents()
+
+    assert QApplication.focusWidget() is field and window._workspace_stale
+    assert _header_texts(window)[:2] == ["Station / Main", "board-main"]

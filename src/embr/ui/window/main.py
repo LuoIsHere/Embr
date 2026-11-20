@@ -457,13 +457,16 @@ class EmbrWindow(FrameWindow):
         """Build the page of the selection. While a text field of it is being edited, a
         refresh of the same page waits until the field is left (job ended, port changed, a
         check), so nothing typed is lost; showing another page first lets the field save what
-        was typed, as leaving it does."""
+        was typed, as leaving it does. The header above the page has no field: it is shown
+        as it is now also while the page waits (a name saved with Enter, a firmware dragged
+        to another group)."""
         if self.refresh_held("workspace"):
             return
         field = self._editing_field()
         if field is not None:
             if self._selection == self._built_for:
                 self._workspace_stale = True
+                self._refresh_header()
                 return
             field.clearFocus()  # its save may refresh (and build the new page) already
         self._workspace_stale = False
@@ -489,6 +492,21 @@ class EmbrWindow(FrameWindow):
         self.header.hide()
         self.pages.setCurrentWidget(self.empty_view)
         return
+
+    def _refresh_header(self) -> None:
+        """The header of the shown page alone; the page keeps what it shows (and _shown, the
+        state Flash is checked against). A selection deleted meanwhile is left to the
+        refresh after the field."""
+        selection = self._selection
+        try:
+            if selection is not None and selection[0] == "firmware":
+                self._library.firmware(selection[1])  # the cached status outlives a deletion
+                status = self._library.tracker.check(selection[1])
+                self.header.show_firmware(status, self._library.flag(status.firmware_id))
+            elif selection is not None and selection[0] == "project":
+                self.header.show_project(self, selection[1])
+        except KeyError:
+            return
 
     def _fit_entries(self, firmware_id: str) -> None:
         """Untick the entries that are not for the identified board; the entries table then shows
