@@ -233,7 +233,8 @@ class Library:
         """Projects in the sidebar order (project_order(), then the others by name) with
         their groups (in project order) and firmware (by name), then standalone
         firmware. `query` (case-insensitive substring): a project whose name matches keeps
-        all its firmware; otherwise only firmware whose name matches are kept, and projects
+        all its firmware; otherwise only firmware whose name or one of whose tags matches
+        are kept, and projects
         left with none are dropped. Flags come from the tracker's cached status of each
         firmware (NEEDS_CONFIRMATION -> "!", MISSING -> MISSING, INCOMPLETE and
         TARGET_SWITCHED -> BLOCKED; never a file access), or a cheap existence check when it
@@ -243,7 +244,7 @@ class Library:
         rows = {f.id: self._row(f) for f in everything}
 
         def matches(f: Firmware) -> bool:
-            return not q or q in f.name.casefold()
+            return not q or any(q in text.casefold() for text in (f.name, *f.tags))
 
         projects: list[ProjectRow] = []
         readable = self._ctx.projects.all()

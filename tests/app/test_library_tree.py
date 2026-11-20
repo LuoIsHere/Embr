@@ -52,8 +52,9 @@ def test_tree_orders_projects_groups_and_firmware(library: Library) -> None:
     [
         ("ALPHA", {"alpha": ["boot-test", "main-app"]}, []),
         ("main", {"alpha": ["main-app"]}, ["main-tool"]),
+        ("Rel", {"beta": ["sensor"]}, []),
     ],
-    ids=["project-name-keeps-all", "firmware-name-keeps-matches"],
+    ids=["project-name-keeps-all", "firmware-name-keeps-matches", "tag-keeps-matches"],
 )
 def test_search(
     library: Library, query: str, projects: dict[str, list[str]], standalone: list[str]
@@ -62,14 +63,16 @@ def test_search(
     beta = library.create_project("beta")
     library.create_firmware("boot-test", alpha.id)
     library.create_firmware("main-app", alpha.id)
-    library.create_firmware("sensor", beta.id)
+    sensor = library.create_firmware("sensor", beta.id)
+    library.set_param(sensor.id, "tags", ["release", "s3"])
     library.create_firmware("main-tool")
 
     tree = library.tree(query)
     found = {p.name: sorted(f.name for g in p.groups for f in g.firmware) for p in tree.projects}
     assert found == projects
     assert [f.name for f in tree.standalone] == standalone
-    assert all(p.firmware_count == 2 for p in tree.projects)
+    total = {"alpha": 2, "beta": 1}  # all the project's firmware, not just those shown
+    assert all(p.firmware_count == total[p.name] for p in tree.projects)
 
 
 def test_origin_is_the_folder(library: Library, tmp_path: Path) -> None:

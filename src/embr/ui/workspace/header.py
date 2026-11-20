@@ -58,7 +58,8 @@ def crumb(owner: Owner, firmware: Firmware) -> str:
 
 
 class Header(QWidget):
-    """Breadcrumb, name, tags, the ⋯ menu and the grey notes line."""
+    """Breadcrumb, name, tags (MCUs, source, the firmware's own tags, state), the ⋯ menu
+    and the grey notes line."""
 
     def __init__(self, owner: Owner) -> None:
         super().__init__()
@@ -131,6 +132,11 @@ class Header(QWidget):
         for mcu in firmware_mcus(self._owner.context, firmware):
             self.row.addWidget(tag(mcu.label, "gray"))
         self.row.addWidget(tag(*SOURCE_LABELS[firmware.source]))
+        for text in firmware.tags:  # the user's words: neither translated nor read as markup
+            own = tag("", "gray")
+            own.setTextFormat(Qt.TextFormat.PlainText)
+            own.setText(text)
+            self.row.addWidget(own)
         if flag == FirmwareFlag.NEEDS_CONFIRMATION:
             self.row.addWidget(tag(tr("needs confirmation"), "warn"))
         elif flag == FirmwareFlag.MISSING:

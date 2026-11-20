@@ -5,6 +5,7 @@ import datetime
 import os
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
 from embr.ui.widgets import ElidedLabel
@@ -159,3 +160,16 @@ def test_the_notes_tooltip_only_shows_a_note(window: EmbrWindow) -> None:
     firmware = window.library.create_firmware("fw")
     window.select_firmware(firmware.id)
     assert window.header.notes.toolTip() == ""
+
+
+def test_the_firmware_tags_follow_the_source_tag(window: EmbrWindow) -> None:
+    """In order, as typed: not translated ("fixed" is also a source tag) nor read as
+    markup."""
+    firmware = window.library.create_firmware("fw")
+    window.library.set_param(firmware.id, "tags", ["release", "<b>s3</b>", "fixed"])
+    window.select_firmware(firmware.id)
+    _settle(window)
+    texts = [_label(window, i).text() for i in range(window.header.row.count())]
+    source = texts.index("fixed")
+    assert texts[source + 1 : source + 4] == ["release", "<b>s3</b>", "fixed"]
+    assert _label(window, source + 2).textFormat() == Qt.TextFormat.PlainText
