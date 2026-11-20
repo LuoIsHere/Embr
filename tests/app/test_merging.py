@@ -14,6 +14,7 @@ from embr.app.flashplan import PlanError
 from embr.app.library import Library
 from embr.app.merging import MergeOptions, Merger
 from embr.app.tracking import Tracker
+from embr.core.firmware.entries import blank_otadata_entry
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams, Source
 
@@ -229,3 +230,34 @@ def test_the_merged_note_follows_a_rename(context: AppContext, tmp_path: Path) -
 
     assert merged is not None
     assert merged.notes.startswith("Merged from Station/Core/renamed:")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [MergeOptions(add_to_list=False), MergeOptions(pad_to_flash_size=True, add_to_list=False)],
+    ids=["to-the-last-entry", "padded"],
+)
+def test_the_size_is_that_of_the_merged_file(
+    context: AppContext, tmp_path: Path, options: MergeOptions
+) -> None:
+    """The last entry is a blank otadata (no file until merging writes it)."""
+    library, merger = _rig(context)
+    source_id = _hello(library)
+    library.set_param(source_id, "flash_size", "4MB")
+    firmware = context.firmware.get(source_id)
+    firmware.entries.append(blank_otadata_entry(0x200000, 0x2000))
+    context.firmware.save(firmware)
+    library.tracker.invalidate(source_id)
+    output = tmp_path / "out.bin"
+
+    size = merger.size(source_id, options)
+    merger.merge(source_id, output, options)
+
+    assert size == output.stat().st_size
+    assert size == (0x400000 if options.pad_to_flash_size else 0x202000)
+
+
+def test_no_size_for_a_start_offset_above_the_first_entry(context: AppContext) -> None:
+    library, merger = _rig(context)
+    source_id = _hello(library)
+    assert merger.size(source_id, MergeOptions(target_offset=0x1000)) is None

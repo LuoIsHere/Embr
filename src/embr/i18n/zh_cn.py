@@ -380,6 +380,7 @@ TEXT: dict[str, str] = {
     ),
     "The start offset is not a hex number.": "起始偏移不是十六进制数。",
     "Save merged image": "保存合成镜像",
+    "Merged image size: {0} ({1} bytes)": "合成后大小：{0}（{1} 字节）",
     "Binary files (*.bin)": "二进制文件 (*.bin)",
     "Erase flash": "擦除 flash",
     "Erase the whole flash of the {0} on <b>{1}</b> (MAC {2})?": (

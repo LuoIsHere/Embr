@@ -52,6 +52,8 @@ def merge(
             "overwrites the whole flash."
         )
     )
+    size = label("", tone="2")
+    dialog.body.addWidget(size)
     command = label("", tone="3", wrap=True, mono=True)
     dialog.body.addWidget(command)
 
@@ -65,6 +67,7 @@ def merge(
     def refresh() -> None:
         chosen = options()
         dialog.ok.setEnabled(False)
+        size.hide()
         if chosen is None:
             command.setText(tr("The start offset is not a hex number."))
             return
@@ -77,6 +80,13 @@ def merge(
             command.setText(tr(str(exc)))
             return
         dialog.ok.setEnabled(True)
+        try:
+            merged = merger.size(firmware.id, chosen)
+        except OSError:  # a file gone meanwhile: merging reports it
+            merged = None
+        if merged is not None:
+            size.setText(tr(f"Merged image size: {size_text(merged)} ({merged:,} bytes)"))
+            size.show()
 
     def pick() -> None:
         chosen, _ = QFileDialog.getSaveFileName(
@@ -104,6 +114,16 @@ def merge(
         return None
     chosen = options()
     return (Path(output.text().strip()), chosen) if chosen else None
+
+
+def size_text(size: int) -> str:
+    """1310720 -> "1.25 MB", 8192 -> "8 KB" (binary units, as flash sizes are written);
+    below 1 KB in bytes ("512 B")."""
+    for unit, factor in (("MB", 1024 * 1024), ("KB", 1024)):
+        if size >= factor:
+            value = f"{size / factor:.2f}".rstrip("0").rstrip(".")
+            return f"{value} {unit}"
+    return f"{size} B"
 
 
 def erase_flash(parent: QWidget, port: str, info: InfoEvent) -> bool:

@@ -16,6 +16,7 @@ from embr.core.firmware.entries import sorted_entries
 from embr.core.firmware.files import is_blank, local_file, path_key, path_ref
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import AddressSource, Entry, Firmware, FlashParams, Source
+from embr.core.flasher.checks import flash_size_bytes
 from embr.core.flasher.merge import MergeInput, merge_args, merge_image
 from embr.core.flasher.plan import FlashSettings
 from embr.core.storage.atomic import write_whole
@@ -50,6 +51,25 @@ class Merger:
             pad_to_size=pad,
         )
         return subprocess.list2cmdline(["esptool", *args])
+
+    def size(self, firmware_id: str, options: MergeOptions) -> int | None:
+        """Bytes of the image merge() writes with `options`: from the start offset to the end
+        of the last entry (gaps filled with 0xFF), or to the end of the flash when padded.
+        From the files' sizes; nothing is read or written. None when the start offset is
+        above the first entry (merging refuses it). PlanError as command(); OSError when a
+        file cannot be read."""
+        firmware, _, inputs, pad = self._inputs(firmware_id, options, write_files=False)
+        blank = {
+            entry_path(self._ctx, e): e.size for e in firmware.entries if e.enabled and is_blank(e)
+        }
+        if min(i.address for i in inputs) < options.target_offset:
+            return None
+        end = max(
+            i.address + (blank[i.path] if i.path in blank else i.path.stat().st_size)
+            for i in inputs
+        )
+        padded = flash_size_bytes(pad) if pad is not None else None
+        return max(end, padded or 0) - options.target_offset
 
     def merge(self, firmware_id: str, output: Path, options: MergeOptions) -> Firmware | None:
         """Write the merged image to `output` (a temporary file next to it, then renamed
