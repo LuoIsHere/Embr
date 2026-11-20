@@ -3,8 +3,15 @@
 import html
 from collections.abc import Callable
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QResizeEvent
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QEnterEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractButton,
     QFrame,
@@ -14,6 +21,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QSizePolicy,
+    QToolTip,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -272,3 +280,18 @@ class Switch(QAbstractButton):
         painter.setBrush(QColor(self._knob))
         painter.drawEllipse(QRectF(x, track.top() + 2, size, size))
         painter.end()
+
+
+class HelpMark(QLabel):
+    """A help icon (setPixmap) with its explanation as the tooltip, shown as soon as the
+    mouse is over it: an ordinary tooltip waits until the mouse has rested for a while, and
+    each small movement starts the wait again, which on a small icon takes long."""
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        super().enterEvent(event)
+        if self.toolTip():
+            QToolTip.showText(event.globalPosition().toPoint(), self.toolTip(), self)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        super().leaveEvent(event)
+        QToolTip.hideText()

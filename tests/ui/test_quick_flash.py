@@ -11,9 +11,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint
 from PySide6.QtGui import QStandardItemModel
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QToolTip
 
 from embr.app.checklist import can_flash, preflight
 from embr.app.context import open_context
@@ -693,3 +694,20 @@ def test_picking_another_port_while_one_is_away_drops_it(
     assert [combo.itemText(i).split(" ")[0] for i in range(combo.count())] == ["COM7"]
     _hotplug(window, monkeypatch, (UART, JTAG))  # back, but no longer the chosen one
     assert window.connection.selected_port() == UART
+
+
+def test_the_help_mark_explains_at_once(window: EmbrWindow) -> None:
+    """The explanation shows as soon as the mouse is over the ? (no rest needed) and goes
+    when it leaves."""
+    window.resize(1400, 800)
+    window.show()
+    QApplication.processEvents()
+    mark = window.connection.quick_help
+    QTest.mouseMove(mark, mark.rect().center())
+    QApplication.processEvents()
+    assert QToolTip.isVisible()
+    assert QToolTip.text() == TIP
+
+    QTest.mouseMove(window.connection, QPoint(2, 2))
+    QTest.qWait(500)  # a tooltip asked to hide fades out after a short delay
+    assert not QToolTip.isVisible()

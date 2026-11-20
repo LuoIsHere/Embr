@@ -25,7 +25,7 @@ from embr.ui import icons
 from embr.ui.icons import keys_pixmap
 from embr.ui.sidebar import chip_name
 from embr.ui.theme import Palette
-from embr.ui.widgets import Switch, button, clear_layout, label, restyle, small, tag
+from embr.ui.widgets import HelpMark, Switch, button, clear_layout, label, restyle, small, tag
 
 BAUDS = (115200, 230400, 460800, 921600, 1500000, 2000000)
 CONNECTION_LABELS: dict[str, str] = {
@@ -182,7 +182,7 @@ class ConnectionPanel(QWidget):
         self.quick.setToolTip(tr(QUICK_TIP))
         self.quick.setAccessibleName(tr("Quick flash"))
         self.quick_text = label(tr("Quick flash"), tone="2")
-        self.quick_help = QLabel()
+        self.quick_help = HelpMark()
         self.quick_help.setToolTip(tr(QUICK_TIP))
         self._quick_box = QWidget()
         quick = QHBoxLayout(self._quick_box)
