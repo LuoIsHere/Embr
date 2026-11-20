@@ -3,6 +3,7 @@ dropping a firmware or files anywhere there shows the highlight on all of it; wh
 scrolls it keeps a firmware row's height."""
 
 from PySide6.QtCore import QPoint
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QTreeWidgetItem
 
 from embr.ui.sidebar import SPARE_MIN, FirmwareTree
@@ -85,3 +86,43 @@ def test_folding_a_project_grows_the_spare_row(window: EmbrWindow) -> None:
     QApplication.processEvents()
     assert _spare(tree).sizeHint(0).height() == open_height + folded_away
     assert tree.visualItemRect(_spare(tree)).bottom() + 1 == tree.viewport().height()
+
+
+def _hovered(tree: FirmwareTree, item: QTreeWidgetItem, hover: str) -> bool:
+    """Whether `item` shows the hover colour after the mouse moved to its right end."""
+    rect = tree.visualItemRect(item)
+    at = QPoint(rect.right() - 5, rect.top() + 6)
+    QTest.mouseMove(tree.viewport(), at)
+    QApplication.processEvents()
+    return _shows(tree, item, hover)
+
+
+def _shows(tree: FirmwareTree, item: QTreeWidgetItem, colour: str) -> bool:
+    rect = tree.visualItemRect(item)
+    at = QPoint(rect.right() - 5, rect.top() + 6)
+    return tree.viewport().grab().toImage().pixelColor(at).name() == colour
+
+
+def _row(tree: FirmwareTree, kind: str) -> QTreeWidgetItem:
+    for index in range(tree.topLevelItemCount()):
+        item = tree.topLevelItem(index)
+        node = tree.node(item)
+        if item is not None and node is not None and node.kind == kind:
+            return item
+    raise AssertionError(f"no {kind} row")
+
+
+def test_only_rows_that_do_something_show_the_hover(window: EmbrWindow) -> None:
+    """Firmware rows do; the section headers, the placeholder and the empty space at the end
+    do not, also when the mouse comes from a firmware row (that one no longer shows it)."""
+    window.library.create_firmware("one")
+    window.library.create_project("P")
+    tree = _shown(window, 700)
+    hover = window.palette.hover
+    firmware = _row(tree, "firmware")
+
+    assert _hovered(tree, firmware, hover)
+    assert not _hovered(tree, _spare(tree), hover)
+    assert not _shows(tree, firmware, hover)
+    assert not _hovered(tree, _row(tree, "header"), hover)
+    assert not _hovered(tree, _row(tree, "placeholder"), hover)

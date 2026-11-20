@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QDrag,
     QDragMoveEvent,
     QDropEvent,
+    QHoverEvent,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -165,6 +166,11 @@ class Row(QWidget):
             widget.setVisible(False)
 
 
+QUIET_ROWS = frozenset({"header", "placeholder", "spare"})
+"""Rows that do nothing when clicked (the section headers, placeholders and the spare row):
+no hover background."""
+
+
 class FirmwareTree(QTreeWidget):
     """Rows are QTreeWidgetItems carrying a Node, drawn with Row widgets. Dragging a
     firmware row emits move_requested on a valid drop; the tree itself never moves items.
@@ -215,6 +221,23 @@ class FirmwareTree(QTreeWidget):
         self._scroller = QTimer(self)
         self._scroller.setInterval(16)
         self._scroller.timeout.connect(self._edge_scroll)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        """The mouse over a row of QUIET_ROWS counts as over no row: the view draws the hover
+        background of the row under the mouse whatever its delegate does."""
+        if event.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverMove):
+            hover = cast(QHoverEvent, event)
+            node = self.node(self.itemAt(hover.position().toPoint()))
+            if node is not None and node.kind in QUIET_ROWS:
+                left = QHoverEvent(
+                    QEvent.Type.HoverLeave,
+                    hover.position(),
+                    hover.globalPosition(),
+                    hover.oldPosF(),
+                    hover.modifiers(),
+                )
+                return super().viewportEvent(left)
+        return super().viewportEvent(event)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         node = self.node(self.itemAt(event.pos()))
@@ -453,9 +476,12 @@ class FirmwareTree(QTreeWidget):
 
     def _picture(self, block: Block) -> QPixmap:
         """The block's rows as shown: grabbed from the viewport when on screen (with the
-        selection), from the row widgets otherwise."""
+        selection), from the row widgets otherwise. At the screen's pixel ratio: a picture of
+        logical size would be drawn scaled up, blurred, on a scaled display."""
         width = self.viewport().width()
-        picture = QPixmap(width, block.height)
+        ratio = self.devicePixelRatioF()
+        picture = QPixmap(round(width * ratio), round(block.height * ratio))
+        picture.setDevicePixelRatio(ratio)
         picture.fill(Qt.GlobalColor.transparent)
         painter = QPainter(picture)
         y = 0

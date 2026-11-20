@@ -409,3 +409,19 @@ def test_a_selected_row_off_screen_keeps_its_colour(window: EmbrWindow) -> None:
     colour = picture.pixelColor(8, above + 4).name()
     assert colour == window.palette.sel.lower()
     _mouse(tree, QEvent.Type.MouseButtonRelease, QPoint(-5, -5), held=False)
+
+
+def test_the_dragged_pictures_keep_the_screen_resolution(
+    window: EmbrWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a scaled display (150 %) the rows are grabbed at 1.5 pixels per point; a picture
+    of logical size would be shown scaled up, blurred."""
+    for name in ("Alpha", "Bravo"):
+        window.library.create_project(name)
+    tree = _shown(window)
+    monkeypatch.setattr(tree, "devicePixelRatioF", lambda: 1.5)
+    block = reorder.blocks(tree._keys(None))[0]
+    picture = tree._picture(block)
+    assert picture.devicePixelRatio() == 1.5
+    assert picture.width() == round(tree.viewport().width() * 1.5)
+    assert picture.height() == round(block.height * 1.5)
