@@ -110,12 +110,15 @@ When run from source, Embr keeps its data in the `.run` folder of the repository
 - [docs/CHANGELOG.md](https://github.com/LuoIsHere/Embr/blob/main/docs/CHANGELOG.md): full list of changes in every version.
 - [LICENSE](LICENSE): the GNU General Public License, version 3.
 - [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES): third-party software, fonts and icons included in Embr, with their licenses.
+- [TRADEMARKS.md](TRADEMARKS.md): use of the Embr name and logo.
 
 ## License and disclaimer
 
 Copyright © 2026 @LuoIsHere
 
 Embr is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE).
+
+The license does not grant any trademark rights to the Embr name or logo: they may not be used to identify modified versions or other products without permission. See [TRADEMARKS.md](TRADEMARKS.md).
 
 Embr is distributed in the hope that it will be useful, but **without any warranty**; without even the implied warranty of merchantability or fitness for a particular purpose. Flashing, erasing and reading flash change or expose the contents of a device. The author accepts no liability for any damage arising from the use of Embr, including damaged devices, lost data or erased or overwritten flash. Back up important data with **Read flash…** before writing to a device.
 

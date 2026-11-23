@@ -1,7 +1,8 @@
 """Build the release package: dist/release/embr_<version>_windows_x64.zip
 holding the folder of the same name with Embr.exe, _internal/, LICENSE, THIRD_PARTY_NOTICES
 (the list from the repository plus the full license texts of everything bundled),
-ESPTOOL.txt, README.md and CHANGELOG.md; next to it <zip name>.sha256 ("<hash>  <name>").
+ESPTOOL.txt, README.md, CHANGELOG.md and TRADEMARKS.md;
+next to it <zip name>.sha256 ("<hash>  <name>").
 
     uv run python scripts/package_release.py [--skip-build]
 
@@ -32,7 +33,7 @@ ANALYSIS = REPO / "build" / "Embr" / "PYZ-00.toc"
 LICENSES = Path(__file__).resolve().parent / "licenses"
 """License texts the bundled packages do not ship themselves."""
 FONT_LICENSE = REPO / "src" / "embr" / "resources" / "fonts" / "LICENSE_Fonts"
-COPIED = ("LICENSE", "README.md", "CHANGELOG.md")
+COPIED = ("LICENSE", "README.md", "CHANGELOG.md", "TRADEMARKS.md")
 LICENSE_FILE = re.compile(r"(LICEN[CS]E|COPYING|NOTICE)", re.IGNORECASE)
 RULE = "=" * 78
 PACKAGE_NAME = f"embr_{__version__}_windows_x64"

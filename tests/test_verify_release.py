@@ -28,6 +28,7 @@ REQUIRED = (
     "ESPTOOL.txt",
     "README.md",
     "CHANGELOG.md",
+    "TRADEMARKS.md",
     BUILD_TXT,
     "_internal/embr/resources/esptool.cfg",
 )
@@ -57,6 +58,7 @@ def _members() -> dict[str, bytes]:
         "ESPTOOL.txt": b"esptool note\r\n",
         "README.md": b"# Embr\n",
         "CHANGELOG.md": b"# Changelog\n",
+        "TRADEMARKS.md": b"# Name and logo\n",
         BUILD_TXT: b"2026-11-01 08:12 UTC\n",
         "_internal/embr/resources/esptool.cfg": b"[esptool]\n",
         "_internal/base_library.zip": b"PK",

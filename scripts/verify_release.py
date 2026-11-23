@@ -27,6 +27,7 @@ REQUIRED = (
     "ESPTOOL.txt",
     "README.md",
     "CHANGELOG.md",
+    "TRADEMARKS.md",
     "_internal/embr/resources/build.txt",
     "_internal/embr/resources/esptool.cfg",
 )

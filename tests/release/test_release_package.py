@@ -44,6 +44,7 @@ TOP_FILES = (
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
+    "TRADEMARKS.md",
     "ESPTOOL.txt",
     "THIRD_PARTY_NOTICES",
 )
@@ -197,7 +198,7 @@ def test_zip_layout(package: Package) -> None:
     for name in (*TOP_FILES, BUILD_TXT):
         assert name in files, f"{name} missing from the zip"
     assert any(n.startswith("_internal/PySide6/") for n in files)
-    for copied in ("LICENSE", "README.md", "CHANGELOG.md"):
+    for copied in ("LICENSE", "README.md", "CHANGELOG.md", "TRADEMARKS.md"):
         assert package.read(copied) == (kit.REPO / copied).read_bytes(), copied
     built = kit.REPO / "dist" / "Embr" / "Embr.exe"
     assert package.read("Embr.exe") == built.read_bytes()

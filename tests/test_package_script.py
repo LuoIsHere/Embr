@@ -429,6 +429,7 @@ def repo(pr: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Repo:
     (root / "LICENSE").write_bytes(b"GPL TEXT\nline two\n")
     (root / "README.md").write_bytes("# Embr\n\nr\u00e9sum\u00e9\n".encode())
     (root / "CHANGELOG.md").write_bytes(b"# Changelog\r\n\r\n- one\r\n")
+    (root / "TRADEMARKS.md").write_bytes(b"# Name and logo\n")
     (root / "THIRD_PARTY_NOTICES").write_text(REPO_NOTICES, encoding="utf-8", newline="\n")
     dist = root / "dist" / "Embr"
     resources = dist / "_internal" / "embr" / "resources"
@@ -488,6 +489,7 @@ def test_main_packages_the_release(
             "LICENSE",
             "README.md",
             "CHANGELOG.md",
+            "TRADEMARKS.md",
             "ESPTOOL.txt",
             "THIRD_PARTY_NOTICES",
         )
@@ -501,7 +503,7 @@ def test_main_packages_the_release(
     }
     assert staged == files
     assert read[f"{NAME}/Embr.exe"] == b"MZ fake exe"
-    for copied in ("LICENSE", "README.md", "CHANGELOG.md"):
+    for copied in ("LICENSE", "README.md", "CHANGELOG.md", "TRADEMARKS.md"):
         assert read[f"{NAME}/{copied}"] == (repo.root / copied).read_bytes(), copied
 
     notices = read[f"{NAME}/THIRD_PARTY_NOTICES"]
@@ -666,4 +668,4 @@ def test_script_paths_point_into_the_repository(pr: Any) -> None:
     assert pr.PACKAGE_NAME == NAME == f"embr_{__version__}_windows_x64"
     for name in pr.COPIED:
         assert (REPO / name).is_file(), name
-    assert set(pr.COPIED) == {"LICENSE", "README.md", "CHANGELOG.md"}
+    assert set(pr.COPIED) == {"LICENSE", "README.md", "CHANGELOG.md", "TRADEMARKS.md"}
