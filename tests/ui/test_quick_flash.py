@@ -27,7 +27,7 @@ from embr.core.history import RecordResult
 from embr.core.serial import ConnectionType, PortInfo
 from embr.core.storage.paths import AppPaths, prepare
 from embr.i18n import Language, current, set_language, tr
-from embr.ui.connection import QUICK_TIP
+from embr.ui.connection import ERASE_TIP, QUICK_TIP
 from embr.ui.window import (
     HINT_DOWNLOAD_MODE,
     HINT_QUICK_JTAG,
@@ -122,6 +122,16 @@ ZH_QUICK = "快速烧录"
 ZH_TIP = (
     "跳过“连接并识别”，直接烧录。烧录时仍会识别并检查芯片；"  # noqa: RUF001
     "芯片不符或已启用安全功能时拒绝写入。"
+)
+ERASE_ALL = "Erase the whole flash before flashing"
+ERASE_ALL_TIP = (
+    "Erase the whole flash before writing. All data on the flash is cleared, including NVS "
+    "(Wi-Fi credentials and other stored data). Saved with the firmware."
+)
+ZH_ERASE_ALL = "烧录前擦除整片 flash"
+ZH_ERASE_ALL_TIP = (
+    "写入前擦除整片 flash。flash 上的全部数据都会被清除，"  # noqa: RUF001
+    "包括 NVS（Wi-Fi 凭据和其他已保存的数据）。此设置随固件保存。"  # noqa: RUF001
 )
 
 
@@ -507,6 +517,7 @@ def test_hint_constants_match_the_requirements() -> None:
         QUICK_JTAG,
     )
     assert QUICK_TIP == TIP
+    assert ERASE_TIP == ERASE_ALL_TIP
 
 
 # ---- Ctrl+Enter ------------------------------------------------------------------------
@@ -565,11 +576,12 @@ def test_visible_without_a_firmware(window: EmbrWindow) -> None:
     panel = window.connection
     assert window.selected_firmware_id() is None
     assert not panel.erase_all.isVisible()
+    assert not panel.erase_help.isVisible()
     assert panel.quick.isVisible()
     assert panel.quick.isEnabled()
 
 
-@pytest.mark.parametrize(("right", "wrapped"), [(280, True), (330, False)])
+@pytest.mark.parametrize(("right", "wrapped"), [(330, True), (420, False)])
 def test_own_row_in_a_narrow_english_column(
     window: EmbrWindow, tmp_path: Path, right: int, wrapped: bool
 ) -> None:
@@ -577,6 +589,7 @@ def test_own_row_in_a_narrow_english_column(
     _settle(window, right)
     panel = window.connection
     assert panel.erase_all.isVisible() and panel.quick.isVisible()
+    assert panel.erase_help.isVisible()
     assert panel.wrapped() is wrapped
     below = (
         panel.quick.mapTo(panel, panel.quick.rect().topLeft()).y()
@@ -585,12 +598,16 @@ def test_own_row_in_a_narrow_english_column(
     assert below is wrapped
 
 
-def test_one_row_in_chinese_at_the_narrowest(tmp_path: Path, qapp: QCoreApplication) -> None:
+@pytest.mark.parametrize(("right", "wrapped"), [(280, True), (310, False)])
+def test_own_row_in_a_narrow_chinese_column(
+    tmp_path: Path, qapp: QCoreApplication, right: int, wrapped: bool
+) -> None:
     with _open(AppPaths(tmp_path / "Embr"), Language.ZH_CN) as shown:
         _single(shown, tmp_path)
-        _settle(shown, 280)
+        _settle(shown, right)
         assert shown.connection.erase_all.isVisible()
-        assert not shown.connection.wrapped()
+        assert shown.connection.erase_help.isVisible()
+        assert shown.connection.wrapped() is wrapped
 
 
 # ---- Simplified Chinese ----------------------------------------------------------------
@@ -608,6 +625,8 @@ def chinese() -> Iterator[None]:
 def test_translations() -> None:
     assert tr("Quick flash") == ZH_QUICK
     assert tr(TIP) == ZH_TIP
+    assert tr(ERASE_ALL) == ZH_ERASE_ALL
+    assert tr(ERASE_ALL_TIP) == ZH_ERASE_ALL_TIP
     for text in (NEEDS_ID, QUICK_OTG, QUICK_JTAG):
         assert tr(text) != text
     erase = tr(ERASE.format("COM7"))
@@ -624,6 +643,9 @@ def test_chinese_panel(tmp_path: Path, qapp: QCoreApplication) -> None:
         assert panel.quick_text.text() == ZH_QUICK
         assert panel.quick.toolTip() == ZH_TIP
         assert panel.quick_help.toolTip() == ZH_TIP
+        assert panel.erase_all.text() == ZH_ERASE_ALL
+        assert panel.erase_all.toolTip() == ZH_ERASE_ALL_TIP
+        assert panel.erase_help.toolTip() == ZH_ERASE_ALL_TIP
         assert panel.quick.accessibleName() == ZH_QUICK
         text, kind = _hint(shown)
         assert (text, kind) == (tr(QUICK_OTG), "warn")
@@ -696,17 +718,22 @@ def test_picking_another_port_while_one_is_away_drops_it(
     assert window.connection.selected_port() == UART
 
 
-def test_the_help_mark_explains_at_once(window: EmbrWindow) -> None:
+@pytest.mark.parametrize(("name", "tip"), [("quick_help", TIP), ("erase_help", ERASE_ALL_TIP)])
+def test_the_help_mark_explains_at_once(
+    window: EmbrWindow, tmp_path: Path, name: str, tip: str
+) -> None:
     """The explanation shows as soon as the mouse is over the ? (no rest needed) and goes
     when it leaves."""
+    _single(_quiet(window), tmp_path)  # the erase box shows with a firmware
     window.resize(1400, 800)
     window.show()
     QApplication.processEvents()
-    mark = window.connection.quick_help
+    mark = getattr(window.connection, name)
+    assert mark.isVisible()
     QTest.mouseMove(mark, mark.rect().center())
     QApplication.processEvents()
     assert QToolTip.isVisible()
-    assert QToolTip.text() == TIP
+    assert QToolTip.text() == tip
 
     QTest.mouseMove(window.connection, QPoint(2, 2))
     QTest.qWait(500)  # a tooltip asked to hide fades out after a short delay

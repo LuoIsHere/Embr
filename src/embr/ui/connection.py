@@ -39,6 +39,10 @@ QUICK_TIP = N_(
     "during the flash; writing is refused if the chip does not match or a security feature "
     "is on."
 )
+ERASE_TIP = N_(
+    "Erase the whole flash before writing. All data on the flash is cleared, including NVS "
+    "(Wi-Fi credentials and other stored data). Saved with the firmware."
+)
 CHECK_TEXT = {
     CheckState.PASS: "PASS",
     CheckState.WARN: "WARN",
@@ -101,7 +105,8 @@ class ConnectionPanel(QWidget):
     flash_clicked = Signal()
     """Flash, or Cancel while a job runs."""
     erase_all_toggled = Signal(bool)
-    """The "erase the whole flash first" box above Flash (the firmware's erase_all)."""
+    """The "erase the whole flash before flashing" box above Flash (the firmware's
+    erase_all)."""
     quick_toggled = Signal(bool)
     """The Quick flash switch next to it (a global setting)."""
     hint_dismissed = Signal()
@@ -174,10 +179,16 @@ class ConnectionPanel(QWidget):
         # ---- action: hint, erase option, flash ----
         self.hint = HintLabel()
         self.hint.hide()
-        self.erase_all = QCheckBox(tr("Erase the whole flash first"))
-        self.erase_all.setToolTip(
-            tr("Saved with the firmware. Clears NVS (Wi-Fi credentials and other stored data)")
-        )
+        self.erase_all = QCheckBox(tr("Erase the whole flash before flashing"))
+        self.erase_all.setToolTip(tr(ERASE_TIP))
+        self.erase_help = HelpMark()
+        self.erase_help.setToolTip(tr(ERASE_TIP))
+        self._erase_box = QWidget()
+        erase = QHBoxLayout(self._erase_box)
+        erase.setContentsMargins(0, 0, 0, 0)
+        erase.setSpacing(4)
+        erase.addWidget(self.erase_all)
+        erase.addWidget(self.erase_help)
         self.quick = Switch()
         self.quick.setToolTip(tr(QUICK_TIP))
         self.quick.setAccessibleName(tr("Quick flash"))
@@ -192,11 +203,12 @@ class ConnectionPanel(QWidget):
         quick.addWidget(self.quick_help)
         quick.addSpacing(2)
         quick.addWidget(self.quick, 0, Qt.AlignmentFlag.AlignVCenter)
-        # one row: [ ] Erase the whole flash first      Quick flash (?) [switch]; when the
-        # column is too narrow for both, the switch goes to a row of its own (right aligned)
+        # one row: [ ] Erase the whole flash before flashing (?)   Quick flash (?) [switch];
+        # when the column is too narrow for both, the switch goes to a row of its own (right
+        # aligned)
         self._options = QHBoxLayout()
         self._options.setSpacing(8)
-        self._options.addWidget(self.erase_all)
+        self._options.addWidget(self._erase_box)
         self._options.addStretch(1)
         self._options.addWidget(self._quick_box)
         self._wrapped_row = QWidget()
@@ -260,7 +272,8 @@ class ConnectionPanel(QWidget):
         self._palette = p
         self._paint_keys()
         self.quick.set_colors(p.accent, p.line, p.panel, p.fg_3)
-        self.quick_help.setPixmap(icons.icon("circle-help", p.fg_3, 14).pixmap(14, 14))
+        for mark in (self.erase_help, self.quick_help):
+            mark.setPixmap(icons.icon("circle-help", p.fg_3, 14).pixmap(14, 14))
 
     def set_quick(self, on: bool) -> None:
         """Show the Quick flash setting; changes come back as quick_toggled."""
@@ -450,7 +463,7 @@ class ConnectionPanel(QWidget):
         room = self.width() - 24  # the action frame's margins
         need = self._quick_box.sizeHint().width()
         if not self.erase_all.isHidden():
-            need += self.erase_all.sizeHint().width() + self._options.spacing()
+            need += self._erase_box.sizeHint().width() + self._options.spacing()
         wrap = need > room
         target, other = (self._wrapped, self._options) if wrap else (self._options, self._wrapped)
         if other.indexOf(self._quick_box) >= 0:
@@ -469,6 +482,7 @@ class ConnectionPanel(QWidget):
         self.erase_all.blockSignals(False)
         self.erase_all.setEnabled(enabled and not self._running)
         self.erase_all.setVisible(visible)
+        self.erase_help.setVisible(visible)
         self._mark_erase_all()
         self._fit_options()
 

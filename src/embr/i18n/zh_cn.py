@@ -208,9 +208,9 @@ TEXT: dict[str, str] = {
     "Port": "端口",
     "Baud": "波特率",
     "Checks": "检查",
-    "Erase the whole flash first": "先擦除整片 flash",
-    "Saved with the firmware. Clears NVS (Wi-Fi credentials and other stored data)": (
-        "随固件保存。会清空 NVS（Wi-Fi 凭据和其他已保存的数据）"
+    "Erase the whole flash before flashing": "烧录前擦除整片 flash",
+    "Erase the whole flash before writing. All data on the flash is cleared, including NVS (Wi-Fi credentials and other stored data). Saved with the firmware.": (
+        "写入前擦除整片 flash。flash 上的全部数据都会被清除，包括 NVS（Wi-Fi 凭据和其他已保存的数据）。此设置随固件保存。"
     ),
     "Idle": "空闲",
     "No serial port found": "未找到串口",
