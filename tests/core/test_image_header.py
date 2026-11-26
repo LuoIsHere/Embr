@@ -36,6 +36,42 @@ def test_idf_app_header_matches_expect(sample: str) -> None:
     boot = read_image_header((build / "bootloader/bootloader.bin").read_bytes())
     assert boot is not None
     assert header.idf_ver == boot.idf_ver == description["git_revision"][:31]
+    assert header.app_version == description["project_version"][:31]
+    assert boot.app_version is None  # the bootloader descriptor has no version field
+
+
+# esp_app_desc_t starts the first segment's data: 24-byte image header, 8-byte segment header
+_APP_VERSION_AT = 24 + 8 + 0x10
+
+
+def _with_app_version(field: bytes) -> bytes:
+    app = idf_app_path("esp32s3_hello").read_bytes()
+    assert len(field) == 32
+    return app[:_APP_VERSION_AT] + field + app[_APP_VERSION_AT + 32 :]
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        (b"v1.2.3-4-gabc1234-dirty".ljust(32, b"\0"), "v1.2.3-4-gabc1234-dirty"),
+        (b"\0" * 32, None),
+        (b"x" * 32, "x" * 32),  # no NUL: the field ends at its 32 bytes, nothing after it
+    ],
+    ids=["set", "empty", "full"],
+)
+def test_app_version(field: bytes, expected: str | None) -> None:
+    header = read_image_header(_with_app_version(field))
+    assert header is not None
+    assert header.app_version == expected
+
+
+def test_arduino_app_version_is_the_core_build_not_the_sketch() -> None:
+    # the Arduino core is a prebuilt ESP-IDF app: its descriptor carries the core's own
+    # version text, which says nothing about the sketch
+    path = FIXTURES / "pio/arduino_esp32_16mb/.pio/build/esp32dev/firmware.bin"
+    header = read_image_header(path.read_bytes())
+    assert header is not None
+    assert header.app_version == "esp-idf: v4.4.7 38eeba213a"
 
 
 def test_p4_rev1_and_rev3() -> None:

@@ -28,7 +28,10 @@ _IMAGE_MAGIC = 0xE9
 _CHIP_ID_OFFSET = 12  # u16 in the extended header
 _APP_DESC_MAGIC = 0xABCD5432
 _BOOTLOADER_DESC_MAGIC = 0x50
-# idf_ver[32] offsets in esp_app_desc_t and esp_bootloader_desc_t (ESP-IDF esp_app_format)
+# version[32] in esp_app_desc_t; idf_ver[32] in esp_app_desc_t and esp_bootloader_desc_t
+# (ESP-IDF esp_app_format)
+_APP_VERSION = 0x10
+_APP_VERSION_SIZE = 32
 _APP_IDF_VER = 0x70
 _BOOTLOADER_IDF_VER = 0x08
 _IDF_VER_SIZE = 32
@@ -60,6 +63,11 @@ class ImageHeader:
     """ESP-IDF version string from the descriptor (esp_app_desc_t.idf_ver at 0x70 of the
     first segment's data, or the bootloader descriptor's idf_ver at 0x08), NUL-stripped,
     at most 31 characters; None without a descriptor."""
+    app_version: str | None = None
+    """Application version from esp_app_desc_t.version at 0x10 of the first segment's data
+    (PROJECT_VER, by default `git describe` of the project at build time), NUL-stripped;
+    None without an app descriptor or when the field is empty. Shown as written, never
+    parsed: a project may set it to any text."""
 
 
 def read_image_header(data: bytes) -> ImageHeader | None:
@@ -84,9 +92,12 @@ def read_image_header(data: bytes) -> ImageHeader | None:
     has_app_desc = len(first) == 4 and struct.unpack("<I", first)[0] == _APP_DESC_MAGIC
     has_bootloader_desc = first[:1] == bytes([_BOOTLOADER_DESC_MAGIC])
     idf_ver: str | None = None
+    app_version: str | None = None
     if has_app_desc != has_bootloader_desc:  # exactly one descriptor
         at = _APP_IDF_VER if has_app_desc else _BOOTLOADER_IDF_VER
         idf_ver = _c_string(desc[at : at + _IDF_VER_SIZE])
+        if has_app_desc:
+            app_version = _c_string(desc[_APP_VERSION : _APP_VERSION + _APP_VERSION_SIZE])
     size_code = image.flash_size_freq & 0xF0
     freq_code = image.flash_size_freq & 0x0F
     return ImageHeader(
@@ -103,6 +114,7 @@ def read_image_header(data: bytes) -> ImageHeader | None:
         has_app_desc=has_app_desc,
         has_bootloader_desc=has_bootloader_desc,
         idf_ver=idf_ver,
+        app_version=app_version,
     )
 
 
