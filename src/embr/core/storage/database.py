@@ -1,4 +1,5 @@
-"""embr.sqlite: flash records and the archive index. Version in PRAGMA user_version."""
+"""embr.sqlite: flash records, the archive index and build versions. Version in PRAGMA
+user_version."""
 
 import shutil
 import sqlite3
@@ -6,9 +7,11 @@ from pathlib import Path
 
 from embr.core.storage.documents import backup_folder
 
-DB_SCHEMA_VERSION = 2
+DB_SCHEMA_VERSION = 3
 """Version 1 tables: flash_records, record_entries, archive_files,
-archive_names. Version 2: flash_records.operation (flash / erase / read_flash)."""
+archive_names. Version 2: flash_records.operation (flash / erase / read_flash). Version 3:
+versions, version_entries, version_counters; flash_records.origin (gui / cli) and
+flash_records.version_id."""
 
 
 class NewerSchemaError(Exception):
@@ -46,7 +49,10 @@ def open_database(path: Path, backup_root: Path) -> sqlite3.Connection:
     if existing and version < DB_SCHEMA_VERSION:
         shutil.copy2(path, backup_folder(backup_root) / path.name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
+    # The GUI and the command line may use the same file at once: a writer waits up to 5 s
+    # for the other process's transaction instead of failing at once. The rollback journal
+    # is kept (no WAL), because WAL is unsafe when the folder is on a network share.
+    connection = sqlite3.connect(path, timeout=5)
     connection.execute("PRAGMA foreign_keys = ON")
     while version < DB_SCHEMA_VERSION:
         _migrate(connection, version)
@@ -112,5 +118,49 @@ _MIGRATIONS: dict[int, str] = {
     1: """
     ALTER TABLE flash_records ADD COLUMN operation TEXT NOT NULL DEFAULT 'flash';
     CREATE INDEX flash_records_operation ON flash_records (operation);
+    """,
+    # build versions: immutable copies of a tracked firmware's flashable content; their
+    # files live in the archive (archive_files only, no archive_names rows). seq numbers
+    # come from version_counters, never from max(seq) + 1, so a deleted number is not
+    # given out again. Records made before this step all came from the GUI.
+    2: """
+    CREATE TABLE versions (
+        id TEXT PRIMARY KEY,
+        firmware_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        app_version TEXT,
+        git_commit TEXT,
+        git_describe TEXT,
+        git_dirty INTEGER,
+        chip TEXT,
+        params TEXT NOT NULL,
+        build_path TEXT NOT NULL DEFAULT '',
+        UNIQUE (firmware_id, seq)
+    );
+    CREATE TABLE version_entries (
+        version_id TEXT NOT NULL REFERENCES versions (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        address INTEGER,
+        sha256 TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        enabled INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (version_id, position)
+    );
+    CREATE TABLE version_counters (
+        firmware_id TEXT PRIMARY KEY,
+        last_seq INTEGER NOT NULL
+    );
+    ALTER TABLE flash_records ADD COLUMN origin TEXT NOT NULL DEFAULT 'gui';
+    ALTER TABLE flash_records ADD COLUMN version_id TEXT;
+    CREATE INDEX flash_records_version ON flash_records (version_id);
     """,
 }

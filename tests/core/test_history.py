@@ -200,6 +200,16 @@ def test_erase_and_read_flash_records(history: History, record: FlashRecord) -> 
     assert [r.id for r in history.query(operation=record.operation)] == [record.id]
 
 
+def test_origin_and_version_read_back(history: History) -> None:
+    plain = _record()
+    from_cli = _record(origin="cli", version_id=new_id())
+    history.add(plain)
+    history.add(from_cli)
+    assert history.get(plain.id).origin == "gui"
+    assert history.get(plain.id).version_id is None
+    assert history.get(from_cli.id) == from_cli
+
+
 def test_duplicate_id_is_refused(history: History) -> None:
     record = _record()
     history.add(record)

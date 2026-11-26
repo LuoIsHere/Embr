@@ -160,8 +160,34 @@ def test_open_database_creates_current_schema(tmp_path: Path) -> None:
         tables = {str(row[0]) for row in rows}
     finally:
         connection.close()
-    assert {"flash_records", "record_entries", "archive_files", "archive_names"} <= tables
+    assert {
+        "flash_records",
+        "record_entries",
+        "archive_files",
+        "archive_names",
+        "versions",
+        "version_entries",
+        "version_counters",
+    } <= tables
     assert _backup_files(tmp_path / "backup") == []
+
+
+def test_open_database_waits_for_another_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The GUI and the command line share embr.sqlite; a write waits for the other
+    process's transaction instead of failing at once."""
+    timeouts: list[object] = []
+    connect = sqlite3.connect
+
+    def spy(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        if "uri" not in kwargs:  # the read-only probe of an existing file is not the one
+            timeouts.append(kwargs.get("timeout"))
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(database.sqlite3, "connect", spy)
+    open_database(tmp_path / "embr.sqlite", tmp_path / "backup").close()
+    assert timeouts == [5]
 
 
 def test_open_database_migrates_old_file_with_backup(tmp_path: Path) -> None:
@@ -237,16 +263,18 @@ def _copy_v1(tmp_path: Path) -> tuple[Path, bytes]:
     return path, original
 
 
-def test_v1_database_migrates_to_v2_with_backup(tmp_path: Path) -> None:
-    assert DB_SCHEMA_VERSION == 2
+def test_v1_database_migrates_with_backup(tmp_path: Path) -> None:
+    assert DB_SCHEMA_VERSION == 3
     path, original = _copy_v1(tmp_path)
     connection = open_database(path, tmp_path / "backup")
     try:
-        assert schema_version(connection) == 2
-        rows = connection.execute("SELECT id, operation FROM flash_records").fetchall()
+        assert schema_version(connection) == 3
+        rows = connection.execute(
+            "SELECT id, operation, origin, version_id FROM flash_records"
+        ).fetchall()
     finally:
         connection.close()
-    assert rows == [(_v1_source()["record"]["id"], "flash")]
+    assert rows == [(_v1_source()["record"]["id"], "flash", "gui", None)]
     backups = _backup_files(tmp_path / "backup")
     assert [b.read_bytes() for b in backups] == [original]
 
@@ -264,6 +292,73 @@ def test_v1_record_reads_back_after_migration(tmp_path: Path) -> None:
         assert getattr(record, field) == value, field
     assert record.refuse_reason is None
     assert record.entries == (RecordEntry(**expected["entry"]),)
+    assert record.origin == "gui"
+    assert record.version_id is None
+
+
+def _make_v2(path: Path, monkeypatch: pytest.MonkeyPatch) -> bytes:
+    """A version 2 database as v0.1.0 and v0.1.1 leave it, holding one record."""
+    with monkeypatch.context() as patch:
+        patch.setattr(database, "DB_SCHEMA_VERSION", 2)
+        connection = open_database(path, path.parent / "unused-backup")
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO flash_records (id, timestamp, result, operation)"
+                " VALUES ('R1', '2026-11-01T10:00:00', 'ok', 'erase')"
+            )
+    finally:
+        connection.close()
+    return path.read_bytes()
+
+
+def test_v2_database_migrates_with_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "embr.sqlite"
+    original = _make_v2(path, monkeypatch)
+    connection = open_database(path, tmp_path / "backup")
+    try:
+        assert schema_version(connection) == DB_SCHEMA_VERSION
+        rows = connection.execute(
+            "SELECT id, operation, origin, version_id FROM flash_records"
+        ).fetchall()
+        tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master")}
+    finally:
+        connection.close()
+    assert rows == [("R1", "erase", "gui", None)]
+    assert {"versions", "version_entries", "version_counters", "flash_records_version"} <= tables
+    assert [b.read_bytes() for b in _backup_files(tmp_path / "backup")] == [original]
+
+
+def test_version_tables_keep_their_rules(tmp_path: Path) -> None:
+    connection = open_database(tmp_path / "embr.sqlite", tmp_path / "backup")
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO versions (id, firmware_id, seq, name, created_at, origin, digest,"
+                " params) VALUES ('V1', 'F1', 1, 'v1', '2026-11-25T10:00:00', 'manual', 'd',"
+                " '{}')"
+            )
+            connection.execute(
+                "INSERT INTO version_entries (version_id, position, name, kind, address,"
+                " sha256, size, enabled) VALUES ('V1', 0, 'app.bin', 'app', 65536, 'a', 1, 1)"
+            )
+        with pytest.raises(sqlite3.IntegrityError), connection:  # seq is unique per firmware
+            connection.execute(
+                "INSERT INTO versions (id, firmware_id, seq, name, created_at, origin, digest,"
+                " params) VALUES ('V2', 'F1', 1, 'v2', '2026-11-25T10:00:00', 'manual', 'd',"
+                " '{}')"
+            )
+        with pytest.raises(sqlite3.IntegrityError), connection:  # one entry per position
+            connection.execute(
+                "INSERT INTO version_entries (version_id, position, name, kind, sha256, size,"
+                " enabled) VALUES ('V1', 0, 'other.bin', 'app', 'b', 1, 1)"
+            )
+        with connection:  # entries go with their version
+            connection.execute("DELETE FROM versions WHERE id = 'V1'")
+        left = connection.execute("SELECT COUNT(*) FROM version_entries").fetchone()[0]
+    finally:
+        connection.close()
+    assert left == 0
 
 
 # --- documents ---------------------------------------------------------------------------

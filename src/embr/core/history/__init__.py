@@ -73,6 +73,11 @@ class FlashRecord:
     """Equivalent esptool command line."""
     log_file: str = ""
     """"YYYY-MM-DD.log" of the day the operation started."""
+    origin: str = "gui"
+    """Where the operation was started: "gui" or "cli"."""
+    version_id: str | None = None
+    """The build version that was flashed, when it was one. Not a foreign key: the record
+    stays as it was after the version is deleted."""
 
 
 def result_from_event(event: ResultEvent | ErrorEvent) -> RecordResult:
@@ -218,6 +223,8 @@ class History:
                     esptool_version=_str(v["esptool_version"]),
                     command=_str(v["command"]),
                     log_file=_str(v["log_file"]),
+                    origin=_str(v["origin"]),
+                    version_id=_opt_str(v["version_id"]),
                 )
             )
         return records
@@ -272,4 +279,6 @@ _RECORD_COLUMNS = (
     "esptool_version",
     "command",
     "log_file",
+    "origin",
+    "version_id",
 )
