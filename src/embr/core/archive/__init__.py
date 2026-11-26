@@ -1,7 +1,8 @@
 """Content-addressed archive: data/archive/<sha256>.bin plus
 an index in embr.sqlite (archive_files: one row per content; archive_names: one row per
-time something was archived under a name). Files are copied, never moved; the source is
-never modified. Nothing is deleted except by delete() ("Clean archive").
+time something was archived under a name). A file stored for a record that keeps its own
+name (store() then register()) has no archive_names row. Files are copied, never moved; the
+source is never modified. Nothing is deleted except by delete() ("Clean archive").
 """
 
 import datetime
@@ -64,12 +65,8 @@ class Archive:
         intact (a stored file whose content no longer matches its hash is replaced), and add
         a name record. Returns the name record; its sha256 is the hash of what was stored.
         Raises OSError when the source cannot be read."""
-        data = source if isinstance(source, bytes) else source.read_bytes()
-        sha = hashlib.sha256(data).hexdigest()
+        sha, size = self.store(source)
         stamp = self._clock().isoformat(timespec="seconds")
-        target = self.path(sha)
-        if not _holds(target, sha):  # missing, or damaged since: written again
-            write_whole(target, data)
         name = ArchiveName(
             id=new_id(),
             sha256=sha,
@@ -80,11 +77,7 @@ class Archive:
             source_firmware=source_firmware,
         )
         with self._db:
-            self._db.execute(
-                "INSERT OR IGNORE INTO archive_files (sha256, size, first_archived)"
-                " VALUES (?, ?, ?)",
-                (sha, len(data), stamp),
-            )
+            self._insert_file(sha, size, stamp)
             self._db.execute(
                 "INSERT INTO archive_names (id, sha256, original_name, original_path, note,"
                 " archived_at, source_firmware) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -99,6 +92,31 @@ class Archive:
                 ),
             )
         return name
+
+    def store(self, source: Path | bytes) -> tuple[str, int]:
+        """Copy the content into the archive folder unless it is already stored intact, the
+        same way as add(), and return its (sha256, size). Touches no database row, so it may
+        run on a background thread; the file stays unindexed until register() is called.
+        Raises OSError when the source cannot be read or the file cannot be written."""
+        data = source if isinstance(source, bytes) else source.read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+        target = self.path(sha)
+        if not _holds(target, sha):  # missing, or damaged since: written again
+            write_whole(target, data)
+        return sha, len(data)
+
+    def register(self, sha256: str, size: int) -> None:
+        """Index a file written by store(), without a name record (whoever stores it keeps
+        the name). Does not commit: the caller wraps it in `with connection:` together with
+        the rows that refer to the file, so either all of them are written or none. A file
+        already indexed keeps its first_archived time."""
+        self._insert_file(sha256, size, self._clock().isoformat(timespec="seconds"))
+
+    def _insert_file(self, sha256: str, size: int, stamp: str) -> None:
+        self._db.execute(
+            "INSERT OR IGNORE INTO archive_files (sha256, size, first_archived) VALUES (?, ?, ?)",
+            (sha256, size, stamp),
+        )
 
     def has(self, sha256: str) -> bool:
         """The file exists in the archive folder."""

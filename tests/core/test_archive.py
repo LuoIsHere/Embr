@@ -128,3 +128,54 @@ def test_unreferenced_and_delete(archive: Archive) -> None:
     assert [f.sha256 for f in archive.files()] == [kept.sha256]
     assert archive.names(dropped.sha256) == []
     assert archive.has(kept.sha256)
+
+
+def test_store_writes_the_file_and_no_rows(archive: Archive, tmp_path: Path) -> None:
+    source = tmp_path / "app.bin"
+    source.write_bytes(b"app")
+    sha, size = archive.store(source)
+    assert (sha, size) == (_sha(b"app"), 3)
+    assert archive.path(sha).read_bytes() == b"app"
+    assert archive.files() == []
+    assert archive.names(sha) == []
+
+
+def test_store_keeps_an_intact_copy_and_replaces_a_damaged_one(
+    archive: Archive, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha, _ = archive.store(b"content")
+    written: list[Path] = []
+
+    def record(path: Path, data: bytes) -> None:
+        written.append(path)
+
+    monkeypatch.setattr("embr.core.archive.write_whole", record)
+    archive.store(b"content")
+    assert written == []  # already there and intact
+    archive.path(sha).write_bytes(b"damaged")
+    archive.store(b"content")
+    assert written == [archive.path(sha)]
+
+
+def test_register_indexes_without_a_name_and_keeps_the_first_time(archive: Archive) -> None:
+    sha, size = archive.store(b"content")
+    archive.register(sha, size)
+    archive.register(sha, size)
+    assert archive.files() == [ArchiveFile(sha, size, "2026-01-02T03:04:05")]
+    assert archive.names(sha) == []
+
+
+def test_register_is_undone_with_the_callers_transaction(tmp_path: Path) -> None:
+    connection = open_database(tmp_path / "embr.sqlite", tmp_path / "backup")
+    try:
+        archive = Archive(tmp_path / "archive", connection)
+        sha, size = archive.store(b"content")
+        with pytest.raises(RuntimeError), connection:
+            archive.register(sha, size)
+            raise RuntimeError("the rows that refer to the file failed")
+        assert archive.files() == []
+        with connection:
+            archive.register(sha, size)
+        assert [f.sha256 for f in archive.files()] == [sha]
+    finally:
+        connection.close()
