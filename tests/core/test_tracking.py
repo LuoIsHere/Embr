@@ -24,7 +24,15 @@ from embr_testkit import (
 from embr.core.firmware.filecache import FileCache
 from embr.core.firmware.import_idf import configured_target, read_build
 from embr.core.firmware.kinds import EntryKind
-from embr.core.firmware.model import BuildRef, EntryOverride, Firmware, FlashParams, Source
+from embr.core.firmware.model import (
+    AddressSource,
+    BuildRef,
+    Entry,
+    EntryOverride,
+    Firmware,
+    FlashParams,
+    Source,
+)
 from embr.core.firmware.tracking import (
     ChangeKind,
     DerivedBuild,
@@ -436,3 +444,45 @@ def test_digest_follows_what_would_be_flashed(tmp_path: Path) -> None:
         other = copy.deepcopy(resolved)
         change(other)
         assert digest(other) != base
+
+
+def test_build_digest_leaves_out_the_erase_option(tmp_path: Path) -> None:
+    firmware, build = _follow(tmp_path)
+    resolved = _resolve(firmware, build).firmware
+    base = digest(resolved, erase_all=False)
+
+    erasing = copy.deepcopy(resolved)
+    erasing.erase_all = not resolved.erase_all
+    assert digest(erasing, erase_all=False) == base
+    assert digest(erasing) != digest(resolved)
+
+    other_params = copy.deepcopy(resolved)
+    other_params.flash.freq = "20m" if resolved.flash.freq != "20m" else "40m"
+    assert digest(other_params, erase_all=False) != base
+
+
+def test_digest_values_are_stable() -> None:
+    """The digest of a flash job does not change between versions of Embr."""
+    firmware = Firmware(
+        id="F",
+        name="App",
+        project_id=None,
+        device="",
+        source=Source.MANUAL,
+        chip="esp32",
+        entries=[
+            Entry(
+                id="E",
+                name="app.bin",
+                file="app.bin",
+                sha256="a" * 64,
+                size=1,
+                kind=EntryKind.APP,
+                address=0x10000,
+                auto_address=None,
+                address_source=AddressSource.MANUAL,
+            )
+        ],
+    )
+    assert digest(firmware) == "a96ce53cf92505a4"
+    assert digest(firmware, erase_all=False) == "cf82335d74c57d2e"

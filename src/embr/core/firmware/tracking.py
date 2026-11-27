@@ -382,10 +382,13 @@ def accept(firmware: Firmware, resolution: Resolution) -> None:
             del firmware.entry_overrides[key]
 
 
-def digest(firmware: Firmware) -> str:
+def digest(firmware: Firmware, *, erase_all: bool = True) -> str:
     """Short hash of what a flash would write: chip, flash parameters, reset modes, stub,
     erase_all and (address, sha256) of every enabled entry. Equal digests mean the same
-    flash job. Works for fixed firmware too."""
+    flash job. Works for fixed firmware too.
+
+    erase_all=False leaves the erase option out: the hash then identifies the build content
+    alone, so two builds that differ only in that option count as the same build version."""
     flash = firmware.flash
     parts: list[object] = [
         firmware.chip,
@@ -395,9 +398,10 @@ def digest(firmware: Firmware) -> str:
         firmware.before,
         firmware.after,
         firmware.stub,
-        firmware.erase_all,
-        sorted((e.address or -1, e.sha256) for e in firmware.entries if e.enabled),
     ]
+    if erase_all:
+        parts.append(firmware.erase_all)
+    parts.append(sorted((e.address or -1, e.sha256) for e in firmware.entries if e.enabled))
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
 
 
