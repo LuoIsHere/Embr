@@ -275,9 +275,15 @@ class VersionStore:
         self._version += 1
         return shas
 
-    def referenced(self) -> set[str]:
-        """sha256 of every file referred to by any version."""
-        return {str(r[0]) for r in self._db.execute("SELECT DISTINCT sha256 FROM version_entries")}
+    def referenced(self, *, besides: str | None = None) -> set[str]:
+        """sha256 of every file referred to by any version; with `besides`, by any version
+        of another firmware than that one."""
+        rows = self._db.execute(
+            "SELECT DISTINCT e.sha256 FROM version_entries e"
+            " JOIN versions v ON v.id = e.version_id WHERE v.firmware_id IS NOT ?",
+            (besides,),
+        )
+        return {str(r[0]) for r in rows}
 
     def flash_counts(self, firmware_id: str) -> dict[str, list[tuple[str, str]]]:
         """For each version of the firmware that was flashed successfully: (mac, timestamp)

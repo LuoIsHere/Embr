@@ -48,6 +48,7 @@ def test_read_build(sample: str) -> None:
     assert (build.chip, build.target) == (expect["chip"], expect["chip"])
     assert (build.before, build.after, build.stub) == ("default-reset", "hard-reset", True)
     assert build.project_name == source["project_name"]
+    assert build.project_path == Path("<PROJECT_DIR>")  # as the sanitized sample writes it
     assert build.idf_version == cast(str, source["toolchain"]).removeprefix("ESP-IDF ")
     assert set(build.inputs) >= {
         build_dir / "flasher_args.json",
@@ -147,6 +148,7 @@ def test_optional_fields_missing(tmp_path: Path) -> None:
         None,
         None,
     )
+    assert build.project_path is None
     assert (build.chip, build.stub, build.flash_freq) == ("esp32s3", True, "keep")
     assert default_firmware_name(build) == "my_project"
 

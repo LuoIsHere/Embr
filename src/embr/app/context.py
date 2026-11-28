@@ -12,6 +12,7 @@ from embr.core.project import ProjectStore
 from embr.core.storage.database import open_database
 from embr.core.storage.paths import AppPaths
 from embr.core.storage.settings import Settings
+from embr.core.versions import VersionStore
 
 
 @dataclass
@@ -24,6 +25,7 @@ class AppContext:
     logs: LogBook
     settings: Settings
     archive: Archive
+    versions: VersionStore
     files: FileCache = field(default_factory=FileCache)
     """Hashes (and small contents) of entry and build files, shared by the tracker, the
     checklist and image headers; a file is read again only after its size or modification
@@ -50,4 +52,5 @@ def open_context(paths: AppPaths) -> AppContext:
         logs=LogBook(paths.logs),
         settings=Settings(paths.settings, paths.backup),
         archive=Archive(paths.archive, database),
+        versions=VersionStore(database),
     )

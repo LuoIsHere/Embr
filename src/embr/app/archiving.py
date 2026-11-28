@@ -33,6 +33,16 @@ class Cleaned:
     """Files that could not be removed; they stay in the archive and its index."""
 
 
+def firmware_references(context: AppContext) -> set[str]:
+    """sha256 of every archive file a firmware entry refers to (versions not included)."""
+    return {
+        sha
+        for f in context.firmware.all()
+        for e in f.entries
+        if (sha := archived_sha(e)) is not None
+    }
+
+
 class Archiver:
     def __init__(
         self,
@@ -122,10 +132,14 @@ class Archiver:
 
     def usage(self) -> list[ArchiveUsage]:
         """Every indexed archive file with the firmware referring to it, in the archive
-        index order (what the Clean archive dialog shows before deleting anything)."""
+        index order (what the Clean archive dialog shows before deleting anything). A file
+        a build version uses counts as used by the firmware the version belongs to."""
         users: dict[str, list[Firmware]] = {}
         for firmware in self._ctx.firmware.all():
             shas = {sha for e in firmware.entries if (sha := archived_sha(e)) is not None}
+            shas |= {
+                e.sha256 for v in self._ctx.versions.for_firmware(firmware.id) for e in v.entries
+            }
             for sha in shas:
                 users.setdefault(sha, []).append(firmware)
         return [
@@ -137,7 +151,7 @@ class Archiver:
         ]
 
     def unreferenced(self) -> list[ArchiveFile]:
-        """Archive files no firmware refers to."""
+        """Archive files no firmware and no build version refers to."""
         return self._ctx.archive.unreferenced(self._referenced())
 
     def clean(self, sha256s: list[str]) -> Cleaned:
@@ -149,12 +163,7 @@ class Archiver:
         return Cleaned(deleted=len(wanted) - len(in_use), in_use=len(in_use))
 
     def _referenced(self) -> set[str]:
-        return {
-            sha
-            for f in self._ctx.firmware.all()
-            for e in f.entries
-            if (sha := archived_sha(e)) is not None
-        }
+        return firmware_references(self._ctx) | self._ctx.versions.referenced()
 
     def _archived_copy(self, entry: Entry, source_name: str) -> Entry:
         copy = dataclasses.replace(entry, id=new_id())

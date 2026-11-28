@@ -69,6 +69,8 @@ class IdfBuild:
     """project_description.json "config_file", else <project_path>/sdkconfig, else None."""
     links: tuple[ImageLink, ...] = ()
     """The app's and the bootloader's, when their project_description.json name them."""
+    project_path: Path | None = None
+    """project_description.json "project_path": the project folder (for its git state)."""
 
     @property
     def inputs(self) -> tuple[Path, ...]:
@@ -132,6 +134,7 @@ def read_build(build_dir: Path) -> IdfBuild:
             for root, found in ((build_dir, desc), (build_dir / "bootloader", None))
             if (link := _link(root, found)) is not None
         ),
+        project_path=Path(project) if (project := _str(desc.get("project_path"))) else None,
     )
 
 

@@ -755,6 +755,11 @@ TEXT: dict[str, str] = {
     "the build is incomplete": "构建不完整",
     "the build output or a file is missing": "构建产物或文件缺失",
     "the build is still being written": "构建产物仍在写入",
+    "{0} does not follow a build; it has no versions.": "{0} 未跟随构建，没有版本。",
+    "{0}: a backup is already in progress.": "{0}：已有备份正在进行。",
+    "{0} changed while it was being backed up; try again when the build has finished.": (
+        "{0} 在备份过程中发生了变化，请在构建完成后重试。"
+    ),
     "{0} is not an Embr package ({1})": "{0} 不是 Embr 包（{1}）",
     "{0} appears more than once in the package": "{0} 在包中重复出现",
     "{0} is missing from the package": "包中缺少 {0}",

@@ -274,6 +274,8 @@ def test_referenced_files(store: VersionStore, connection: sqlite3.Connection) -
     _insert(store, connection, entries=(APP,))
     _insert(store, connection, firmware_id=OTHER_FW)
     assert store.referenced() == {APP.sha256, BOOT.sha256}
+    assert store.referenced(besides=OTHER_FW) == {APP.sha256}
+    assert store.referenced(besides=FW) == {APP.sha256, BOOT.sha256}
 
 
 def _flash(version_id: str | None, mac: str | None, **changes: Any) -> FlashRecord:

@@ -32,6 +32,7 @@ from embr.app.flashplan import PlanError
 from embr.app.pio import FRAMEWORK_PKG_KEY as FRAMEWORK_PKG_KEY
 from embr.app.pio import PIO_SECTION as PIO_SECTION
 from embr.app.tracking import Tracker
+from embr.app.versions import BuildVersions
 from embr.core import chipinfo
 from embr.core.firmware import model
 from embr.core.firmware.entries import (
@@ -218,14 +219,25 @@ class Tree:
 
 
 class Library:
-    def __init__(self, context: AppContext, tracker: Tracker | None = None) -> None:
-        """`tracker` is shared with Operations and the UI; None creates one."""
+    def __init__(
+        self,
+        context: AppContext,
+        tracker: Tracker | None = None,
+        versions: BuildVersions | None = None,
+    ) -> None:
+        """`tracker` is shared with Operations and the UI; None creates one. `versions`
+        loses the build versions of deleted firmware; None creates one on `tracker`."""
         self._ctx = context
         self._tracker = tracker or Tracker(context)
+        self._versions = versions or BuildVersions(context, self._tracker)
 
     @property
     def tracker(self) -> Tracker:
         return self._tracker
+
+    @property
+    def versions(self) -> BuildVersions:
+        return self._versions
 
     # ---- sidebar ----------------------------------------------------------------------
 
@@ -342,8 +354,12 @@ class Library:
         return project
 
     def delete_project(self, project_id: str, *, delete_firmware: bool = False) -> None:
+        """With delete_firmware, their build versions go too (see delete_firmware())."""
         members = self._ctx.firmware.in_scope(project_id)
         self._ctx.projects.delete(project_id, self._ctx.firmware, delete_firmware=delete_firmware)
+        if delete_firmware:
+            for firmware in members:
+                self._versions.forget_firmware(firmware.id)
         self._invalidate(members)
 
     def add_group(self, project_id: str, name: str) -> Project:
@@ -445,8 +461,10 @@ class Library:
         return copy
 
     def delete_firmware(self, firmware_id: str) -> None:
-        """Archive files and flash records are kept."""
+        """Its build versions are deleted with the archive files only they used; other
+        archive files and the flash records are kept."""
         self._ctx.firmware.delete(firmware_id)
+        self._versions.forget_firmware(firmware_id)
         self._tracker.invalidate(firmware_id)
 
     def preview_idf(self, build_dir: Path) -> IdfBuild:

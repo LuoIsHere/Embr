@@ -484,7 +484,7 @@ def read_env(
         raise BuildMissingError(N_(f"{build_dir}: no build output"))
     if ref.env not in ini_envs(ref.project_root):
         raise EnvDirError(N_(f"{PLATFORMIO_INI} no longer declares [env:{ref.env}]"))
-    framework = _framework(build_dir, config)
+    framework = framework_of(build_dir, config)
     notes: list[str] = []
     problems: list[str] = []
     inputs = [*ini_files(ref.project_root), build_dir / IDEDATA, build_dir]
@@ -676,7 +676,9 @@ def _read(path: Path, cache: FileCache) -> Loaded | None:
         return None
 
 
-def _framework(build_dir: Path, config: EnvConfig | None) -> Framework:
+def framework_of(build_dir: Path, config: EnvConfig | None) -> Framework:
+    """The framework read_env() builds with: from `config` when it names espidf or arduino,
+    else espidf when `build_dir` has flasher_args.json, else arduino."""
     names = set(config.frameworks) if config is not None else set[str]()
     if Framework.ESPIDF.value in names:
         return Framework.ESPIDF
