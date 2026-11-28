@@ -154,6 +154,7 @@ class EmbrWindow(FrameWindow):
         self.sidebar_panel.tree.menu_requested.connect(self._firmware_menu)
         self.firmware_view.entries.archive_requested.connect(self.library_actions.archive_entry)
         self.firmware_view.entries.merge_requested.connect(self.library_actions.merge)
+        self.firmware_view.versions.version_action.connect(self.library_actions.version_action)
         self.connection.erase_clicked.connect(self.jobs.erase)
         self.connection.read_clicked.connect(self.jobs.read)
         self.connection.board_log_clicked.connect(self.jobs.open_board_log)

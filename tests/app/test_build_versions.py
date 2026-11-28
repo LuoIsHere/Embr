@@ -393,6 +393,12 @@ def test_deleting_a_version_reclaims_only_its_own_files(
     assert rig.versions.exclusive_size(rig.firmware_id) == sum(
         {e.sha256: e.size for v in (first, second) for e in v.entries}.values()
     )
+    assert rig.versions.freed_by([first.id]) == next(
+        e.size for e in first.entries if e.kind == EntryKind.APP.value
+    )
+    assert rig.versions.freed_by([first.id, second.id, "unknown"]) == sum(
+        {e.sha256: e.size for v in (first, second) for e in v.entries}.values()
+    )
     rig.versions.delete([first.id])
     assert context.versions.get(first.id) is None
     assert not context.archive.has(_app_sha(first))

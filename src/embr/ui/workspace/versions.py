@@ -1,16 +1,18 @@
 """The Versions tab of a tracking firmware: its build versions, newest first, with editable
-names, notes and pins, and Back up this build."""
+names, notes and pins, Back up this build, and a context menu per version (the window does
+what it asks: VersionsTab.version_action)."""
 
 import dataclasses
 from collections.abc import Mapping, Sequence
 
-from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
+    QMenu,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -24,7 +26,7 @@ from embr.i18n import N_, tr
 from embr.ui.adapters import settings as ui_settings
 from embr.ui.dialogs.device import size_text
 from embr.ui.owner import Owner
-from embr.ui.widgets import button, label, plain_table, small
+from embr.ui.widgets import button, danger_action, label, plain_table, small
 from embr.ui.workspace.entries import NOTE_MIN_WIDTH, ROW_PX
 from embr.ui.workspace.header import BACK_UP, BACKING_UP
 
@@ -110,6 +112,8 @@ class VersionsTab(QWidget):
         N_("Note"),
         N_("Pinned"),
     )
+    version_action = Signal(str, str)
+    """(action, version id) chosen in the context menu: save, merge, pin, delete."""
 
     def __init__(self, owner: Owner) -> None:
         super().__init__()
@@ -127,6 +131,7 @@ class VersionsTab(QWidget):
         self.table.setHorizontalHeaderLabels([tr(c) if c != "#" else c for c in self.COLUMNS])
         plain_table(self.table, ROW_PX)
         self.table.viewport().installEventFilter(self)  # refit columns, see eventFilter()
+        self.table.customContextMenuRequested.connect(self._context_menu)
         header = self.table.horizontalHeader()
         for column in (0, NOTE, PINNED):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
@@ -246,6 +251,43 @@ class VersionsTab(QWidget):
         pin.setFlags(flags)
         pin.setCheckState(Qt.CheckState.Checked if version.pinned else Qt.CheckState.Unchecked)
         self.table.setItem(row, PINNED, pin)
+
+    # ---- context menu -----------------------------------------------------------------
+
+    def menu_for(self, version: Version) -> tuple[QMenu, dict[str, QAction]]:
+        """The context menu of a row and its actions by name. While the firmware is locked
+        or read-only only Merge to .bin... is available."""
+        firmware = self._firmware
+        assert firmware is not None
+        locked = self._owner.is_locked(firmware.id) or firmware.read_only
+        menu = QMenu(self)
+        actions: dict[str, QAction] = {
+            "save": menu.addAction(tr("Save as firmware…")),
+            "merge": menu.addAction(tr("Merge to .bin…")),
+            "pin": menu.addAction(tr("Unpin") if version.pinned else tr("Pin")),
+        }
+        menu.addSeparator()
+        actions["delete"] = danger_action(menu, tr("Delete…"), lambda: None)
+        for name in ("save", "pin", "delete"):
+            actions[name].setEnabled(not locked)
+        return menu, actions
+
+    def _context_menu(self, pos: QPoint) -> None:
+        row = self.table.rowAt(pos.y())
+        item = self.table.item(row, 0) if row >= 0 else None
+        if self._firmware is None or item is None:
+            return
+        version_id = str(item.data(Qt.ItemDataRole.UserRole))
+        version = next((v for v in self._versions if v.id == version_id), None)
+        if version is None:
+            return
+        menu, actions = self.menu_for(version)
+        chosen: list[str] = []
+        for name, action in actions.items():
+            action.triggered.connect(lambda _=False, n=name: chosen.append(n))
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+        if chosen:
+            self.version_action.emit(chosen[0], version_id)
 
     # ---- edits ------------------------------------------------------------------------
 

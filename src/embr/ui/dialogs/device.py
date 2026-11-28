@@ -29,10 +29,16 @@ IMPORT_LABEL = N_("Import into Embr as a firmware")
 
 
 def merge(
-    parent: QWidget, merger: Merger, firmware: Firmware, default_output: Path
+    parent: QWidget,
+    merger: Merger,
+    firmware: Firmware,
+    default_output: Path,
+    *,
+    as_given: bool = False,
 ) -> tuple[Path, MergeOptions] | None:
     """Asks before replacing an existing file (naming the firmware that use it); a folder
-    as the output keeps Merge disabled."""
+    as the output keeps Merge disabled. `as_given`: the command and size are those of the
+    firmware object itself (a build version), not of the firmware stored under its id."""
     dialog = Dialog(parent, tr("Merge to .bin"), tr("Merge"), danger=False)
     offset = QLineEdit("0x0")
     dialog.field(tr("Start offset (hex)"), offset)
@@ -75,13 +81,20 @@ def merge(
             command.setText(tr("Save as is a folder; enter a file name."))
             return
         try:
-            command.setText(merger.command(firmware.id, Path(output.text()), chosen))
+            line = (
+                merger.command_for(firmware, Path(output.text()), chosen)
+                if as_given
+                else merger.command(firmware.id, Path(output.text()), chosen)
+            )
+            command.setText(line)
         except (PlanError, ValueError) as exc:  # e.g. checked entries for two chips
             command.setText(tr(str(exc)))
             return
         dialog.ok.setEnabled(True)
         try:
-            merged = merger.size(firmware.id, chosen)
+            merged = (
+                merger.size_for(firmware, chosen) if as_given else merger.size(firmware.id, chosen)
+            )
         except OSError:  # a file gone meanwhile: merging reports it
             merged = None
         if merged is not None:

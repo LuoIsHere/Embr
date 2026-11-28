@@ -1,6 +1,7 @@
 """The Versions tab of a tracking firmware, driven offscreen on a real window: shown only for
 tracking firmware, names, notes and pins saved from the table, Back up this build with the
-copy run at once, and the dragged column widths kept. git is never run."""
+copy run at once, the dragged column widths kept, and the context menu (save as firmware,
+merge, pin, delete). git is never run; dialogs are answered by stand-ins."""
 
 import os
 import shutil
@@ -10,9 +11,11 @@ from typing import Any
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QLineEdit
 
 from embr.app import versions as app_versions
+from embr.app.merging import MergeOptions
 from embr.core.versions import Origin, Version
 from embr.ui import dialogs
 from embr.ui.window import EmbrWindow
@@ -244,3 +247,142 @@ def test_dragged_column_widths_are_kept(window: EmbrWindow, tmp_path: Path) -> N
 
     assert window.context.settings.get("ui", COLUMN_WIDTHS) == "150,0,0,0,0,0"
     assert VersionsTab(window)._chosen == {NAME: 150}
+
+
+# --- context menu --------------------------------------------------------------------------
+
+
+def _menu(tab: VersionsTab, row: int = 0) -> dict[str, QAction]:
+    _, actions = tab.menu_for(tab.shown[row])
+    return actions
+
+
+def test_the_menu_offers_only_merge_while_locked(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware_id, _ = _tracked(window, tmp_path)
+    _backup(window, firmware_id)
+    tab = _shown(window, firmware_id)
+    actions = _menu(tab)
+    assert [a.text() for n, a in actions.items() if n != "delete"] == [
+        "Save as firmware…",
+        "Merge to .bin…",
+        "Pin",
+    ]
+    assert all(a.isEnabled() for a in actions.values())
+
+    def locked(_firmware_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(window, "is_locked", locked)
+    tab = _shown(window, firmware_id)
+    enabled = {n for n, a in _menu(tab).items() if a.isEnabled()}
+    assert enabled == {"merge"}
+
+
+def test_pin_and_unpin(window: EmbrWindow, tmp_path: Path) -> None:
+    firmware_id, _ = _tracked(window, tmp_path)
+    version = _backup(window, firmware_id)
+    tab = _shown(window, firmware_id)
+
+    tab.version_action.emit("pin", version.id)
+    stored = window.context.versions.get(version.id)
+    assert stored is not None and stored.pinned
+    assert _menu(tab)["pin"].text() == "Unpin"
+    tab.version_action.emit("pin", version.id)
+    stored = window.context.versions.get(version.id)
+    assert stored is not None and not stored.pinned
+
+
+def test_save_as_firmware_starts_from_the_version_name(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware_id, _ = _tracked(window, tmp_path)
+    version = _backup(window, firmware_id)
+    asked: list[str] = []
+
+    def ask_text(_parent: object, _title: str, _caption: str, value: str, *_rest: Any) -> str:
+        asked.append(value)
+        return "kept build"
+
+    monkeypatch.setattr(dialogs, "ask_text", ask_text)
+    tab = _shown(window, firmware_id)
+    tab.version_action.emit("save", version.id)
+
+    assert asked == [version.name]
+    created_id = window.selected_firmware_id()
+    assert created_id is not None and created_id != firmware_id
+    created = window.library.firmware(created_id)
+    assert created.name == "kept build" and created.source.value == "archived"
+
+
+def test_delete_a_version(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware_id, app = _tracked(window, tmp_path)
+    first = _backup(window, firmware_id)
+    _rebuilt(window, firmware_id, app)
+    second = _backup(window, firmware_id)
+    asked: list[list[str]] = []
+
+    def confirm(_parent: object, _title: str, lines: list[str], _ok: str) -> tuple[bool, bool]:
+        asked.append(lines)
+        return True, False
+
+    monkeypatch.setattr(dialogs, "confirm", confirm)
+    tab = _shown(window, firmware_id)
+    tab.version_action.emit("delete", first.id)
+
+    app_of_first = next(e for e in first.entries if e.kind == "app")
+    (lines,) = asked
+    assert lines[0] == f"Delete version <b>#1 {first.name}</b>?"
+    assert lines[1].startswith("Archive files used only by this version are deleted, freeing ")
+    assert [v.id for v in tab.shown] == [second.id]
+    assert not window.context.archive.has(app_of_first.sha256)
+
+
+def test_deleting_a_firmware_names_its_versions(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware_id, app = _tracked(window, tmp_path)
+    _backup(window, firmware_id)
+    _rebuilt(window, firmware_id, app)
+    _backup(window, firmware_id)
+    asked: list[list[str]] = []
+
+    def confirm(_parent: object, _title: str, lines: list[str], _ok: str) -> tuple[bool, bool]:
+        asked.append(lines)
+        return False, False
+
+    monkeypatch.setattr(dialogs, "confirm", confirm)
+    window.select_firmware(firmware_id)
+    window.firmware_action("delete")
+    assert asked[0][-1] == "Its 2 versions are deleted too."
+
+
+def test_merge_a_version(
+    window: EmbrWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    firmware_id, app = _tracked(window, tmp_path)
+    version = _backup(window, firmware_id)
+    seen: list[tuple[str, Path, bool]] = []
+    output = tmp_path / "out.bin"
+
+    def merge(
+        _parent: object, _merger: object, firmware: Any, default: Path, *, as_given: bool = False
+    ) -> tuple[Path, MergeOptions]:
+        seen.append((firmware.name, default, as_given))
+        return output, MergeOptions()
+
+    monkeypatch.setattr(dialogs, "merge", merge)
+    tab = _shown(window, firmware_id)
+    source_name = window.library.firmware(firmware_id).name
+    tab.version_action.emit("merge", version.id)
+
+    ((name, default, as_given),) = seen
+    assert name == f"{source_name} {version.name}" and as_given
+    assert default == app.parent.resolve() / f"{version.name}_merged.bin"
+    assert output.is_file()
+    created_id = window.selected_firmware_id()
+    assert created_id is not None
+    assert window.library.firmware(created_id).name == f"{source_name} {version.name} (merged)"

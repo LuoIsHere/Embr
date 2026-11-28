@@ -243,6 +243,23 @@ class BuildVersions:
         kept = firmware_references(self._ctx) | self._ctx.versions.referenced(besides=firmware_id)
         return sum(size for sha, size in sizes.items() if sha not in kept)
 
+    def freed_by(self, version_ids: Iterable[str]) -> int:
+        """Bytes delete(version_ids) would free: the files of those versions that no
+        firmware entry and no other version refers to."""
+        wanted = set(version_ids)
+        chosen = [v for i in wanted if (v := self._ctx.versions.get(i)) is not None]
+        sizes = {e.sha256: e.size for v in chosen for e in v.entries}
+        kept = firmware_references(self._ctx)
+        for firmware_id in {v.firmware_id for v in chosen}:
+            kept |= self._ctx.versions.referenced(besides=firmware_id)
+            kept |= {
+                e.sha256
+                for v in self._ctx.versions.for_firmware(firmware_id)
+                if v.id not in wanted
+                for e in v.entries
+            }
+        return sum(size for sha, size in sizes.items() if sha not in kept)
+
     def _reclaim(self, used: set[str]) -> None:
         kept = firmware_references(self._ctx) | self._ctx.versions.referenced()
         self._ctx.archive.delete(used - kept)

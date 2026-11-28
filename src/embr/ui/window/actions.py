@@ -2,7 +2,9 @@
 imports and exports, archive, backups, merge and files dropped on the sidebar."""
 
 import contextlib
+import dataclasses
 import html
+import re
 import threading
 from collections.abc import Callable, Generator
 from datetime import date
@@ -41,6 +43,7 @@ from embr.core.versions import Origin, Version
 from embr.i18n import N_, tr
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
+from embr.ui.dialogs.device import size_text
 from embr.ui.sidebar import Node
 from embr.ui.workspace import kept_notes
 
@@ -137,6 +140,14 @@ def _pio_folder(path: Path) -> Path | None:
     return built[0].build_dir if built else path
 
 
+FORBIDDEN_IN_FILE_NAMES = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _file_name(name: str) -> str:
+    """`name` usable as a Windows file name: characters it forbids become "-"."""
+    return FORBIDDEN_IN_FILE_NAMES.sub("-", name).strip(" .") or "version"
+
+
 def _start_thread(work: Callable[[], None]) -> None:
     threading.Thread(target=work, name="version-copy", daemon=True).start()
 
@@ -218,15 +229,15 @@ class LibraryActions:
             self._follow_env(firmware_id)
             return
         elif name == "delete":
-            accepted, _ = dialogs.confirm(
-                self._window,
-                tr("Delete firmware"),
-                [
-                    tr(f"Delete <b>{html.escape(firmware.name)}</b>?"),
-                    tr(dialogs.ARCHIVE_KEPT),
-                ],
-                tr("Delete"),
-            )
+            lines = [tr(f"Delete <b>{html.escape(firmware.name)}</b>?"), tr(dialogs.ARCHIVE_KEPT)]
+            count = len(self._window.context.versions.for_firmware(firmware_id))
+            if count:
+                lines.append(
+                    tr("Its 1 version is deleted too.")
+                    if count == 1
+                    else tr(f"Its {count} versions are deleted too.")
+                )
+            accepted, _ = dialogs.confirm(self._window, tr("Delete firmware"), lines, tr("Delete"))
             if not accepted:
                 return
             self._window.library.delete_firmware(firmware_id)
@@ -429,6 +440,97 @@ class LibraryActions:
             return
         window.note("ok", f"[version] {name}: backed up as #{version.seq} '{version.name}'")
         window.changed()
+
+    def version_action(self, name: str, version_id: str) -> None:
+        """An item of a version's context menu: save (as firmware), merge, pin (or unpin),
+        delete. Only merge while the firmware is locked or read-only."""
+        window = self._window
+        version = window.context.versions.get(version_id)
+        if version is None:
+            return
+        try:
+            firmware = window.library.firmware(version.firmware_id)
+        except KeyError:
+            return
+        if name == "merge":
+            self._merge_version(version, firmware.name)
+            return
+        if window.is_locked(firmware.id) or firmware.read_only:
+            return
+        versions = window.library.versions
+        label = f"#{version.seq} '{version.name}'"
+        if name == "pin":
+            window.context.versions.set_pinned(version.id, not version.pinned)
+            window.note("dim", f"[version] {label} {'unpinned' if version.pinned else 'pinned'}")
+        elif name == "save":
+            text = dialogs.ask_text(
+                window,
+                tr("Save as firmware"),
+                tr("Name"),
+                version.name,
+                tr(
+                    f"A new archived firmware is created next to <b>{html.escape(firmware.name)}"
+                    "</b> with the files of this version. A duplicate name gets a numeric suffix."
+                ),
+                tr("Save"),
+            )
+            if not text:
+                return
+            created = versions.save_as_firmware(version.id, text)
+            window.note("ok", f"[version] {label} saved as firmware '{created.name}'")
+            window.select_firmware(created.id)
+            return
+        elif name == "delete":
+            freed = versions.freed_by([version.id])
+            accepted, _ = dialogs.confirm(
+                window,
+                tr("Delete version"),
+                [
+                    tr(f"Delete version <b>#{version.seq} {html.escape(version.name)}</b>?"),
+                    tr(
+                        "Archive files used only by this version are deleted, freeing "
+                        f"{size_text(freed)}."
+                    )
+                    if freed
+                    else tr(
+                        "Its files are still used by other versions or firmware; no space is freed."
+                    ),
+                ],
+                tr("Delete"),
+            )
+            if not accepted:
+                return
+            versions.delete([version.id])
+            window.note("warning", f"[version] {label} deleted")
+        else:
+            return
+        window.changed()
+
+    def _merge_version(self, version: Version, firmware_name: str) -> None:
+        """Merge to .bin... of a version: the output is named after the version and placed in
+        its build folder; the firmware it can add is "<firmware> <version> (merged)"."""
+        window = self._window
+        try:
+            shown = window.library.versions.as_firmware(version)
+        except KeyError:
+            return
+        named = dataclasses.replace(shown, name=f"{firmware_name} {version.name}")
+        build = Path(version.build_path) if version.build_path else None
+        folder = build if build is not None and build.is_dir() else window.context.paths.root
+        output = self._merger.default_output(
+            dataclasses.replace(shown, name=_file_name(version.name)), folder
+        )
+        request = dialogs.merge(window, self._merger, named, output, as_given=True)
+        if request is None:
+            return
+        try:
+            created = self._merger.merge_firmware(named, *request)
+        except (PlanError, MergeError, OSError) as exc:
+            window.note("error", f"[merge] {exc}")
+            return
+        window.note("ok", f"[merge] #{version.seq} '{version.name}' written to {request[0]}")
+        if created is not None:
+            window.select_firmware(created.id)
 
     def _package_folder(self) -> Path:
         stored = self._window.context.settings.get(ui_settings.UI_SECTION, PACKAGE_FOLDER)

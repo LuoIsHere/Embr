@@ -787,6 +787,24 @@ TEXT: dict[str, str] = {
     "Already backed up": "已备份",
     "The current build is version #{0} {1}.": "当前构建就是版本 #{0} {1}。",
     "Not backed up": "未备份",
+    "Save as firmware…": "另存为固件…",
+    "Pin": "固定",
+    "Unpin": "取消固定",
+    "Save as firmware": "另存为固件",
+    "A new archived firmware is created next to <b>{0}</b> with the files of this version. A duplicate name gets a numeric suffix.": (
+        "将在 <b>{0}</b> 旁新建一个归档固件，使用此版本的文件。名称重复时自动加数字后缀。"
+    ),
+    "Save": "保存",
+    "Delete version": "删除版本",
+    "Delete version <b>#{0} {1}</b>?": "删除版本 <b>#{0} {1}</b>？",
+    "Archive files used only by this version are deleted, freeing {0}.": (
+        "将删除仅由此版本使用的归档文件，释放 {0}。"
+    ),
+    "Its files are still used by other versions or firmware; no space is freed.": (
+        "其文件仍被其他版本或固件使用，不会释放空间。"
+    ),
+    "Its 1 version is deleted too.": "其 1 个历史版本也将一并删除。",
+    "Its {0} versions are deleted too.": "其 {0} 个历史版本也将一并删除。",
     "{0} is not an Embr package ({1})": "{0} 不是 Embr 包（{1}）",
     "{0} appears more than once in the package": "{0} 在包中重复出现",
     "{0} is missing from the package": "包中缺少 {0}",
