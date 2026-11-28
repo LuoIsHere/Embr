@@ -1,4 +1,4 @@
-"""Archiving a version and cleaning the archive."""
+"""Archiving a version, backing up a build and cleaning the archive."""
 
 import html
 from collections.abc import Callable, Mapping
@@ -37,6 +37,24 @@ def archive_version(
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return name.text().strip(), notes.text().strip()
+
+
+def backup_build(parent: QWidget, firmware_name: str) -> str | None:
+    """The note for a new version of the firmware's current build ("" for none), or None
+    when cancelled."""
+    dialog = Dialog(parent, tr("Back up this build"), tr("Back up"), danger=False)
+    dialog.text(
+        tr(
+            f"The current build of <b>{html.escape(firmware_name)}</b> is copied into "
+            "data/archive/ and added to its versions."
+        )
+    )
+    note = QLineEdit()
+    note.setPlaceholderText(tr("why this version is kept"))
+    dialog.field(tr("Note"), note)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return note.text().strip()
 
 
 def clean_archive(

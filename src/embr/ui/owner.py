@@ -52,7 +52,7 @@ class Owner(Protocol):
         ...
 
     def firmware_action(self, name: str) -> None:
-        """rename, duplicate, move, archive, export, reveal, delete for the selected
+        """rename, duplicate, move, archive, backup, export, reveal, delete for the selected
         firmware."""
         ...
 

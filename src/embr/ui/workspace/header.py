@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from embr.app.chips import firmware_mcus
 from embr.app.library import FirmwareFlag
 from embr.app.locations import firmware_location
-from embr.app.tracking import TrackStatus
+from embr.app.tracking import STATE_TEXT, TrackStatus
 from embr.core.firmware.files import local_file
 from embr.core.firmware.model import Firmware, Source
 from embr.core.firmware.tracking import ResolveState
@@ -41,6 +41,8 @@ SOURCE_LABELS = {
     Source.IDF_BUILD: (N_("tracks IDF build"), "info"),
     Source.PIO_BUILD: (N_("tracks PIO build"), "info"),
 }
+BACK_UP = N_("Back up this build…")
+BACKING_UP = N_("Backing up…")
 STATE_TAGS = {
     ResolveState.TARGET_SWITCHED: N_("target switched"),
     ResolveState.INCOMPLETE: N_("build incomplete"),
@@ -82,6 +84,10 @@ class Header(QWidget):
         self.archive_action = self.menu.addAction(
             tr("Archive this version…"), lambda: owner.firmware_action("archive")
         )
+        self.backup_action = self.menu.addAction(
+            tr(BACK_UP), lambda: owner.firmware_action("backup")
+        )
+        self.menu.setToolTipsVisible(True)  # explains a disabled Back up this build
         self.menu.addAction(tr("Export…"), lambda: owner.firmware_action("export"))
         self.reveal_action = self.menu.addAction(
             tr("Show in Explorer"), lambda: owner.firmware_action("reveal")
@@ -154,6 +160,23 @@ class Header(QWidget):
         self.archive_action.setEnabled(
             status.state.flashable and any(local_file(e) for e in firmware.entries)
         )
+        self._show_backup(status)
+
+    def _show_backup(self, status: TrackStatus) -> None:
+        """Back up this build: tracking firmware only; disabled (the state as the tooltip)
+        unless the build can be flashed, while a backup runs, and while the firmware is
+        locked or read-only."""
+        firmware = status.firmware
+        owner = self._owner
+        tracking = firmware.source.tracking
+        busy = tracking and owner.library.versions.busy(firmware.id)
+        locked = owner.is_locked(firmware.id) or firmware.read_only
+        flashable = status.state.flashable
+        action = self.backup_action
+        action.setVisible(tracking)
+        action.setText(tr(BACKING_UP) if busy else tr(BACK_UP))
+        action.setEnabled(tracking and flashable and not busy and not locked)
+        action.setToolTip("" if flashable else tr(STATE_TEXT[status.state]))
 
     def show_files_updated(self, status: TrackStatus) -> None:
         """The grey time left of the notes, alone: a rebuild with the same content changes it

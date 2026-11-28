@@ -1,4 +1,4 @@
-"""One firmware's page: header, banner and the three tabs."""
+"""One firmware's page: header, banner and the tabs (Versions only for tracking firmware)."""
 
 import html
 
@@ -25,6 +25,9 @@ from embr.ui.workspace.entries import EntriesTab
 from embr.ui.workspace.header import Banner
 from embr.ui.workspace.params import ParamsTab
 from embr.ui.workspace.records import RecordsTab
+from embr.ui.workspace.versions import VersionsTab
+
+VERSIONS_TAB = 3
 
 
 class FirmwareView(QWidget):
@@ -43,11 +46,13 @@ class FirmwareView(QWidget):
         self.entries = EntriesTab(owner)
         self.params = ParamsTab(owner)
         self.records = RecordsTab(owner)
+        self.versions = VersionsTab(owner)
         for index, (name, page) in enumerate(
             (
                 (N_("Entries"), self.entries),
                 (N_("Parameters"), self.params),
                 (N_("Records"), self.records),
+                (N_("Versions"), self.versions),
             )
         ):
             tab_button = button(tr(name), "tab")
@@ -83,6 +88,19 @@ class FirmwareView(QWidget):
         self.entries.show_firmware(firmware, status.marks, status.entry_notes, status.removed)
         self.params.show_firmware(firmware)
         self.records.show_firmware(firmware)
+        self._show_versions(status)
+
+    def _show_versions(self, status: TrackStatus) -> None:
+        """Only tracking firmware have versions: for others the tab is hidden, and when it
+        was the open one the page goes back to Entries."""
+        tab = self.tab_group.button(VERSIONS_TAB)
+        tracking = status.firmware.source.tracking
+        tab.setVisible(tracking)
+        if tracking:
+            self.versions.show_firmware(status)
+        elif self.pages.currentIndex() == VERSIONS_TAB:
+            self.tab_group.button(0).setChecked(True)
+            self.pages.setCurrentIndex(0)
 
     def _fixed_banner(self, status: TrackStatus) -> None:
         entries = status.firmware.entries

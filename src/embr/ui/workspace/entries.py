@@ -12,7 +12,6 @@ from PySide6.QtGui import (
     QDropEvent,
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QComboBox,
     QFileDialog,
@@ -50,6 +49,7 @@ from embr.ui.widgets import (
     button,
     elided,
     label,
+    plain_table,
     tag,
 )
 from embr.ui.workspace.header import crumb
@@ -135,20 +135,10 @@ class EntriesTab(QWidget):
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setObjectName("entries")
         self.table.setHorizontalHeaderLabels([tr(c) for c in self.COLUMNS])
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
+        plain_table(self.table, ROW_PX)
         self.table.viewport().installEventFilter(self)  # refit columns, see eventFilter()
-        self.table.setWordWrap(False)  # one line per row; long text is elided
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
-        self.table.verticalHeader().setDefaultSectionSize(ROW_PX)
         header = self.table.horizontalHeader()
-        header.setHighlightSections(False)
-        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)  # Note takes the rest
         self._sizing = False
@@ -194,8 +184,6 @@ class EntriesTab(QWidget):
         layout.addWidget(self.table)
         layout.addWidget(add_row)
         layout.addStretch(1)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._filling = False
         self._committed: tuple[str, int] | None = None
         """(entry id, column) of the address just committed: the refresh that follows shows

@@ -1,7 +1,7 @@
 """In-app dialogs: Esc closes, destructive buttons are red and say what they
 affect. One module per part of the window; everything is used through this package."""
 
-from embr.ui.dialogs.archive import archive_version, clean_archive
+from embr.ui.dialogs.archive import archive_version, backup_build, clean_archive
 from embr.ui.dialogs.base import (
     Dialog,
     Placement,
@@ -38,6 +38,7 @@ __all__ = [
     "archive_version",
     "ask_choice",
     "ask_text",
+    "backup_build",
     "clean_archive",
     "confirm",
     "erase_flash",

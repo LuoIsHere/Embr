@@ -14,13 +14,16 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLayout,
     QMenu,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
     QToolTip,
     QVBoxLayout,
     QWidget,
@@ -41,6 +44,26 @@ def set_prop(widget: QWidget, name: str, value: str) -> None:
     if widget.property(name) != value:
         widget.setProperty(name, value)
         restyle(widget)
+
+
+def plain_table(table: QTableWidget, row_px: int) -> None:
+    """The look of the workspace tables (entries, versions): no row header, no grid, one line
+    per row, no selection or item editing (cells hold their own fields), a context menu,
+    rows of `row_px`, left-aligned header sections the user can drag."""
+    table.verticalHeader().hide()
+    table.setShowGrid(False)
+    table.setWordWrap(False)  # one line per row; long text is elided
+    table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+    table.verticalHeader().setDefaultSectionSize(row_px)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    header = table.horizontalHeader()
+    header.setHighlightSections(False)
+    header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
 
 def label(

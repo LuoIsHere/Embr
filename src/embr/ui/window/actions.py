@@ -1,9 +1,10 @@
 """What the window does to firmware and projects: the firmware menu, new and moved firmware,
-imports and exports, archive, merge and files dropped on the sidebar."""
+imports and exports, archive, backups, merge and files dropped on the sidebar."""
 
 import contextlib
 import html
-from collections.abc import Generator
+import threading
+from collections.abc import Callable, Generator
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,6 +21,8 @@ from embr.app.library import AlreadyTrackedError, TrackingEntriesError
 from embr.app.locations import firmware_location
 from embr.app.merging import Merger
 from embr.app.packages import Packager, Placement
+from embr.app.tracking import BuildChangedError
+from embr.app.versions import Copied, Prepared
 from embr.core.firmware.entries import FolderError
 from embr.core.firmware.files import local_file
 from embr.core.firmware.import_idf import IdfBuildError, build_dir_below
@@ -34,6 +37,7 @@ from embr.core.firmware.import_pio import (
 from embr.core.firmware.store import ReadOnlyError, default_name_archived
 from embr.core.flasher.merge import MergeError
 from embr.core.package import PACKAGE_SUFFIX, PackageError
+from embr.core.versions import Origin, Version
 from embr.i18n import N_, tr
 from embr.ui import dialogs
 from embr.ui.adapters import settings as ui_settings
@@ -133,6 +137,10 @@ def _pio_folder(path: Path) -> Path | None:
     return built[0].build_dir if built else path
 
 
+def _start_thread(work: Callable[[], None]) -> None:
+    threading.Thread(target=work, name="version-copy", daemon=True).start()
+
+
 @contextlib.contextmanager
 def _busy() -> Generator[None]:
     """Wait cursor while packing or checking a package."""
@@ -156,6 +164,8 @@ class LibraryActions:
         self._archiver = Archiver(context, tracker)
         self._merger = Merger(context, tracker)
         self._packager = Packager(context, tracker)
+        self.start_thread: Callable[[Callable[[], None]], None] = _start_thread
+        """Runs a backup's copy; tests replace it to copy at once."""
 
     def firmware_action(self, name: str) -> None:
         firmware_id = self._window.selected_firmware_id()
@@ -194,6 +204,9 @@ class LibraryActions:
                 return
         elif name == "archive":
             self._archive_version(firmware_id)
+            return
+        elif name == "backup":
+            self._backup(firmware_id)
             return
         elif name == "export":
             self._export_firmware(firmware_id)
@@ -351,6 +364,71 @@ class LibraryActions:
             "ok", f"[archive] '{archived.name}' created; '{firmware.name}' is unchanged"
         )
         self._window.select_firmware(archived.id)
+
+    def _backup(self, firmware_id: str) -> None:
+        """Back up this build: nothing to do when the latest version has the same content;
+        else the note dialog, then the files are copied on a worker thread and the version
+        is written on the GUI thread (BuildVersions' three steps)."""
+        window = self._window
+        versions = window.library.versions
+        firmware = window.library.firmware(firmware_id)
+        if firmware.read_only or versions.busy(firmware_id):
+            return
+        try:
+            first = versions.prepare(firmware_id)
+        except PlanError as exc:
+            dialogs.notice(window, tr("Not backed up"), [html.escape(tr(str(exc)))])
+            return
+        if isinstance(first, Version):
+            dialogs.notice(
+                window,
+                tr("Already backed up"),
+                [tr(f"The current build is version #{first.seq} {html.escape(first.name)}.")],
+            )
+            return
+        versions.abandon(first)  # asked again after the dialog: the build may move on
+        note = dialogs.backup_build(window, firmware.name)
+        if note is None:
+            return
+        try:
+            prepared = versions.prepare(firmware_id)
+        except (PlanError, KeyError) as exc:
+            dialogs.notice(window, tr("Not backed up"), [html.escape(tr(str(exc)))])
+            return
+        if isinstance(prepared, Version):  # the same content was backed up meanwhile
+            return
+        window.changed()  # shows the backup in progress
+
+        def work() -> None:
+            try:
+                result: Copied | BaseException = versions.copy(prepared)
+            except BaseException as exc:  # handed to the GUI thread, which reports it
+                result = exc
+            with contextlib.suppress(RuntimeError):  # the window is gone
+                window.dispatch(lambda: self._backed_up(prepared, result, note))
+
+        self.start_thread(work)
+
+    def _backed_up(self, prepared: Prepared, result: Copied | BaseException, note: str) -> None:
+        window = self._window
+        versions = window.library.versions
+        name = prepared.firmware.name
+        if isinstance(result, BaseException):
+            versions.abandon(prepared)
+            window.changed()
+            if not isinstance(result, BuildChangedError):
+                raise result
+            window.note("warning", f"[version] {name}: not backed up, {result}")
+            dialogs.notice(window, tr("Not backed up"), [html.escape(tr(str(result)))])
+            return
+        try:
+            version = versions.commit(prepared, result, origin=Origin.MANUAL, note=note)
+        except KeyError:
+            window.note("dim", f"[version] {name} was deleted during the backup")
+            window.changed()
+            return
+        window.note("ok", f"[version] {name}: backed up as #{version.seq} '{version.name}'")
+        window.changed()
 
     def _package_folder(self) -> Path:
         stored = self._window.context.settings.get(ui_settings.UI_SECTION, PACKAGE_FOLDER)

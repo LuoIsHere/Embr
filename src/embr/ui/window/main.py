@@ -2,7 +2,7 @@
 
 import contextlib
 import html
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import datetime
 from pathlib import Path
 
@@ -239,6 +239,10 @@ class EmbrWindow(FrameWindow):
 
     def export_project(self, project_id: str) -> None:
         self.library_actions.export_project(project_id)
+
+    def dispatch(self, fn: Callable[[], None]) -> None:
+        """Run `fn` on the GUI thread, from any thread. RuntimeError once the window is gone."""
+        self._dispatcher.dispatch(fn)
 
     def changed(self) -> None:
         self.refresh_workspace()

@@ -760,6 +760,33 @@ TEXT: dict[str, str] = {
     "{0} changed while it was being backed up; try again when the build has finished.": (
         "{0} 在备份过程中发生了变化，请在构建完成后重试。"
     ),
+    # build versions: the Versions tab and Back up this build
+    "Versions": "历史版本",
+    "Created": "创建时间",
+    "Version": "版本",
+    "Origin": "来源",
+    "Changes": "变化",
+    "Flashed": "烧录",
+    "Pinned": "固定",
+    "Version name. Clear the field and confirm to restore the default name": (
+        "版本名称。清空并确认即可恢复默认名称"
+    ),
+    "flash settings": "烧录参数",
+    "Flashed to 1 board:": "已烧录到 1 台设备：",
+    "Flashed to {0} boards:": "已烧录到 {0} 台设备：",
+    "Back up this build…": "备份此构建…",
+    "Backing up…": "正在备份…",
+    "No versions yet.": "尚无版本。",
+    "1 version; deleting it would free {0}": "共 1 个版本；删除后可释放 {0}",
+    "{0} versions; deleting all would free {1}": "共 {0} 个版本；全部删除可释放 {1}",
+    "Back up this build": "备份此构建",
+    "Back up": "备份",
+    "The current build of <b>{0}</b> is copied into data/archive/ and added to its versions.": (
+        "<b>{0}</b> 的当前构建将复制到 data/archive/，并加入其历史版本。"
+    ),
+    "Already backed up": "已备份",
+    "The current build is version #{0} {1}.": "当前构建就是版本 #{0} {1}。",
+    "Not backed up": "未备份",
     "{0} is not an Embr package ({1})": "{0} 不是 Embr 包（{1}）",
     "{0} appears more than once in the package": "{0} 在包中重复出现",
     "{0} is missing from the package": "包中缺少 {0}",
