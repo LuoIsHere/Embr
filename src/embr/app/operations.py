@@ -133,6 +133,8 @@ class _Job:
     start: datetime.datetime
     firmware: Firmware | None = None
     plan: FlashPlan | None = None
+    version_id: str | None = None
+    """Flash of a build version: its id, for the record."""
     other: ErasePlan | ReadPlan | None = None
     """The plan of an erase or read_flash job."""
     target: tuple[str | None, str] = (None, "")
@@ -216,6 +218,23 @@ class Operations:
         BusyError while a job runs; flashplan.PlanError propagates."""
         self._ensure_idle()
         firmware = self._tracker.verify_for_flash(firmware_id, shown_digest)
+        self.flash_firmware(firmware, port, baud, listener)
+
+    def flash_firmware(
+        self,
+        firmware: Firmware,
+        port: PortInfo,
+        baud: int | None,
+        listener: Listener,
+        *,
+        version_id: str | None = None,
+    ) -> None:
+        """Start a flash job for a firmware object as given (no Tracker check): flash()
+        after its verification, or a build version (versions.BuildVersions.as_firmware(),
+        `version_id` written to the record). The record's firmware fields come from
+        `firmware`. BusyError while a job runs; flashplan.PlanError as in flash(), including
+        an archived file that is missing or no longer has its recorded hash."""
+        self._ensure_idle()
         snapshot = self._memory.snapshot
         info = snapshot.info if snapshot and snapshot.port.device == port.device else None
         revision = board_revision(info.major, info.minor) if info else None
@@ -241,6 +260,7 @@ class Operations:
         )
         segment.write(f"$ {command_line(plan)}")
         job = _Job(JobKind.FLASH, listener, port, segment, record_id, start, firmware, plan)
+        job.version_id = version_id
         job.kinds = {(e.address, e.name): str(e.kind) for e in enabled if e.address is not None}
         self._run(job, plan)
 
@@ -548,6 +568,7 @@ class Operations:
             operation=Operation.FLASH,
             firmware=firmware,
             baud=plan.baud,
+            version_id=job.version_id,
             entries=tuple(
                 RecordEntry(
                     e.name,
@@ -572,6 +593,7 @@ class Operations:
         firmware: Firmware | None,
         baud: int | None,
         entries: tuple[RecordEntry, ...],
+        version_id: str | None = None,
     ) -> FlashRecord:
         """The record of a finished job; without `firmware` its project and firmware fields
         are empty. The chip fields come from the job's InfoEvent, if one arrived."""
@@ -602,6 +624,7 @@ class Operations:
             esptool_version=esptool.__version__,
             command=command_line(plan),
             log_file=job.segment.file_name,
+            version_id=version_id,
         )
 
     def _log(self, job: _Job, event: Event) -> None:

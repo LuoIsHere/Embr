@@ -18,20 +18,25 @@ from app_testkit import (
     BRIDGE,
     JTAG,
     MAC,
+    Clock,
     build_files,
     entry_ids_under,
     fixed_firmware,
+    flip_last_byte,
+    idf_project,
     info,
     multi_chip_firmware,
 )
 
+from embr.app import versions as app_versions
 from embr.app.chips import entry_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.identify import IdentifyMemory
 from embr.app.library import Library
 from embr.app.operations import BusyError, JobKind, JobOutcome, JobProgress, Operations
-from embr.app.tracking import BuildChangedError
+from embr.app.tracking import BuildChangedError, Tracker
+from embr.app.versions import BuildVersions
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams, Source
 from embr.core.flasher import runner
@@ -53,6 +58,7 @@ from embr.core.history import Operation, RecordResult
 from embr.core.logs import BOARDS_FOLDER, HEADER_PREFIX
 from embr.core.serial import BAUD_SECTION, PortInfo
 from embr.core.storage.settings import Settings
+from embr.core.versions import Origin, Version
 
 TIMEOUT = 30.0
 HELLO = build_files("esp32s3_hello")
@@ -308,6 +314,58 @@ def test_flash_refuses_a_firmware_that_differs_from_the_shown_one(
     setup = Setup(context, FakeWorker(FLASH_OK))
     with pytest.raises(BuildChangedError):
         setup.ops.flash(firmware.id, BRIDGE, None, setup.recorder, shown_digest="0" * 16)
+    assert setup.worker.tasks == []
+    assert context.history.query() == []
+    assert not setup.ops.busy
+
+
+def _no_git(*_args: object, **_kwargs: object) -> None:
+    return None
+
+
+def _stored_version(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[BuildVersions, Version]:
+    """A tracked IDF build backed up once (git not asked)."""
+    monkeypatch.setattr(app_versions.vcs, "read_state", _no_git)
+    tracker = Tracker(context, clock=Clock())
+    versions = BuildVersions(context, tracker)
+    library = Library(context, tracker, versions)
+    firmware = library.import_idf(idf_project("esp32s3_hello", tmp_path / "hello"))
+    return versions, versions.backup(firmware.id, origin=Origin.MANUAL)
+
+
+def test_flashing_a_version_records_it(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    versions, version = _stored_version(context, tmp_path, monkeypatch)
+    setup = Setup(context, FakeWorker(FLASH_OK))
+    setup.ops.flash_firmware(
+        versions.as_firmware(version), BRIDGE, 921600, setup.recorder, version_id=version.id
+    )
+    assert setup.ops.running_firmware_id == version.firmware_id
+    outcome = setup.pump.until_finished(setup.recorder)
+
+    (record,) = context.history.query()
+    assert outcome.result == RecordResult.OK
+    assert (record.version_id, record.firmware_id) == (version.id, version.firmware_id)
+    (plan,) = setup.worker.tasks
+    assert isinstance(plan, FlashPlan)
+    archive = context.paths.archive
+    assert [Path(e.path) for e in plan.entries] == [
+        archive / f"{e.sha256}.bin" for e in version.entries
+    ]
+
+
+def test_flashing_a_version_with_a_changed_archive_file_is_refused(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    versions, version = _stored_version(context, tmp_path, monkeypatch)
+    app = next(e for e in version.entries if e.kind == EntryKind.APP.value)
+    flip_last_byte(context.paths.archive / f"{app.sha256}.bin")
+    setup = Setup(context, FakeWorker(FLASH_OK))
+    with pytest.raises(PlanError, match="changed"):
+        setup.ops.flash_firmware(versions.as_firmware(version), BRIDGE, None, setup.recorder)
     assert setup.worker.tasks == []
     assert context.history.query() == []
     assert not setup.ops.busy

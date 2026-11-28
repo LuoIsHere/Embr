@@ -6,17 +6,28 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from app_testkit import IDF, Clock, build_files, copy_files, root_first, write_newer
+from app_testkit import (
+    IDF,
+    Clock,
+    build_files,
+    copy_files,
+    idf_project,
+    root_first,
+    write_newer,
+)
 
+from embr.app import versions as app_versions
 from embr.app.chips import Mcu, firmware_chips, firmware_mcus
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
 from embr.app.merging import MergeOptions, Merger
 from embr.app.tracking import Tracker
+from embr.app.versions import BuildVersions
 from embr.core.firmware.entries import blank_otadata_entry
 from embr.core.firmware.kinds import EntryKind
 from embr.core.firmware.model import FlashParams, Source
+from embr.core.versions import Origin
 
 
 def _rig(context: AppContext) -> tuple[Library, Merger]:
@@ -261,3 +272,31 @@ def test_no_size_for_a_start_offset_above_the_first_entry(context: AppContext) -
     library, merger = _rig(context)
     source_id = _hello(library)
     assert merger.size(source_id, MergeOptions(target_offset=0x1000)) is None
+
+
+def _no_git(*_args: object, **_kwargs: object) -> None:
+    return None
+
+
+def test_a_version_merges_as_its_build(
+    context: AppContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(app_versions.vcs, "read_state", _no_git)
+    tracker = Tracker(context, clock=Clock())
+    versions = BuildVersions(context, tracker)
+    library, merger = Library(context, tracker, versions), Merger(context, tracker)
+    firmware = library.import_idf(idf_project("esp32s3_hello", tmp_path / "hello"))
+    version = versions.backup(firmware.id, origin=Origin.MANUAL)
+    shown = versions.as_firmware(version)
+    by_id, by_object = tmp_path / "by_id.bin", tmp_path / "by_object.bin"
+    options = MergeOptions(add_to_list=False)
+
+    merger.merge(firmware.id, by_id, options)
+    assert merger.merge_firmware(shown, by_object, options) is None
+    assert by_object.read_bytes() == by_id.read_bytes()
+    assert merger.size_for(shown, options) == merger.size(firmware.id, options)
+    command = merger.command_for(shown, by_object, options)
+    assert str(context.paths.archive) in command
+    merged = merger.merge_firmware(shown, tmp_path / "listed.bin", MergeOptions())
+    assert merged is not None and merged.name == f"{firmware.name} (merged)"
+    assert len(context.firmware.all()) == 2  # the version's object itself is never saved

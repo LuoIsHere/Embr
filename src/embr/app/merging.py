@@ -41,7 +41,11 @@ class Merger:
     def command(self, firmware_id: str, output: Path, options: MergeOptions) -> str:
         """Equivalent `esptool ... merge-bin` command line for the dialog. PlanError when
         the firmware cannot be merged (see merge())."""
-        firmware, mcu, inputs, pad = self._inputs(firmware_id, options, write_files=False)
+        return self.command_for(self._flashable(firmware_id), output, options)
+
+    def command_for(self, firmware: Firmware, output: Path, options: MergeOptions) -> str:
+        """command() for a firmware object as given (no Tracker check)."""
+        mcu, inputs, pad = self._inputs_for(firmware, options, write_files=False)
         args = merge_args(
             mcu.chip,
             inputs,
@@ -58,7 +62,11 @@ class Merger:
         From the files' sizes; nothing is read or written. None when the start offset is
         above the first entry (merging refuses it). PlanError as command(); OSError when a
         file cannot be read."""
-        firmware, _, inputs, pad = self._inputs(firmware_id, options, write_files=False)
+        return self.size_for(self._flashable(firmware_id), options)
+
+    def size_for(self, firmware: Firmware, options: MergeOptions) -> int | None:
+        """size() for a firmware object as given (no Tracker check)."""
+        _, inputs, pad = self._inputs_for(firmware, options, write_files=False)
         blank = {
             entry_path(self._ctx, e): e.size for e in firmware.entries if e.enabled and is_blank(e)
         }
@@ -85,9 +93,17 @@ class Merger:
         (app.chips.merge_problem(), whose message the dialog shows while its Merge button is
         disabled), or padding is asked without a known flash size;
         core.flasher.merge.MergeError propagates."""
+        return self.merge_firmware(self._flashable(firmware_id), output, options)
+
+    def merge_firmware(
+        self, firmware: Firmware, output: Path, options: MergeOptions
+    ) -> Firmware | None:
+        """merge() for a firmware object as given (no Tracker check), e.g. a build version
+        (versions.BuildVersions.as_firmware()); the new firmware is placed as merge() places
+        it, from the object's name, project and group."""
         if output.is_dir():
             raise PlanError(N_(f"{output} is a folder; enter a file name"))
-        firmware, mcu, inputs, pad = self._inputs(firmware_id, options, write_files=True)
+        mcu, inputs, pad = self._inputs_for(firmware, options, write_files=True)
         data = merge_image(
             mcu.chip,
             inputs,
@@ -161,15 +177,19 @@ class Merger:
             return firmware.name
         return "/".join(part for part in (project, firmware.device, firmware.name) if part)
 
-    def _inputs(
-        self, firmware_id: str, options: MergeOptions, *, write_files: bool
-    ) -> tuple[Firmware, Mcu, list[MergeInput], str | None]:
+    def _flashable(self, firmware_id: str) -> Firmware:
+        """The firmware as currently resolved; PlanError when it is not flashable now."""
         status = self._tracker.check(firmware_id)
         firmware = status.firmware
         if not status.state.flashable:
             reasons = status.problems or tuple(c.message for c in status.changes[:3])
             why = "; ".join(reasons)
             raise PlanError(N_(f"{firmware.name} cannot be merged now: {why}"))
+        return firmware
+
+    def _inputs_for(
+        self, firmware: Firmware, options: MergeOptions, *, write_files: bool
+    ) -> tuple[Mcu, list[MergeInput], str | None]:
         enabled = sorted_entries([e for e in firmware.entries if e.enabled])
         if not enabled:
             raise PlanError(N_(f"{firmware.name} has no enabled entries"))
@@ -191,7 +211,7 @@ class Merger:
             pad = declared_flash_size(self._ctx, firmware)
             if pad is None:
                 raise PlanError(N_(f"{firmware.name}: flash size unknown; set it to pad the image"))
-        return firmware, mcu, inputs, pad
+        return mcu, inputs, pad
 
 
 def _merged_mcu(mcus: list[Mcu]) -> Mcu:

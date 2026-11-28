@@ -1,5 +1,6 @@
-"""Build versions of tracking firmware: back up the current build, delete versions, and
-reclaim the archive files only versions used.
+"""Build versions of tracking firmware: back up the current build, delete versions,
+reclaim the archive files only versions used, and turn a version back into a firmware
+object (to flash or merge it) or into a new archived firmware.
 
 A backup runs in three steps so that copying large images can leave the GUI thread:
 prepare() and commit() run on the thread that owns the database, copy() only touches
@@ -21,17 +22,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from embr.app.archiving import firmware_references
+from embr.app.chips import firmware_mcus, image_chip
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.tracking import STATE_TEXT, BuildChangedError, Tracker, TrackStatus
 from embr.core import vcs
-from embr.core.firmware.files import entry_file, is_blank
+from embr.core.firmware.files import archive_ref, entry_file, is_blank
 from embr.core.firmware.image_header import read_image_header
 from embr.core.firmware.import_idf import IdfBuildError, read_build
 from embr.core.firmware.import_pio import EnvRef, Framework, framework_of
 from embr.core.firmware.kinds import EntryKind
-from embr.core.firmware.model import Entry, Firmware, Source
+from embr.core.firmware.model import AddressSource, Entry, Firmware, FlashParams, Source
+from embr.core.firmware.store import default_name_archived
 from embr.core.firmware.tracking import digest
+from embr.core.storage.ids import new_id
 from embr.core.vcs import GitState
 from embr.core.versions import Origin, Version, VersionDraft, VersionEntry, VersionParams
 from embr.i18n import N_
@@ -242,6 +246,92 @@ class BuildVersions:
     def _reclaim(self, used: set[str]) -> None:
         kept = firmware_references(self._ctx) | self._ctx.versions.referenced()
         self._ctx.archive.delete(used - kept)
+
+    # ---- using a version ------------------------------------------------------------------
+
+    def as_firmware(self, version: Version) -> Firmware:
+        """A firmware object of the version for flashing and merging, never saved
+        (read_only). Id, name, project and group are the source firmware's, so the job lock
+        and the record point at it; erase_all is the source's current setting (a flash
+        option, not part of the version). Chip, flash settings, reset modes and stub come
+        from the version, so digest(..., erase_all=False) equals version.digest. Entries
+        refer to the archived files; an entry whose file names no chip gets the version's
+        chip, as an archived copy of the build does. KeyError when the source is gone."""
+        source = self._ctx.firmware.get(version.firmware_id)
+        params = version.params
+        return Firmware(
+            id=source.id,
+            name=source.name,
+            project_id=source.project_id,
+            device=source.device,
+            source=Source.ARCHIVED,
+            chip=version.chip,
+            flash=FlashParams(params.flash_mode, params.flash_freq, params.flash_size),
+            before=params.before,
+            after=params.after,
+            erase_all=source.erase_all,
+            stub=params.stub,
+            entries=self._entries(version),
+            read_only=True,
+        )
+
+    def save_as_firmware(self, version_id: str, name: str = "") -> Firmware:
+        """New ARCHIVED firmware with the version's entries, in the source's project and
+        group: the same archive files (no file is copied, no name record written), chip,
+        flash settings and reset modes of the version, erase_all and tags of the source,
+        archived_from naming the source, the version number and the build folder. Default
+        name: store.default_name_archived() with today's date; made unique. KeyError for
+        an unknown version."""
+        version = self._ctx.versions.get(version_id)
+        if version is None:
+            raise KeyError(version_id)
+        shown = self.as_firmware(version)
+        source = self._ctx.firmware.get(version.firmware_id)
+        created = self._ctx.firmware.create(
+            name.strip() or default_name_archived(source.name, self._clock().date()),
+            source=Source.ARCHIVED,
+            project_id=source.project_id,
+            device=source.device,
+            before=shown.before,
+            after=shown.after,
+            erase_all=source.erase_all,
+        )
+        created.flash = shown.flash
+        created.tags = list(source.tags)
+        origin = f"{source.name} version #{version.seq}, archived {version.created_at}"
+        if version.build_path:
+            origin += f", from {version.build_path}"
+        created.archived_from = origin
+        created.entries = shown.entries
+        self._ctx.firmware.save(created)
+        return created
+
+    def _entries(self, version: Version) -> list[Entry]:
+        entries = [
+            Entry(
+                id=new_id(),
+                name=e.name,
+                file=archive_ref(e.sha256),
+                sha256=e.sha256,
+                size=e.size,
+                kind=EntryKind(e.kind),
+                address=e.address,
+                auto_address=e.address,
+                address_source=AddressSource.AUTO,
+                enabled=e.enabled,
+                note=e.note,
+            )
+            for e in version.entries
+        ]
+        if version.chip:
+            probe = Firmware("", "", None, "", Source.ARCHIVED, entries=entries)
+            mcus = firmware_mcus(self._ctx, probe)  # the image chips: none chosen by hand yet
+            line = mcus[0].line if len(mcus) == 1 else ""
+            for entry in entries:
+                if image_chip(self._ctx, entry) is None:
+                    entry.chip = version.chip
+                    entry.chip_line = line
+        return entries
 
     # ---- build facts --------------------------------------------------------------------
 

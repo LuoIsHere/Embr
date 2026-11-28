@@ -28,6 +28,8 @@ from app_testkit import (
 
 from embr.app import versions as app_versions
 from embr.app.archiving import Archiver
+from embr.app.checklist import CheckState, preflight
+from embr.app.chips import firmware_chips
 from embr.app.context import AppContext
 from embr.app.flashplan import PlanError
 from embr.app.library import Library
@@ -481,3 +483,66 @@ def test_deleting_a_project_with_its_firmware_drops_their_versions(
     rig.library.delete_project(project.id, delete_firmware=True)
     assert context.versions.get(version.id) is None
     assert context.archive.files() == list[ArchiveFile]()
+
+
+# --- using a version -----------------------------------------------------------------------
+
+
+def test_a_version_as_firmware_is_its_build(
+    context: AppContext, tmp_path: Path, no_git: list[Path]
+) -> None:
+    rig = _rig(context, tmp_path)
+    project = rig.library.create_project("p")
+    rig.library.move_firmware(rig.firmware_id, project.id, "board")
+    version = _backup(rig)
+    flip_last_byte(rig.app)  # the build moves on; the version does not
+    rig.library.set_param(rig.firmware_id, "erase_all", True)
+
+    shown = rig.versions.as_firmware(version)
+    assert (shown.id, shown.name, shown.project_id, shown.device) == (
+        rig.firmware_id,
+        context.firmware.get(rig.firmware_id).name,
+        project.id,
+        "board",
+    )
+    assert (shown.source, shown.read_only, shown.erase_all) == (Source.ARCHIVED, True, True)
+    assert digest(shown, erase_all=False) == version.digest
+    assert [e.file for e in shown.entries] == [archive_ref(e.sha256) for e in version.entries]
+    assert firmware_chips(context, shown) == ("esp32s3",)
+    table = next(e for e in shown.entries if e.kind == EntryKind.PARTITION_TABLE)
+    assert table.chip == "esp32s3"  # names no chip itself: the version's chip
+    items = preflight(context, shown, None, None)
+    assert not [i for i in items if i.state == CheckState.REFUSE]
+    assert len(context.firmware.all()) == 1  # nothing saved
+
+
+def test_a_version_saved_as_firmware(
+    context: AppContext, tmp_path: Path, no_git: list[Path]
+) -> None:
+    rig = _rig(context, tmp_path)
+    project = rig.library.create_project("p")
+    rig.library.move_firmware(rig.firmware_id, project.id, "board")
+    version = _backup(rig)
+    names = _names_count(context)
+
+    saved = rig.versions.save_as_firmware(version.id, " demo ")
+    again = rig.versions.save_as_firmware(version.id, "demo")
+    assert (saved.name, again.name) == ("demo", "demo (2)")
+    assert (saved.source, saved.project_id, saved.device) == (Source.ARCHIVED, project.id, "board")
+    assert saved.entries == context.firmware.get(saved.id).entries
+    assert [e.file for e in saved.entries] == [archive_ref(e.sha256) for e in version.entries]
+    shown = rig.versions.as_firmware(version)
+    assert (saved.flash, saved.before, saved.after) == (shown.flash, shown.before, shown.after)
+    assert saved.entries[0].chip is None  # the bootloader names its chip itself
+    assert firmware_chips(context, saved) == ("esp32s3",)
+    assert f"version #{version.seq}" in saved.archived_from
+    assert version.build_path in saved.archived_from
+    assert _names_count(context) == names
+    today = rig.clock().date().isoformat()
+    source_name = context.firmware.get(rig.firmware_id).name
+    assert rig.versions.save_as_firmware(version.id).name == f"{source_name} (archived {today})"
+
+    rig.versions.delete([version.id])  # the saved firmware still uses the files
+    assert all(context.archive.has(e.sha256) for e in version.entries)
+    with pytest.raises(KeyError):
+        rig.versions.save_as_firmware(version.id)
